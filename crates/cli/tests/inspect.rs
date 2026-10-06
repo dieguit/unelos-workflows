@@ -475,7 +475,10 @@ fn inspect_research_parallel_is_isolated_repeatable_and_read_only() {
     assert!(!root.join(".unelos/active-run").exists());
     assert!(!root.join(".unelos/active-run.json").exists());
 
-    let backend_skill = root.join(".unelos/skills/backend-research/SKILL.md");
+    let backend_skill = root
+        .join(".unelos/skills")
+        .join("backend-research")
+        .join("SKILL.md");
     fs::rename(
         &backend_skill,
         backend_skill.with_file_name("SKILL.md.disabled"),
@@ -484,11 +487,13 @@ fn inspect_research_parallel_is_isolated_repeatable_and_read_only() {
     let missing = inspect_workflow_node(&root, "research-feature", "parallel-research", true);
     assert_eq!(missing.status.code(), Some(2), "{missing:?}");
     assert!(missing.stdout.is_empty());
-    let stderr = String::from_utf8_lossy(&missing.stderr);
-    assert!(stderr.contains("backend-research"), "{stderr}");
+    let diagnostic: Value = serde_json::from_slice(&missing.stderr).unwrap();
+    assert_eq!(diagnostic["error"]["code"], "context_resolution_failed");
+    let message = diagnostic["error"]["message"].as_str().unwrap();
+    assert!(message.contains("backend-research"), "{message}");
     assert!(
-        stderr.contains(backend_skill.to_string_lossy().as_ref()),
-        "{stderr}"
+        message.contains(backend_skill.to_string_lossy().as_ref()),
+        "{message}"
     );
     for node in ["approve-plan", "done"] {
         let output = inspect_workflow_node(&root, "research-feature", node, true);
