@@ -263,13 +263,17 @@ fn inspect_resolves_one_task_context_deterministically_without_runtime_state() {
     }
     assert_eq!(
         value["skills"][0]["directory"],
-        root.join(".unelos/skills/verification")
+        root.join(".unelos/skills")
+            .join("verification")
             .to_string_lossy()
             .as_ref()
     );
     assert_eq!(
         value["skills"][1]["directory"],
-        root.join(".unelos/skills/rust").to_string_lossy().as_ref()
+        root.join(".unelos/skills")
+            .join("rust")
+            .to_string_lossy()
+            .as_ref()
     );
     for field in ["runId", "taskId", "request", "feedback"] {
         assert!(value.get(field).is_none(), "unexpected {field}");
@@ -316,13 +320,17 @@ fn inspect_node_reads_only_selected_skills_in_order_and_reports_missing_skill() 
     assert_eq!(skills[0]["content"], selected);
     assert_eq!(
         skills[0]["directory"],
-        root.join(".unelos/skills/verification")
+        root.join(".unelos/skills")
+            .join("verification")
             .to_string_lossy()
             .as_ref()
     );
     assert_eq!(
         skills[1]["directory"],
-        root.join(".unelos/skills/rust").to_string_lossy().as_ref()
+        root.join(".unelos/skills")
+            .join("rust")
+            .to_string_lossy()
+            .as_ref()
     );
     let serialized = value.to_string();
     assert_eq!(serialized.matches("SELECTED_SKILL_MARKER").count(), 1);
