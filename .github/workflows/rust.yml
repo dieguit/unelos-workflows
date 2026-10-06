@@ -1,7 +1,6 @@
 name: Rust CLI and core
 
 on:
-  push:
   pull_request:
 
 permissions:
