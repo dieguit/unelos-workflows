@@ -4675,6 +4675,7 @@ dependencies = [
  "camino",
  "config",
  "serde",
+ "serde_json",
  "serde_yaml_ng",
  "thiserror 2.0.21",
  "tracing",
