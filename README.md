@@ -89,7 +89,9 @@ Gates have exactly `approved` and `rejected` routes. Task outcome-map keys must
 match the referenced definition's outcomes; definitions declaring outcomes
 cannot use a single-successor transition.
 
-No Workflow validation CLI command exists yet. Terminal QA:
+There is no Workflow validation CLI command. Use `inspect` to view a normalized
+Workflow graph; the [manual inspection walkthrough](examples/manual-project/README.md)
+includes the example and safe QA steps. Core validation terminal QA:
 
 ```sh
 cargo test --locked -p unelos-core --test validation -- --nocapture
@@ -100,91 +102,6 @@ entry/targets, Task/Agent references, parallel workers, outcome maps, gate
 routes, artifact producers/paths, unused definitions, and invalid Node fields.
 For author-facing errors, call the core API and display the returned error;
 the integration checks assert its source path, field, and cause.
-
-### Workflow inspection (T05a)
-
-`inspect` prints the selected Workflow as normalized JSON. It is read-only: it
-does not start a run or resolve instructions or Skills. The example starts at
-`plan` and has five Nodes and six edges: `plan` executes in the main process;
-the human gate routes `approved` to `implement` and `rejected` back to `plan`;
-`implement` and `review` execute as subagents; and `changes_requested` routes
-from review back to implement. The graph ends at `done`.
-
-From the repository root, build and run it either way:
-
-```sh
-cargo build -p unelos-cli --bin unelos
-./target/debug/unelos --project examples/manual-project inspect implement-feature --json
-cargo run -p unelos-cli --bin unelos -- --project examples/manual-project inspect implement-feature --json
-```
-
-Omit `--project` to inspect the current directory (run these from
-`examples/manual-project`):
-
-```sh
-../../target/debug/unelos inspect implement-feature --json
-cargo run -p unelos-cli --bin unelos -- inspect implement-feature --json
-```
-
-Pretty JSON is the default; omit `--json`:
-
-```sh
-./target/debug/unelos --project examples/manual-project inspect implement-feature
-```
-
-#### Manual QA: safe failure and read-only checks
-
-Run from the repository root. Each check restores from the untouched copy
-before mutating. Output and diagnostics are captured separately. Omitting
-execution is valid and defaults the task to `main`; the invalid transition and
-missing descriptor should return status `2`, empty stdout, and actionable stderr.
-
-```sh
-qa=$(mktemp -d /tmp/opencode/t05a-qa.XXXXXX)
-mkdir "$qa/project"
-cp -a examples/manual-project/. "$qa/project/"
-cp -a examples/manual-project "$qa/untouched"
-
-check_failure() {
-  expected=$1
-  set +e
-  ./target/debug/unelos --project "$qa/project" inspect implement-feature --json >"$qa/stdout" 2>"$qa/stderr"
-  result=$?
-  set -e
-  if ! test "$result" -eq 2 || ! test ! -s "$qa/stdout" || ! test -s "$qa/stderr" || ! grep -q "$expected" "$qa/stderr"; then return 1; fi
-  printf 'status=%s stdout_bytes=%s\n' "$result" "$(wc -c <"$qa/stdout")"
-  cat "$qa/stderr"
-}
-
-# Remove implement's execution setting; omitted execution defaults to main.
-cp -a "$qa/untouched/." "$qa/project/"
-sed -i '/^  implement:/,/^  review:/ { /    execution: subagent/d; }' "$qa/project/.unelos/workflows/implement-feature.yaml"
-./target/debug/unelos --project "$qa/project" inspect implement-feature --json >"$qa/stdout" 2>"$qa/stderr"
-test ! -s "$qa/stderr"
-python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert next(n for n in d["nodes"] if n["id"] == "implement")["execution"] == "main"' "$qa/stdout"
-printf 'omitted execution: status=0, stdout JSON defaults implement.execution to main\n'
-
-# Unknown transition target: make implement point at a nonexistent Node.
-cp -a "$qa/untouched/." "$qa/project/"
-sed -i 's/    next: review/    next: missing-node/' "$qa/project/.unelos/workflows/implement-feature.yaml"
-check_failure missing-node
-
-# Missing project descriptor: rename it, then restore the exact name.
-cp -a "$qa/untouched/." "$qa/project/"
-mv "$qa/project/.unelos/project.yaml" "$qa/project/.unelos/project.yaml.disabled"
-check_failure project.yaml
-mv "$qa/project/.unelos/project.yaml.disabled" "$qa/project/.unelos/project.yaml"
-
-# Repeated output is byte-identical and inspection did not alter/create files.
-cp -a "$qa/untouched/." "$qa/project/"
-./target/debug/unelos --project "$qa/project" inspect implement-feature --json >"$qa/first.json"
-./target/debug/unelos --project "$qa/project" inspect implement-feature --json >"$qa/second.json"
-cmp "$qa/first.json" "$qa/second.json"
-diff -ru "$qa/untouched" "$qa/project"
-```
-
-The fixture source is `crates/core/tests/fixtures/project/.unelos`; the shipped
-example parity test checks its parsed inspection output against the example.
 
 ### Rust checks
 
