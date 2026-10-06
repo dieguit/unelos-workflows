@@ -273,6 +273,10 @@ fn builds_deterministic_runtime_packet_without_allocating_artifacts() {
         changed["inputs"][0]["path"],
         project.project_root.join("opaque/input").as_str()
     );
+    assert_eq!(
+        changed["outputs"][0]["path"],
+        project.project_root.join("opaque/output").as_str()
+    );
 }
 
 #[test]
