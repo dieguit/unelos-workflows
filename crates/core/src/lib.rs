@@ -7,6 +7,7 @@ mod project;
 mod settings;
 mod skills;
 mod validation;
+mod work;
 
 pub use context::{
     build_task_packet, inspect_task, ArtifactReference, ContextError, TaskContext, TaskInspection,
@@ -18,3 +19,8 @@ pub use project::{load_project, LoadedProject, ProjectLoadError};
 pub use settings::{Settings, SettingsError};
 pub use skills::{resolve_skills, ResolvedSkill, SkillResolveError};
 pub use validation::{validate_project, ProjectValidationError};
+pub use work::{
+    build_work_packet, inspect_node, EndInspection, FinishedPacket, GateInspection, GatePacket,
+    NodeInspection, ParallelInspection, ParallelPacket, TaskWorkPacket, WorkPacket,
+    WorkRuntimeInput, WorkerInspection, WorkerPacket, WorkerReportBinding,
+};

@@ -105,23 +105,37 @@ pub fn inspect_task(
             cause: "inspection is supported only for ordinary Task nodes".into(),
         });
     };
+    Ok(TaskInspection {
+        context: resolve_task_context(project, node_id, &node.task, &node.agent, node.execution)?,
+        inputs: node.inputs.clone(),
+        outputs: node.outputs.clone(),
+    })
+}
+
+pub(crate) fn resolve_task_context(
+    project: &LoadedProject,
+    node_id: &str,
+    task_id: &str, // Task Definition reference, not a runtime Task identity
+    agent_id: &str,
+    execution: crate::Execution,
+) -> Result<TaskContext, ContextError> {
     let task = project
         .definitions
         .task_definitions
-        .get(&node.task)
+        .get(task_id)
         .ok_or_else(|| ContextError::Diagnostic {
             path: project.project_source.clone(),
-            field: format!("taskDefinitions.{}", node.task),
+            field: format!("taskDefinitions.{task_id}"),
             cause: "referenced Task Definition is missing".into(),
         })?;
     let agent =
         project
             .definitions
             .agents
-            .get(&node.agent)
+            .get(agent_id)
             .ok_or_else(|| ContextError::Diagnostic {
                 path: project.project_source.clone(),
-                field: format!("agents.{}", node.agent),
+                field: format!("agents.{agent_id}"),
                 cause: "referenced Agent is missing".into(),
             })?;
     let ids: Vec<&str> = task
@@ -132,13 +146,12 @@ pub fn inspect_task(
         .collect();
     let skills = resolve_skills(&project.project_root, &ids)?;
 
-    Ok(TaskInspection {
-        context: TaskContext {
+    Ok(TaskContext {
             kind: "task",
             node_id: node_id.to_owned(),
-            task_definition: node.task.clone(),
-            agent: node.agent.clone(),
-            execution: node.execution,
+            task_definition: task_id.to_owned(),
+            agent: agent_id.to_owned(),
+            execution,
             task_instructions: task.instructions.clone(),
             agent_instructions: agent.instructions.clone(),
             skills,
@@ -146,11 +159,7 @@ pub fn inspect_task(
             mcps: agent.mcps.clone(),
             tools: agent.tools.clone(),
             outcomes: task.outcomes.clone(),
-            completion_instructions:
-                "Produce the declared outputs before completing this current Task.".into(),
-        },
-        inputs: node.inputs.clone(),
-        outputs: node.outputs.clone(),
+            completion_instructions: "Read any existing declared outputs and update them in place, preserving relevant content. Produce every declared output before completing this current Task; report the changes to the controller. Do not edit the run ledger.".into(),
     })
 }
 
@@ -185,7 +194,7 @@ pub fn build_task_packet(
     })
 }
 
-fn ordered_bindings(
+pub(crate) fn ordered_bindings(
     project: &LoadedProject,
     node_id: &str,
     side: &str,

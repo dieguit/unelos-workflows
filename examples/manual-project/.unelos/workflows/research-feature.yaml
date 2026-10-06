@@ -1,0 +1,26 @@
+name: research-feature
+start: plan
+nodes:
+  plan:
+    task: create-plan
+    agent: planner
+    outputs: [plan.md]
+    next: parallel-research
+  parallel-research:
+    type: parallel
+    tasks:
+      - task: research-backend
+        agent: backend-researcher
+      - task: research-frontend
+        agent: frontend-researcher
+    inputs: [plan.md]
+    outputs: [research-summary.md]
+    next: approve-plan
+  approve-plan:
+    type: human-gate
+    inputs: [plan.md, research-summary.md]
+    next:
+      approved: done
+      rejected: parallel-research
+  done:
+    type: end

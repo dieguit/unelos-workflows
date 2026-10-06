@@ -9,6 +9,12 @@ taskDefinitions:
     instructions: Inspect actual changes against the plan and report findings.
     skills: [code-review, verification]
     outcomes: [approved, changes_requested]
+  research-backend:
+    instructions: Read the supplied plan and update the backend research report, preserving relevant existing content. Report changes to the controller.
+    skills: [backend-research]
+  research-frontend:
+    instructions: Read the supplied plan and update the frontend research report, preserving relevant existing content. Report changes to the controller.
+    skills: [frontend-research]
 agents:
   planner:
     instructions: Follow project constraints when planning.
@@ -22,3 +28,11 @@ agents:
   reviewer:
     instructions: Inspect requirements and actual changes independently.
     skills: [rust]
+  backend-researcher:
+    instructions: Research backend concerns without editing the run ledger.
+    skills: [backend-research]
+    tools: [read-file]
+  frontend-researcher:
+    instructions: Research frontend concerns without editing the run ledger.
+    skills: [frontend-research]
+    tools: [read-file]
