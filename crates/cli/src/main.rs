@@ -5,7 +5,7 @@ use std::{
     process::ExitCode,
 };
 use unelos_core::{
-    build_graph, inspect_task, load_project, validate_project, ContextError, ProjectLoadError,
+    build_graph, inspect_node, load_project, validate_project, ContextError, ProjectLoadError,
     ProjectValidationError, Settings, SettingsError,
 };
 
@@ -35,10 +35,10 @@ enum Command {
         #[command(subcommand)]
         command: ConfigCommand,
     },
-    /// Inspect a normalized workflow or one resolved Task context.
+    /// Inspect a normalized workflow or one resolved Node context.
     Inspect {
         workflow: String,
-        /// Resolve an ordinary Task Node's execution context.
+        /// Resolve a Task, parallel, human-gate, or end Node context.
         #[arg(long)]
         node: Option<String>,
     },
@@ -134,7 +134,7 @@ fn run(cli: &Cli) -> Result<(), Error> {
             let project = load_project(&cli.project, workflow)?;
             validate_project(&project)?;
             let result = if let Some(node) = node {
-                serde_json::to_value(inspect_task(&project, node)?)?
+                serde_json::to_value(inspect_node(&project, node)?)?
             } else {
                 let graph = build_graph(&project.workflow);
                 let nodes = project

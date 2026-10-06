@@ -186,29 +186,14 @@ fn inspect_serializes_parallel_workers_and_gate_and_end() {
         workflow,
     )
     .unwrap();
-    let value: Value = serde_json::from_slice(&inspect(root, true).stdout).unwrap();
-    let parallel = value["nodes"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|node| node["id"] == "parallel-check")
-        .unwrap();
-    assert_eq!(
-        parallel["tasks"],
-        json!([{"task":"implement-plan","agent":"engineer"}, {"task":"create-plan","agent":"planner"}])
-    );
-    assert_eq!(parallel["inputs"], json!(["implementation-report.md"]));
-    assert_eq!(parallel["outputs"], json!(["checks.md"]));
-    assert_eq!(parallel["next"], "review");
-    assert_eq!(
-        value["nodes"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|node| node["id"] == "done")
-            .unwrap(),
-        &json!({"id":"done", "kind":"end"})
-    );
+    let parallel = inspect_node(root, "parallel-check", true);
+    assert!(parallel.status.success(), "{parallel:?}");
+    let value: Value = serde_json::from_slice(&parallel.stdout).unwrap();
+    assert_eq!(value["kind"], "parallel");
+    assert_eq!(value["inputs"], json!(["implementation-report.md"]));
+    assert_eq!(value["outputs"], json!(["checks.md"]));
+    assert_eq!(value["workers"][0]["taskDefinition"], "implement-plan");
+    assert_eq!(value["workers"][1]["taskDefinition"], "create-plan");
 }
 
 #[test]
@@ -362,19 +347,32 @@ fn inspect_node_reads_only_selected_skills_in_order_and_reports_missing_skill() 
 }
 
 #[test]
-fn inspect_node_reports_unknown_and_unsupported_nodes_without_panicking() {
+fn inspect_node_resolves_all_node_kinds_and_reports_unknown_nodes() {
     let temp = assert_fs::TempDir::new().unwrap();
     let root = temp.path();
     copy_tree(&fixture(), root);
-    for node in ["missing", "approve-plan", "done"] {
-        let output = inspect_node(root, node, true);
-        assert_eq!(output.status.code(), Some(2), "{output:?}");
-        assert!(output.stdout.is_empty());
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(!stderr.contains("panicked"), "{stderr}");
-        assert!(stderr.contains("context_resolution_failed"), "{stderr}");
-        assert!(stderr.contains(node), "{stderr}");
-    }
+    let gate = inspect_node(root, "approve-plan", true);
+    assert!(gate.status.success(), "{gate:?}");
+    let value: Value = serde_json::from_slice(&gate.stdout).unwrap();
+    assert_eq!(value["kind"], "human-gate");
+    assert_eq!(value["inputs"], json!(["plan.md"]));
+    assert_eq!(value["decisions"], json!(["approved", "rejected"]));
+    assert_eq!(value["rejectionReasonRequired"], true);
+    assert!(value.get("agent").is_none());
+    assert!(value.get("activationId").is_none());
+
+    let end = inspect_node(root, "done", true);
+    assert!(end.status.success(), "{end:?}");
+    let value: Value = serde_json::from_slice(&end.stdout).unwrap();
+    assert_eq!(value, json!({"kind":"end", "nodeId":"done"}));
+
+    let output = inspect_node(root, "missing", true);
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert!(stderr.contains("context_resolution_failed"), "{stderr}");
+    assert!(stderr.contains("missing"), "{stderr}");
 
     let workflow_path = root.join(".unelos/workflows/implement-feature.yaml");
     let parallel = workflow_yaml().replace(
@@ -383,23 +381,156 @@ fn inspect_node_reports_unknown_and_unsupported_nodes_without_panicking() {
     );
     fs::write(workflow_path, parallel).unwrap();
     let output = inspect_node(root, "parallel-check", true);
-    assert_eq!(output.status.code(), Some(2), "{output:?}");
-    assert!(output.stdout.is_empty());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("parallel-check"), "{stderr}");
-    assert!(stderr.contains("ordinary Task"), "{stderr}");
+    assert!(output.status.success(), "{output:?}");
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["kind"], "parallel");
+    assert_eq!(value["workers"][0]["execution"], "subagent");
 }
 
-fn inspect_node(root: &Path, node: &str, json_mode: bool) -> std::process::Output {
+#[test]
+fn inspect_research_parallel_is_isolated_repeatable_and_read_only() {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/manual-project");
+    let temp = assert_fs::TempDir::new().unwrap();
+    let root = temp.path().join("project with spaces");
+    fs::create_dir_all(&root).unwrap();
+    copy_tree(&source, &root);
+    let before = snapshot(&root);
+
+    let compact = inspect_workflow_node(&root, "research-feature", "parallel-research", true);
+    assert!(compact.status.success(), "{compact:?}");
+    assert!(compact.stderr.is_empty());
+    let pretty = inspect_workflow_node(&root, "research-feature", "parallel-research", false);
+    assert!(pretty.status.success(), "{pretty:?}");
+    assert!(String::from_utf8_lossy(&pretty.stdout).lines().count() > 1);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&compact.stdout).unwrap(),
+        serde_json::from_slice::<Value>(&pretty.stdout).unwrap()
+    );
+    assert_eq!(
+        inspect_workflow_node(&root, "research-feature", "parallel-research", true).stdout,
+        compact.stdout
+    );
+
+    let value: Value = serde_json::from_slice(&compact.stdout).unwrap();
+    assert_eq!(value["kind"], "parallel");
+    assert_eq!(value["inputs"], json!(["plan.md"]));
+    assert_eq!(value["outputs"], json!(["research-summary.md"]));
+    assert_eq!(value["workers"].as_array().unwrap().len(), 2);
+    for (index, (agent, task, marker)) in [
+        (
+            "backend-researcher",
+            "research-backend",
+            "BACKEND_ONLY_MARKER",
+        ),
+        (
+            "frontend-researcher",
+            "research-frontend",
+            "FRONTEND_ONLY_MARKER",
+        ),
+    ]
+    .iter()
+    .enumerate()
+    {
+        let worker = &value["workers"][index];
+        assert_eq!(worker["agent"], *agent);
+        assert_eq!(worker["taskDefinition"], *task);
+        assert_eq!(worker["inputs"], json!(["plan.md"]));
+        assert_eq!(worker["outputs"], json!(["result.md"]));
+        assert_eq!(worker["execution"], "subagent");
+        assert_eq!(
+            worker["skills"][0]["content"]
+                .as_str()
+                .unwrap()
+                .matches(marker)
+                .count(),
+            1
+        );
+        assert_eq!(worker["skills"].as_array().unwrap().len(), 1);
+        let serialized = worker.to_string();
+        let other_marker = if *marker == "BACKEND_ONLY_MARKER" {
+            "FRONTEND_ONLY_MARKER"
+        } else {
+            "BACKEND_ONLY_MARKER"
+        };
+        assert!(!serialized.contains(other_marker));
+        assert_eq!(
+            worker["skills"][0]["directory"],
+            root.join(".unelos/skills")
+                .join(if index == 0 {
+                    "backend-research"
+                } else {
+                    "frontend-research"
+                })
+                .to_string_lossy()
+                .as_ref()
+        );
+    }
+    assert_eq!(value["workers"][0]["agent"], "backend-researcher");
+    assert_eq!(value["workers"][1]["agent"], "frontend-researcher");
+    for field in ["runId", "taskId", "activationId", "ledgerPath"] {
+        assert!(value.get(field).is_none(), "unexpected {field}");
+    }
+    assert!(!value.to_string().contains(".unelos/runs"));
+    assert!(!root.join(".unelos/runs").exists());
+    assert!(!root.join(".unelos/active-run").exists());
+    assert!(!root.join(".unelos/active-run.json").exists());
+
+    let backend_skill = root.join(".unelos/skills/backend-research/SKILL.md");
+    fs::rename(
+        &backend_skill,
+        backend_skill.with_file_name("SKILL.md.disabled"),
+    )
+    .unwrap();
+    let missing = inspect_workflow_node(&root, "research-feature", "parallel-research", true);
+    assert_eq!(missing.status.code(), Some(2), "{missing:?}");
+    assert!(missing.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&missing.stderr);
+    assert!(stderr.contains("backend-research"), "{stderr}");
+    assert!(
+        stderr.contains(backend_skill.to_string_lossy().as_ref()),
+        "{stderr}"
+    );
+    for node in ["approve-plan", "done"] {
+        let output = inspect_workflow_node(&root, "research-feature", node, true);
+        assert!(output.status.success(), "{output:?}");
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+        if node == "approve-plan" {
+            assert_eq!(value["kind"], "human-gate");
+            assert_eq!(value["inputs"], json!(["plan.md", "research-summary.md"]));
+            assert_eq!(value["decisions"], json!(["approved", "rejected"]));
+            assert_eq!(value["rejectionReasonRequired"], true);
+            assert!(value.get("agent").is_none());
+        } else {
+            assert_eq!(value, json!({"kind":"end", "nodeId":"done"}));
+        }
+    }
+    fs::rename(
+        backend_skill.with_file_name("SKILL.md.disabled"),
+        &backend_skill,
+    )
+    .unwrap();
+    assert_eq!(snapshot(&root), before);
+}
+
+fn inspect_workflow_node(
+    root: &Path,
+    workflow: &str,
+    node: &str,
+    json_mode: bool,
+) -> std::process::Output {
     let mut command = command();
     command
         .arg("--project")
         .arg(root)
-        .args(["inspect", "implement-feature", "--node", node]);
+        .args(["inspect", workflow, "--node", node]);
     if json_mode {
         command.arg("--json");
     }
     command.output().unwrap()
+}
+
+fn inspect_node(root: &Path, node: &str, json_mode: bool) -> std::process::Output {
+    inspect_workflow_node(root, "implement-feature", node, json_mode)
 }
 
 fn inspect(root: &Path, json_mode: bool) -> std::process::Output {

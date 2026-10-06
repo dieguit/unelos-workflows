@@ -114,3 +114,47 @@ Use this shared command for the checks below:
    Expect the normal workflow graph: whole-Workflow inspection does not
    resolve Skills. Rename `SKILL.md.disabled` back to `SKILL.md`. Remove the
    disposable copy when finished if you no longer need it.
+
+## Manual QA: parallel, gate, and end Node contexts (T07)
+
+Build the CLI and run these inspections against the disposable project copy:
+
+```sh
+cargo build --locked -p unelos-cli --bin unelos
+./target/debug/unelos --project "$qa/project" inspect research-feature --node parallel-research --json
+./target/debug/unelos --project "$qa/project" inspect research-feature --node approve-plan --json
+./target/debug/unelos --project "$qa/project" inspect research-feature --node done --json
+```
+
+1. `parallel-research` returns two ordered delegated workers: backend first,
+   frontend second. Each worker contains its selected Skill text and logical
+   `plan.md` input and `result.md` output. `BACKEND_ONLY_MARKER` appears exactly
+   once only in the backend worker; `FRONTEND_ONLY_MARKER` appears exactly once
+   only in the frontend worker. The parent aggregate output is the logical name
+   `research-summary.md`. These are names, not concrete run paths.
+
+2. `approve-plan` returns kind `human-gate`, logical inputs `plan.md` and
+   `research-summary.md`, decisions `approved` and `rejected`, and requires a
+   rejection reason. It has no executor. `done` returns kind `end`; this
+   describes the Node, not a runtime `finished` state.
+
+3. Repeat the parallel command and compare its output; it should be identical.
+   Confirm the disposable project remains unchanged and has no `.unelos/runs`
+   directory or active-run file.
+
+4. Rename
+   `$qa/project/.unelos/skills/backend-research/SKILL.md` to
+   `SKILL.md.disabled`, then repeat the parallel command. Expect a nonzero exit
+   and a diagnostic naming the selected Skill and its `SKILL.md` path. While
+   it remains renamed, repeat the gate and end commands; both should still
+   succeed because neither resolves worker Skills. Restore the Skill:
+
+   ```sh
+   mv "$qa/project/.unelos/skills/backend-research/SKILL.md.disabled" "$qa/project/.unelos/skills/backend-research/SKILL.md"
+   ```
+
+The flat runtime example in the T07 design is illustrative only. Future workers
+update existing artifacts in place and report changes; only the controller
+writes the informational ledger. Core, not ledger content, owns progression.
+T07 inspection writes no runtime artifacts and does not implement dispatch,
+artifact updates, or ledger writing.
