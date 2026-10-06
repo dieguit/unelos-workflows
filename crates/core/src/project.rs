@@ -78,19 +78,10 @@ pub fn load_project(
             name: workflow_name.to_owned(),
         });
     }
-    let project_root = if project_root.is_absolute() {
-        project_root.to_owned()
-    } else {
-        let cwd = std::env::current_dir().map_err(|source| ProjectLoadError::Root {
-            path: project_root.to_owned(),
-            source,
-        })?;
-        let cwd = Utf8PathBuf::from_path_buf(cwd).map_err(|_| ProjectLoadError::Root {
-            path: project_root.to_owned(),
-            source: io::Error::new(io::ErrorKind::InvalidData, "current directory is not UTF-8"),
-        })?;
-        cwd.join(project_root)
-    };
+    let project_root = absolute_root(project_root).map_err(|source| ProjectLoadError::Root {
+        path: project_root.to_owned(),
+        source,
+    })?;
     let project_source = project_root.join(".unelos/project.yaml");
     let workflow_source = project_root.join(format!(".unelos/workflows/{workflow_name}.yaml"));
     let definitions = parse_project_definitions(project_source.as_str(), &read(&project_source)?)?;
@@ -109,4 +100,14 @@ pub fn load_project(
         definitions,
         workflow,
     })
+}
+
+pub(crate) fn absolute_root(project_root: &Utf8Path) -> io::Result<Utf8PathBuf> {
+    if project_root.is_absolute() {
+        return Ok(project_root.to_owned());
+    }
+    let cwd = Utf8PathBuf::from_path_buf(std::env::current_dir()?).map_err(|_| {
+        io::Error::new(io::ErrorKind::InvalidData, "current directory is not UTF-8")
+    })?;
+    Ok(cwd.join(project_root))
 }

@@ -56,6 +56,23 @@ with `--json`. Broken output pipes terminate quietly.
 
 Exit codes: `0` success, `2` invalid arguments/settings, `1` operational failure.
 
+### Local Skill resolution (T03)
+
+`unelos_core::resolve_skills(root, ordered_ids)` reads only selected local
+`.unelos/skills/<id>/SKILL.md` files, deduplicating IDs in first-occurrence order.
+Each result contains its ID, absolute directory, and unchanged UTF-8 content.
+Resources remain available through that directory; they are not injected.
+IDs must be nonempty, not `.` or `..`, and contain no `/`, `\`, `:`, or NUL.
+
+No CLI Skill command exists yet. Terminal QA exercises real temporary files:
+
+```sh
+cargo test --locked -p unelos-core --test skills -- --nocapture
+```
+
+Expect five passing checks covering order/content/resources, missing files,
+unreadable files, invalid IDs, and working-directory-independent roots.
+
 ### Rust checks
 
 ```sh
