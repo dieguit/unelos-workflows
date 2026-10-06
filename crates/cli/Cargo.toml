@@ -1,0 +1,24 @@
+[package]
+name = "unelos-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "unelos"
+path = "src/main.rs"
+
+[dependencies]
+unelos-core.workspace = true
+camino.workspace = true
+clap.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+thiserror.workspace = true
+miette.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+assert_fs.workspace = true
+insta.workspace = true

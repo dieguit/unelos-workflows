@@ -1,0 +1,46 @@
+name: Rust CLI and core
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.146
+      - name: Formatting
+        run: cargo fmt --all -- --check
+      - name: Lints
+        run: cargo clippy --locked -p unelos-core -p unelos-cli --all-targets -- -D warnings
+      - name: Tests
+        run: cargo nextest run --locked -p unelos-core -p unelos-cli
+      - name: Documentation tests
+        run: cargo test --locked -p unelos-core --doc
+      - name: Windows workspace metadata
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:CARGO_TARGET_DIR = Join-Path $env:RUNNER_TEMP "unelos-custom-target"
+          $metadata = cargo metadata --locked --manifest-path "src-tauri/Cargo.toml" --no-deps --format-version 1 | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw "Cargo metadata failed." }
+          if ($metadata.target_directory -ne $env:CARGO_TARGET_DIR) { throw "Custom target directory was not respected." }
+          $package = $metadata.packages | Where-Object { $_.name -eq "tauri-native" } | Select-Object -First 1
+          $binary = $package.targets | Where-Object { $_.kind -contains "bin" } | Select-Object -First 1
+          if ($binary.name -ne "tauri-native") { throw "Wrong desktop binary selected." }
+          $path = Join-Path $metadata.target_directory "release/$($binary.name).exe"
+          if ($path -ne (Join-Path $env:CARGO_TARGET_DIR "release/tauri-native.exe")) { throw "Wrong desktop binary path." }

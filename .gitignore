@@ -22,3 +22,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Rust workspace build artifacts
+/target/
+
+# AI artifacts
+docs/superpowers/
+docs/ignored/
+.superpowers/

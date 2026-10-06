@@ -1,0 +1,11 @@
+[package]
+name = "unelos-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+camino.workspace = true
+config.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
