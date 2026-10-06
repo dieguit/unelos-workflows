@@ -4,11 +4,17 @@ use std::{
     io::{self, Write},
     process::ExitCode,
 };
-use unelos_core::{Settings, SettingsError};
+use unelos_core::{
+    build_graph, load_project, validate_project, ProjectLoadError, ProjectValidationError,
+    Settings, SettingsError,
+};
 
 #[derive(Parser)]
 #[command(name = "unelos", version, about = "Unelos command-line tool")]
 struct Cli {
+    /// Load a project from this directory.
+    #[arg(long, global = true, default_value = ".")]
+    project: Utf8PathBuf,
     /// Load settings from this TOML file (no automatic discovery).
     #[arg(long, global = true)]
     config: Option<Utf8PathBuf>,
@@ -29,6 +35,8 @@ enum Command {
         #[command(subcommand)]
         command: ConfigCommand,
     },
+    /// Inspect a normalized workflow.
+    Inspect { workflow: String },
 }
 
 #[derive(Subcommand)]
@@ -58,6 +66,10 @@ async fn main() -> ExitCode {
 enum Error {
     #[error("{0}")]
     Settings(#[from] SettingsError),
+    #[error("{0}")]
+    ProjectLoad(#[from] ProjectLoadError),
+    #[error("{0}")]
+    ProjectValidation(#[from] ProjectValidationError),
     #[error("could not write command output")]
     Output(#[from] io::Error),
     #[error("could not serialize command output")]
@@ -70,13 +82,17 @@ impl Error {
     fn code(&self) -> &'static str {
         match self {
             Self::Settings(_) => "invalid_settings",
+            Self::ProjectLoad(_) => "project_load_failed",
+            Self::ProjectValidation(_) => "invalid_project",
             _ => "operational_failure",
         }
     }
 
     fn exit_code(&self) -> ExitCode {
         match self {
-            Self::Settings(_) => ExitCode::from(2),
+            Self::Settings(_) | Self::ProjectLoad(_) | Self::ProjectValidation(_) => {
+                ExitCode::from(2)
+            }
             _ => ExitCode::FAILURE,
         }
     }
@@ -93,7 +109,7 @@ fn run(cli: &Cli) -> Result<(), Error> {
     } else {
         subscriber.try_init().map_err(Error::Logging)?;
     }
-    match cli.command {
+    match &cli.command {
         Command::Config {
             command: ConfigCommand::Show,
         } => {
@@ -102,6 +118,36 @@ fn run(cli: &Cli) -> Result<(), Error> {
                 serde_json::to_string(&settings)?
             } else {
                 format!("log_level = {:?}", settings.log_level)
+            };
+            writeln!(io::stdout().lock(), "{output}")?;
+        }
+        Command::Inspect { workflow } => {
+            let project = load_project(&cli.project, workflow)?;
+            validate_project(&project)?;
+            let graph = build_graph(&project.workflow);
+            let nodes = project
+                .workflow
+                .nodes
+                .iter()
+                .map(|(id, node)| {
+                    let mut value = serde_json::to_value(node)?;
+                    value
+                        .as_object_mut()
+                        .expect("Node serializes as an object")
+                        .insert("id".into(), serde_json::json!(id));
+                    Ok(value)
+                })
+                .collect::<Result<Vec<_>, serde_json::Error>>()?;
+            let result = serde_json::json!({
+                "name": project.workflow.name,
+                "start": graph.start,
+                "nodes": nodes,
+                "edges": graph.edges,
+            });
+            let output = if cli.json {
+                serde_json::to_string(&result)?
+            } else {
+                serde_json::to_string_pretty(&result)?
             };
             writeln!(io::stdout().lock(), "{output}")?;
         }
@@ -120,6 +166,10 @@ fn render_error(error: &Error, json: bool) -> String {
         let help = match error {
             Error::Settings(_) => {
                 "Check --config, UNELOS_LOG_LEVEL, and --log-level. Use --help for usage."
+            }
+            Error::ProjectLoad(_) => "Check --project and the reported authoring source.",
+            Error::ProjectValidation(_) => {
+                "Check --project and the reported authoring source and field."
             }
             _ => "Check the output destination and logging configuration.",
         };

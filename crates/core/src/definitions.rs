@@ -1,6 +1,6 @@
 use serde::{
     de::{DeserializeOwned, MapAccess, SeqAccess, Visitor},
-    Deserialize, Deserializer,
+    Deserialize, Deserializer, Serialize,
 };
 use std::collections::BTreeMap;
 use std::fmt;
@@ -209,7 +209,7 @@ pub struct WorkflowDefinition {
 }
 
 /// How a task node runs. Parallel workers are implicitly subagents.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Execution {
     #[default]
@@ -218,7 +218,8 @@ pub enum Execution {
 }
 
 /// A single next-node identity or outcome labels mapped to destination IDs.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
 pub enum Transition {
     Single(String),
     Outcomes(BTreeMap<String, String>),
@@ -273,7 +274,7 @@ impl<'de> Deserialize<'de> for Transition {
 }
 
 /// A task node; artifact names and agent references remain opaque strings.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TaskNode {
     #[serde(deserialize_with = "strict_string")]
@@ -290,7 +291,7 @@ pub struct TaskNode {
 }
 
 /// An opaque task/agent reference used by a parallel node.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkerReference {
     #[serde(deserialize_with = "strict_string")]
@@ -300,7 +301,7 @@ pub struct WorkerReference {
 }
 
 /// Concurrent workers, with authored input/output ordering preserved.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ParallelNode {
     pub tasks: Vec<WorkerReference>,
@@ -313,7 +314,7 @@ pub struct ParallelNode {
 
 /// A human approval gate. Route labels (including `approved` and `rejected`)
 /// are not validated here; that semantic check is deferred to T04.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct HumanGateNode {
     #[serde(default, deserialize_with = "strict_strings")]
@@ -323,7 +324,8 @@ pub struct HumanGateNode {
 }
 
 /// One of the supported structural Workflow node forms.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum NodeDefinition {
     Task(TaskNode),
     Parallel(ParallelNode),
