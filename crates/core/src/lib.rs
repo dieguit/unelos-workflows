@@ -1,5 +1,6 @@
 //! Shared application logic for the CLI and desktop adapters.
 
+mod context;
 mod definitions;
 mod graph;
 mod project;
@@ -7,6 +8,7 @@ mod settings;
 mod skills;
 mod validation;
 
+pub use context::{inspect_task, ContextError, TaskContext, TaskInspection};
 pub use definitions::*;
 pub use graph::{build_graph, GraphEdge, GraphNode, NodeKind, WorkflowGraph};
 pub use project::{load_project, LoadedProject, ProjectLoadError};

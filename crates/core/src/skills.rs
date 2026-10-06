@@ -1,9 +1,11 @@
 use camino::{Utf8Path, Utf8PathBuf};
+use serde::Serialize;
 use std::{collections::HashSet, fs, io};
 
 use crate::project::absolute_root;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ResolvedSkill {
     pub id: String,
     pub directory: Utf8PathBuf,
