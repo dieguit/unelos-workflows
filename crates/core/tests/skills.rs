@@ -57,7 +57,8 @@ fn missing_selected_skill_reports_id_and_expected_path() {
     let temp = TempDir::new().unwrap();
     let root = root(&temp);
     write_skill(&root, "rust", "Rust instructions");
-    let expected = root.join(".unelos/skills/missing/SKILL.md");
+    // Match native join separators when checking the rendered diagnostic on Windows.
+    let expected = root.join(".unelos/skills").join("missing").join("SKILL.md");
     let error = resolve_skills(&root, &["rust", "missing"]).unwrap_err();
     assert!(error.to_string().contains("missing"));
     assert!(error.to_string().contains(expected.as_str()));
