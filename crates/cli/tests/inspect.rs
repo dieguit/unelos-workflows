@@ -39,6 +39,22 @@ fn inspect_normalizes_the_existing_fixture() {
 }
 
 #[test]
+fn inspect_shipped_example_matches_the_original_fixture() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let example = root.join("examples/manual-project");
+    let output = command()
+        .arg("--project")
+        .arg(example)
+        .args(["inspect", "implement-feature", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let actual: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let expected: Value = serde_json::from_slice(&inspect(&fixture(), true).stdout).unwrap();
+    assert_eq!(actual, expected);
+}
+
+#[test]
 fn inspect_emits_full_normalized_workflow_and_is_read_only() {
     let temp = assert_fs::TempDir::new().unwrap();
     let root = temp.path().join("project with spaces");
