@@ -191,13 +191,22 @@ fn explicit_root_is_independent_of_working_directory() {
         let root = Utf8PathBuf::from_path_buf(root.into()).unwrap();
         assert_fixture(&load_project(&root, "implement-feature").unwrap(), &root);
         let relative = root.file_name().unwrap();
+        let cwd = Utf8PathBuf::from_path_buf(std::env::current_dir().unwrap()).unwrap();
+        let expected_root = cwd.join(relative);
         assert_fixture(
             &load_project(Utf8Path::new(relative), "implement-feature").unwrap(),
-            &root,
+            &expected_root,
         );
         return;
     }
     let (temp, root) = temporary_project();
+    #[cfg(unix)]
+    let root = {
+        // Reproduce platforms where getcwd reports the physical path behind a symlink.
+        let alias = Utf8PathBuf::from_path_buf(temp.path().join("cwd-alias")).unwrap();
+        std::os::unix::fs::symlink(temp.path(), &alias).unwrap();
+        alias.join(root.file_name().unwrap())
+    };
     assert_fixture(&load_project(&root, "implement-feature").unwrap(), &root);
     let output = Command::new(std::env::current_exe().unwrap())
         .args([
