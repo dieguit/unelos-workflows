@@ -89,7 +89,10 @@ Gates have exactly `approved` and `rejected` routes. Task outcome-map keys must
 match the referenced definition's outcomes; definitions declaring outcomes
 cannot use a single-successor transition.
 
-No Workflow validation CLI command exists yet. Terminal QA:
+There is no standalone validation-only CLI command: `inspect` validates the
+selected Workflow before printing its normalized graph and reports authoring
+diagnostics. See the [manual inspection walkthrough](examples/manual-project/README.md)
+for the example and safe QA steps. Core validation terminal QA:
 
 ```sh
 cargo test --locked -p unelos-core --test validation -- --nocapture
@@ -98,8 +101,8 @@ cargo test --locked -p unelos-core --test validation -- --nocapture
 Expect ten passing checks: the T02 fixture and rework loops, missing
 entry/targets, Task/Agent references, parallel workers, outcome maps, gate
 routes, artifact producers/paths, unused definitions, and invalid Node fields.
-For author-facing errors, call the core API and display the returned error;
-the integration checks assert its source path, field, and cause.
+The core API also returns these errors to direct callers; integration checks
+assert their source path, field, and cause.
 
 ### Rust checks
 
