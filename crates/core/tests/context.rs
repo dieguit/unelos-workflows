@@ -115,7 +115,7 @@ fn resolves_the_selected_task_into_deterministic_inspection_json() {
     assert_eq!(value["outcomes"], serde_json::json!(["done", "retry"]));
     assert_eq!(
         value["completionInstructions"],
-        "Produce the declared outputs before completing this current Task."
+        "Read any existing declared outputs and update them in place, preserving relevant content. Produce every declared output before completing this current Task; report the changes to the controller. Do not edit the run ledger."
     );
     assert!(value.get("runId").is_none());
     assert!(value.get("taskId").is_none());
