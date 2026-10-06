@@ -73,6 +73,34 @@ cargo test --locked -p unelos-core --test skills -- --nocapture
 Expect five passing checks covering order/content/resources, missing files,
 unreadable files, invalid IDs, and working-directory-independent roots.
 
+### Workflow validation (T04)
+
+`unelos_core::validate_project(&loaded_project)` checks only the selected
+Workflow and returns a sorted map of logical output names to producer Node IDs.
+Call `load_project(root, workflow_name)` first. Errors include the Workflow
+source path, offending field/reference, and cause. Validation checks references,
+transitions, outcome contracts, and artifacts; loops are valid. It does not read
+Skills, connect MCPs, execute work, or check whether an input is completed yet.
+
+Artifact names use relative forward-slash paths (e.g. `reports/plan.md`), with
+nonempty components and no `.`, `..`, backslash, colon, or NUL. Each logical
+output has one producing Node; every input must name a declared output.
+Gates have exactly `approved` and `rejected` routes. Task outcome-map keys must
+match the referenced definition's outcomes; definitions declaring outcomes
+cannot use a single-successor transition.
+
+No Workflow validation CLI command exists yet. Terminal QA:
+
+```sh
+cargo test --locked -p unelos-core --test validation -- --nocapture
+```
+
+Expect ten passing checks: the T02 fixture and rework loops, missing
+entry/targets, Task/Agent references, parallel workers, outcome maps, gate
+routes, artifact producers/paths, unused definitions, and invalid Node fields.
+For author-facing errors, call the core API and display the returned error;
+the integration checks assert its source path, field, and cause.
+
 ### Rust checks
 
 ```sh
