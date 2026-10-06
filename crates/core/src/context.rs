@@ -1,5 +1,6 @@
 use camino::Utf8PathBuf;
 use serde::Serialize;
+use std::collections::BTreeMap;
 
 use crate::{
     resolve_skills, Execution, LoadedProject, NodeDefinition, ResolvedSkill, SkillResolveError,
@@ -29,6 +30,46 @@ pub struct TaskInspection {
     pub context: TaskContext,
     pub inputs: Vec<String>,
     pub outputs: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ArtifactReference {
+    pub name: String,
+    pub path: Utf8PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransitionFeedback {
+    pub source_node_id: String,
+    pub source_execution_id: String,
+    pub outcome: String,
+    pub reason: Option<String>,
+    pub artifacts: Vec<ArtifactReference>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskRuntimeInput {
+    pub run_id: String,
+    pub task_id: String,
+    pub node_id: String,
+    pub request: String,
+    pub inputs: Vec<ArtifactReference>,
+    pub outputs: Vec<ArtifactReference>,
+    pub feedback: Option<TransitionFeedback>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskPacket {
+    #[serde(flatten)]
+    pub context: TaskContext,
+    pub run_id: String,
+    pub task_id: String,
+    pub request: String,
+    pub inputs: Vec<ArtifactReference>,
+    pub outputs: Vec<ArtifactReference>,
+    pub feedback: Option<TransitionFeedback>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -111,4 +152,90 @@ pub fn inspect_task(
         inputs: node.inputs.clone(),
         outputs: node.outputs.clone(),
     })
+}
+
+/// Build a runtime packet using caller-supplied identities and opaque artifact paths.
+pub fn build_task_packet(
+    project: &LoadedProject,
+    input: TaskRuntimeInput,
+) -> Result<TaskPacket, ContextError> {
+    let inspection = inspect_task(project, &input.node_id)?;
+    let inputs = ordered_bindings(
+        project,
+        &input.node_id,
+        "inputs",
+        inspection.inputs,
+        input.inputs,
+    )?;
+    let outputs = ordered_bindings(
+        project,
+        &input.node_id,
+        "outputs",
+        inspection.outputs,
+        input.outputs,
+    )?;
+    Ok(TaskPacket {
+        context: inspection.context,
+        run_id: input.run_id,
+        task_id: input.task_id,
+        request: input.request,
+        inputs,
+        outputs,
+        feedback: input.feedback,
+    })
+}
+
+fn ordered_bindings(
+    project: &LoadedProject,
+    node_id: &str,
+    side: &str,
+    declared: Vec<String>,
+    supplied: Vec<ArtifactReference>,
+) -> Result<Vec<ArtifactReference>, ContextError> {
+    let mut by_name = BTreeMap::new();
+    for binding in supplied {
+        let name = binding.name.clone();
+        if by_name.insert(name.clone(), binding).is_some() {
+            return Err(binding_error(
+                project,
+                node_id,
+                side,
+                &name,
+                "duplicate binding",
+            ));
+        }
+    }
+    for name in by_name.keys() {
+        if !declared.iter().any(|declared| declared == name) {
+            return Err(binding_error(
+                project,
+                node_id,
+                side,
+                name,
+                "undeclared binding",
+            ));
+        }
+    }
+    declared
+        .into_iter()
+        .map(|name| {
+            by_name
+                .remove(&name)
+                .ok_or_else(|| binding_error(project, node_id, side, &name, "missing binding"))
+        })
+        .collect()
+}
+
+fn binding_error(
+    project: &LoadedProject,
+    node_id: &str,
+    side: &str,
+    name: &str,
+    cause: &str,
+) -> ContextError {
+    ContextError::Diagnostic {
+        path: project.workflow_source.clone(),
+        field: format!("nodes.{node_id}.{side}.{name}"),
+        cause: cause.into(),
+    }
 }

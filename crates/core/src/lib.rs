@@ -8,7 +8,10 @@ mod settings;
 mod skills;
 mod validation;
 
-pub use context::{inspect_task, ContextError, TaskContext, TaskInspection};
+pub use context::{
+    build_task_packet, inspect_task, ArtifactReference, ContextError, TaskContext, TaskInspection,
+    TaskPacket, TaskRuntimeInput, TransitionFeedback,
+};
 pub use definitions::*;
 pub use graph::{build_graph, GraphEdge, GraphNode, NodeKind, WorkflowGraph};
 pub use project::{load_project, LoadedProject, ProjectLoadError};

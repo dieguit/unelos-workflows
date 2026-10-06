@@ -1,12 +1,62 @@
+use assert_fs::TempDir;
 use camino::Utf8Path;
 use std::fs;
 use unelos_core::{
-    inspect_task, load_project, NodeDefinition, ParallelNode, SkillResolveError, Transition,
+    build_task_packet, inspect_task, load_project, ArtifactReference, NodeDefinition, ParallelNode,
+    SkillResolveError, TaskRuntimeInput, Transition, TransitionFeedback,
 };
 
 fn fixture_project() -> unelos_core::LoadedProject {
     let root = Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/project");
     load_project(&root, "implement-feature").unwrap()
+}
+
+fn runtime_project() -> (TempDir, unelos_core::LoadedProject) {
+    let temp = TempDir::new().unwrap();
+    let source = Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/project");
+    let root = Utf8Path::from_path(temp.path()).unwrap().join("project");
+    for path in [
+        ".unelos/project.yaml",
+        ".unelos/workflows/implement-feature.yaml",
+    ] {
+        fs::create_dir_all(root.join(path).parent().unwrap()).unwrap();
+        fs::copy(source.join(path), root.join(path)).unwrap();
+    }
+    let mut project = load_project(&root, "implement-feature").unwrap();
+    for task in project.definitions.task_definitions.values_mut() {
+        task.skills.clear();
+    }
+    for agent in project.definitions.agents.values_mut() {
+        agent.skills.clear();
+    }
+    (temp, project)
+}
+
+fn runtime_input(root: &Utf8Path) -> TaskRuntimeInput {
+    TaskRuntimeInput {
+        run_id: "run-1".into(),
+        task_id: "task-3".into(),
+        node_id: "implement".into(),
+        request: "Implement naïve café.\nSecond line.".into(),
+        inputs: vec![ArtifactReference {
+            name: "plan.md".into(),
+            path: root.join(".unelos/runs/run-1/tasks/task-1/outputs/plan.md"),
+        }],
+        outputs: vec![ArtifactReference {
+            name: "implementation-report.md".into(),
+            path: root.join(".unelos/runs/run-1/tasks/task-3/outputs/report.md"),
+        }],
+        feedback: Some(TransitionFeedback {
+            source_node_id: "review".into(),
+            source_execution_id: "task-2".into(),
+            outcome: "changes_requested".into(),
+            reason: Some("Café said \"redo\".\nAgain.".into()),
+            artifacts: vec![ArtifactReference {
+                name: "review.md".into(),
+                path: root.join("review.md"),
+            }],
+        }),
+    }
 }
 
 #[test]
@@ -178,4 +228,162 @@ fn reports_unknown_unsupported_and_missing_references_without_panicking() {
         .unwrap_err()
         .to_string()
         .contains("missing-agent"));
+}
+
+#[test]
+fn builds_deterministic_runtime_packet_without_allocating_artifacts() {
+    let (_temp, project) = runtime_project();
+    let input = runtime_input(&project.project_root);
+    let packet = build_task_packet(&project, input.clone()).unwrap();
+    let value = serde_json::to_value(&packet).unwrap();
+    assert_eq!(value["kind"], "task");
+    assert_eq!(value["runId"], "run-1");
+    assert_eq!(value["taskId"], "task-3");
+    assert_eq!(value["nodeId"], "implement");
+    assert_eq!(value["request"], input.request);
+    assert_eq!(value["inputs"][0]["name"], "plan.md");
+    assert_eq!(value["inputs"][0]["path"], input.inputs[0].path.as_str());
+    assert_eq!(value["outputs"][0]["name"], "implementation-report.md");
+    assert_eq!(value["outputs"][0]["path"], input.outputs[0].path.as_str());
+    assert_eq!(value["feedback"]["sourceNodeId"], "review");
+    assert_eq!(value["feedback"]["sourceExecutionId"], "task-2");
+    assert_eq!(value["feedback"]["outcome"], "changes_requested");
+    assert_eq!(value["feedback"]["reason"], "Café said \"redo\".\nAgain.");
+    assert_eq!(value["feedback"]["artifacts"][0]["name"], "review.md");
+    assert_eq!(
+        value["feedback"]["artifacts"][0]["path"],
+        input.feedback.as_ref().unwrap().artifacts[0].path.as_str()
+    );
+    assert_eq!(
+        serde_json::to_vec(&packet).unwrap(),
+        serde_json::to_vec(&build_task_packet(&project, input.clone()).unwrap()).unwrap()
+    );
+    assert!(!project.project_root.join(".unelos/runs").exists());
+    assert!(!input.outputs[0].path.exists());
+
+    let mut changed = input;
+    changed.run_id = "run-2".into();
+    changed.task_id = "task-9".into();
+    changed.inputs[0].path = project.project_root.join("opaque/input");
+    changed.outputs[0].path = project.project_root.join("opaque/output");
+    let changed = serde_json::to_value(build_task_packet(&project, changed).unwrap()).unwrap();
+    assert_eq!(changed["runId"], "run-2");
+    assert_eq!(changed["taskId"], "task-9");
+    assert_eq!(
+        changed["inputs"][0]["path"],
+        project.project_root.join("opaque/input").as_str()
+    );
+}
+
+#[test]
+fn validates_exact_bindings_and_serializes_them_in_declaration_order() {
+    let (_temp, mut project) = runtime_project();
+    let mut input = runtime_input(&project.project_root);
+    input.node_id = "review".into();
+    input.inputs = ["implementation-report.md", "plan.md"]
+        .into_iter()
+        .map(|name| ArtifactReference {
+            name: name.into(),
+            path: project.project_root.join(name),
+        })
+        .collect();
+    input.outputs = vec![ArtifactReference {
+        name: "review.md".into(),
+        path: project.project_root.join("review.md"),
+    }];
+    let value = serde_json::to_value(build_task_packet(&project, input.clone()).unwrap()).unwrap();
+    assert_eq!(value["inputs"][0]["name"], "plan.md");
+    assert_eq!(value["inputs"][1]["name"], "implementation-report.md");
+
+    for (bindings, side, name) in [
+        (vec![], "inputs", "plan.md"),
+        (
+            vec![("plan.md", "one"), ("plan.md", "two")],
+            "inputs",
+            "plan.md",
+        ),
+        (
+            vec![
+                ("extra.md", "extra"),
+                ("implementation-report.md", "report"),
+            ],
+            "inputs",
+            "extra.md",
+        ),
+    ] {
+        let mut invalid = input.clone();
+        invalid.inputs = bindings
+            .into_iter()
+            .map(|(name, path)| ArtifactReference {
+                name: name.into(),
+                path: project.project_root.join(path),
+            })
+            .collect();
+        let error = build_task_packet(&project, invalid)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("review") && error.contains(side) && error.contains(name),
+            "{error}"
+        );
+    }
+    for (bindings, side, name) in [
+        (vec![], "outputs", "review.md"),
+        (
+            vec![("review.md", "one"), ("review.md", "two")],
+            "outputs",
+            "review.md",
+        ),
+        (vec![("extra.md", "extra")], "outputs", "extra.md"),
+    ] {
+        let mut invalid = input.clone();
+        invalid.outputs = bindings
+            .into_iter()
+            .map(|(name, path)| ArtifactReference {
+                name: name.into(),
+                path: project.project_root.join(path),
+            })
+            .collect();
+        let error = build_task_packet(&project, invalid)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("review") && error.contains(side) && error.contains(name),
+            "{error}"
+        );
+    }
+
+    let mut plan = runtime_input(&project.project_root);
+    plan.node_id = "plan".into();
+    plan.inputs.clear();
+    plan.outputs.clear();
+    if let NodeDefinition::Task(node) = project.workflow.nodes.get_mut("plan").unwrap() {
+        node.inputs.clear();
+        node.outputs.clear();
+    }
+    assert!(build_task_packet(&project, plan.clone()).is_ok());
+    plan.inputs.push(ArtifactReference {
+        name: "unexpected".into(),
+        path: project.project_root.join("unexpected"),
+    });
+    let error = build_task_packet(&project, plan).unwrap_err().to_string();
+    assert!(error.contains("plan") && error.contains("inputs") && error.contains("unexpected"));
+}
+
+#[test]
+fn absent_feedback_and_reason_serialize_as_null() {
+    let (_temp, project) = runtime_project();
+    let mut input = runtime_input(&project.project_root);
+    input.feedback = None;
+    let value = serde_json::to_value(build_task_packet(&project, input.clone()).unwrap()).unwrap();
+    assert_eq!(value["feedback"], serde_json::Value::Null);
+    input.feedback = Some(TransitionFeedback {
+        source_node_id: "gate".into(),
+        source_execution_id: "opaque-id".into(),
+        outcome: "approved".into(),
+        reason: None,
+        artifacts: vec![],
+    });
+    let value = serde_json::to_value(build_task_packet(&project, input).unwrap()).unwrap();
+    assert_eq!(value["feedback"]["reason"], serde_json::Value::Null);
 }
