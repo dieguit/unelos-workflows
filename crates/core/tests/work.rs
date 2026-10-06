@@ -262,11 +262,15 @@ fn composes_deterministic_parallel_workers_with_explicit_paths_and_parent_identi
     for duty in [
         "Only the controller updates the supplied run ledger",
         "Dispatch every listed worker",
-        "relay questions",
+        "relay questions and resume the same logical work",
         "Wait for all reports",
         "read them",
+        "update aggregate outputs",
+        "in place",
+        "A worker return or question never transitions the Node",
         "Never complete a blocked or partial parent",
         "Never use the ledger to derive destinations",
+        "report completion through Unelos",
     ] {
         assert!(instructions.contains(duty), "missing {duty}");
     }
@@ -490,15 +494,25 @@ fn composes_task_gate_and_finished_variants_with_controller_contracts() {
         root.join("plan").as_str()
     );
     assert_eq!(
+        gate_json["artifacts"][1]["path"],
+        root.join("summary").as_str()
+    );
+    assert_eq!(
         gate_json["decisions"],
         serde_json::json!(["approved", "rejected"])
     );
     assert_eq!(gate_json["rejectionReasonRequired"], true);
     assert!(gate_json.get("taskId").is_none() && gate_json.get("agent").is_none());
     let gate_instructions = gate_json["controllerInstructions"].as_str().unwrap();
-    assert!(gate_instructions.contains("Only the controller updates the supplied run ledger"));
-    assert!(gate_instructions.contains("nonempty rejection reason"));
-    assert!(gate_instructions.contains("through Unelos"));
+    for duty in [
+        "Only the controller updates the supplied run ledger",
+        "obtain an explicit user decision",
+        "Require a nonempty rejection reason",
+        "Record the decision through Unelos",
+        "ledger notes do not authorize progression",
+    ] {
+        assert!(gate_instructions.contains(duty), "missing {duty}");
+    }
 
     let finished = build_work_packet(
         &project,
@@ -511,8 +525,10 @@ fn composes_task_gate_and_finished_variants_with_controller_contracts() {
     .unwrap();
     let finished_json = serde_json::to_value(&finished).unwrap();
     assert_eq!(finished_json["kind"], "finished");
+    assert_eq!(finished_json["runId"], "run-1");
     assert_eq!(finished_json["remainingWork"], false);
     assert_eq!(finished_json["nodeId"], "done");
+    assert_eq!(finished_json["ledgerPath"], ledger_path.as_str());
     assert!(finished_json.get("taskId").is_none() && finished_json.get("executor").is_none());
     assert!(finished_json["controllerInstructions"]
         .as_str()

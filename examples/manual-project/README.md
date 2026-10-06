@@ -153,8 +153,20 @@ cargo build --locked -p unelos-cli --bin unelos
    mv "$qa/project/.unelos/skills/backend-research/SKILL.md.disabled" "$qa/project/.unelos/skills/backend-research/SKILL.md"
    ```
 
-The flat runtime example in the T07 design is illustrative only. Future workers
-update existing artifacts in place and report changes; only the controller
-writes the informational ledger. Core, not ledger content, owns progression.
-T07 inspection writes no runtime artifacts and does not implement dispatch,
+Illustrative flat runtime layout (not created or enforced by T07):
+
+```text
+.unelos/runs/change-button-color/
+  ledger.md
+  plan/plan.md
+  parallel-research/backend-researcher/result.md
+  parallel-research/frontend-researcher/result.md
+  parallel-research/research-summary.md
+```
+
+The caller supplies artifact and ledger paths. Descriptive run-directory naming
+is future controller-bootstrap behavior. Future workers update existing
+artifacts in place and report changes; only the controller writes the
+informational ledger. Core, not ledger content, owns progression. T07
+inspection writes no runtime artifacts and does not implement dispatch,
 artifact updates, or ledger writing.
