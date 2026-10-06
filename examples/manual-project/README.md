@@ -101,6 +101,7 @@ Task-then-Agent order and deduplicate the repeated Skill. Request and feedback
 are tested in core; a later runtime caller supplies run/execution-scoped paths.
 
 ```sh
+set -e
 qa=$(mktemp -d /tmp/opencode/t06-qa.XXXXXX)
 mkdir "$qa/project"
 cp -a examples/manual-project/. "$qa/project/"
