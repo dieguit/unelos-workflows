@@ -13,3 +13,4 @@ tracing.workspace = true
 
 [dev-dependencies]
 assert_fs.workspace = true
+serde_json.workspace = true
