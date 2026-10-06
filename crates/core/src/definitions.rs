@@ -108,12 +108,6 @@ fn strict_strings<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<Stri
             Ok(values)
         }
     }
-    struct StrictStringValue(String);
-    impl<'de> Deserialize<'de> for StrictStringValue {
-        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            strict_string(deserializer).map(Self)
-        }
-    }
     deserializer.deserialize_seq(StrictStrings)
 }
 
