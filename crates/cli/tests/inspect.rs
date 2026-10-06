@@ -180,6 +180,7 @@ fn inspect_serializes_parallel_workers_and_gate_and_end() {
     let workflow = workflow_yaml()
         .replace("outputs: [implementation-report.md]\n    next: review", "outputs: [implementation-report.md]\n    next: parallel-check")
         .replace("  review:\n", "  parallel-check:\n    type: parallel\n    tasks:\n      - task: implement-plan\n        agent: engineer\n      - task: create-plan\n        agent: planner\n    inputs: [implementation-report.md]\n    outputs: [checks.md]\n    next: review\n  review:\n");
+    assert!(!workflow.contains("\r\n"));
     fs::write(
         root.join(".unelos/workflows/implement-feature.yaml"),
         workflow,
@@ -264,5 +265,7 @@ fn project_yaml() -> String {
 }
 
 fn workflow_yaml() -> String {
-    fs::read_to_string(fixture().join(".unelos/workflows/implement-feature.yaml")).unwrap()
+    fs::read_to_string(fixture().join(".unelos/workflows/implement-feature.yaml"))
+        .unwrap()
+        .replace("\r\n", "\n")
 }
