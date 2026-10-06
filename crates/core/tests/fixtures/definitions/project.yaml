@@ -1,0 +1,19 @@
+taskDefinitions:
+  implement-plan:
+    description: Implement the supplied plan.
+    instructions: |
+      Read the plan.
+      Verify the changes.
+    skills: [planning, verification]
+    outcomes: [approved, changes_requested]
+  minimal:
+    instructions: Work.
+agents:
+  engineer:
+    instructions: Follow project conventions.
+    skills: [rust, verification]
+    model: vendor/model#variant
+    mcps: [github, local]
+    tools: [read, shell]
+  minimal:
+    instructions: Work.
