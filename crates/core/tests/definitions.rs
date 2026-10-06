@@ -66,3 +66,18 @@ fn project_rejects_malformed_or_discarded_configuration() {
         assert!(rendered.contains(detail), "{rendered}");
     }
 }
+
+#[test]
+fn project_rejects_non_string_definition_ids() {
+    for yaml in [
+        "taskDefinitions: {12: {instructions: Work}}",
+        "taskDefinitions: {true: {instructions: Work}}",
+        "agents: {12: {instructions: Work}}",
+        "agents: {true: {instructions: Work}}",
+    ] {
+        assert!(
+            parse_project_definitions("broken-project.yaml", yaml).is_err(),
+            "accepted non-string definition ID: {yaml}"
+        );
+    }
+}

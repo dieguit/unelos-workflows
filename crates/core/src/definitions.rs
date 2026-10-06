@@ -117,6 +117,14 @@ fn strict_strings<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<Stri
     deserializer.deserialize_seq(StrictStrings)
 }
 
+struct StrictMapKey(String);
+
+impl<'de> Deserialize<'de> for StrictMapKey {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        strict_string(deserializer).map(Self)
+    }
+}
+
 fn strict_map<'de, D, V>(deserializer: D) -> Result<BTreeMap<String, V>, D::Error>
 where
     D: Deserializer<'de>,
@@ -132,7 +140,7 @@ where
 
         fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
             let mut values = BTreeMap::new();
-            while let Some((key, value)) = map.next_entry::<String, V>()? {
+            while let Some((StrictMapKey(key), value)) = map.next_entry::<StrictMapKey, V>()? {
                 if values.insert(key.clone(), value).is_some() {
                     return Err(serde::de::Error::custom(format!("duplicate key `{key}`")));
                 }
