@@ -76,6 +76,12 @@ fn resolves_the_selected_task_into_deterministic_inspection_json() {
 
     let plan = serde_json::to_value(inspect_task(&project, "plan").unwrap()).unwrap();
     assert_eq!(plan["execution"], "main");
+
+    let review = serde_json::to_value(inspect_task(&project, "review").unwrap()).unwrap();
+    assert_eq!(
+        review["outcomes"],
+        serde_json::json!(["approved", "changes_requested"])
+    );
 }
 
 #[test]
@@ -129,15 +135,17 @@ fn selected_missing_skill_reports_id_and_native_expected_path() {
 #[test]
 fn reports_unknown_unsupported_and_missing_references_without_panicking() {
     let mut project = fixture_project();
-    assert!(inspect_task(&project, "missing")
-        .unwrap_err()
-        .to_string()
-        .contains("missing"));
+    let error = inspect_task(&project, "missing").unwrap_err();
+    assert!(
+        matches!(error, unelos_core::ContextError::Diagnostic { path, field, .. }
+        if path == project.workflow_source && field == "nodes.missing")
+    );
     for node in ["approve-plan", "done"] {
-        assert!(inspect_task(&project, node)
-            .unwrap_err()
-            .to_string()
-            .contains(node));
+        let error = inspect_task(&project, node).unwrap_err();
+        assert!(
+            matches!(error, unelos_core::ContextError::Diagnostic { path, field, .. }
+            if path == project.workflow_source && field == format!("nodes.{node}"))
+        );
     }
     project.workflow.nodes.insert(
         "parallel".into(),
@@ -148,10 +156,11 @@ fn reports_unknown_unsupported_and_missing_references_without_panicking() {
             next: Transition::Single("done".into()),
         }),
     );
-    assert!(inspect_task(&project, "parallel")
-        .unwrap_err()
-        .to_string()
-        .contains("parallel"));
+    let error = inspect_task(&project, "parallel").unwrap_err();
+    assert!(
+        matches!(error, unelos_core::ContextError::Diagnostic { path, field, .. }
+        if path == project.workflow_source && field == "nodes.parallel")
+    );
 
     let mut project = fixture_project();
     if let NodeDefinition::Task(task) = project.workflow.nodes.get_mut("implement").unwrap() {
