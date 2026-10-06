@@ -1,88 +1,116 @@
-# Workflow inspection (T05a)
+# Workflow and Task inspection (T05a, T06)
 
-`inspect` prints the selected Workflow as normalized JSON. It is read-only: it
-does not start a run or resolve instructions or Skills. This example starts at
-`plan` and has five Nodes and six edges: `plan` executes in the main process;
-the human gate routes `approved` to `implement` and `rejected` back to `plan`;
-`implement` and `review` execute as subagents; and `changes_requested` routes
-from review back to implement. The graph ends at `done`.
+This fixture has five Nodes and six edges. It starts at `plan`; approval routes
+to `implement`, rejection loops back to `plan`, and review can route back to
+`implement` before reaching `done`. `plan` uses the default `main` execution;
+`implement` and `review` use `subagent`.
 
-Run the following commands from the repository root:
+## Before testing (Linux, Bash)
+
+Run all commands below in the same terminal, starting from the repository
+root, so the `qa` variable remains available. They edit only a disposable copy,
+never the shipped example.
 
 ```sh
 cargo build -p unelos-cli --bin unelos
-./target/debug/unelos --project examples/manual-project inspect implement-feature --json
-cargo run -p unelos-cli --bin unelos -- --project examples/manual-project inspect implement-feature --json
-```
-
-Omit `--project` to inspect the current directory; run these from
-`examples/manual-project`:
-
-```sh
-../../target/debug/unelos inspect implement-feature --json
-cargo run -p unelos-cli --bin unelos -- inspect implement-feature --json
-```
-
-Pretty JSON is the default; omit `--json` (run from the repository root):
-
-```sh
-./target/debug/unelos --project examples/manual-project inspect implement-feature
-```
-
-## Manual QA: safe failures and read-only checks
-
-Run from the repository root. Each check restores from the untouched copy
-before mutating. Output, diagnostics, and exit status are captured separately.
-Omitting execution is valid and defaults the task to `main`; the invalid
-transition and missing descriptor should return status `2`, empty stdout, and
-actionable stderr.
-
-```sh
-qa=$(mktemp -d /tmp/opencode/t05a-qa.XXXXXX)
+mkdir -p /tmp/opencode
+qa=$(mktemp -d /tmp/opencode/manual-qa.XXXXXX)
 mkdir "$qa/project"
 cp -a examples/manual-project/. "$qa/project/"
-cp -a examples/manual-project "$qa/untouched"
-
-check_failure() {
-  expected=$1
-  set +e
-  ./target/debug/unelos --project "$qa/project" inspect implement-feature --json >"$qa/stdout" 2>"$qa/stderr"
-  result=$?
-  set -e
-  if ! test "$result" -eq 2 || ! test ! -s "$qa/stdout" || ! test -s "$qa/stderr" || ! grep -q "$expected" "$qa/stderr"; then return 1; fi
-  printf 'status=%s stdout_bytes=%s\n' "$result" "$(wc -c <"$qa/stdout")"
-  cat "$qa/stderr"
-}
-
-# Remove implement's execution setting; omitted execution defaults to main.
-cp -a "$qa/untouched/." "$qa/project/"
-sed -i '/^  implement:/,/^  review:/ { /    execution: subagent/d; }' "$qa/project/.unelos/workflows/implement-feature.yaml"
-set +e
-./target/debug/unelos --project "$qa/project" inspect implement-feature --json >"$qa/stdout" 2>"$qa/stderr"
-result=$?
-set -e
-if ! test "$result" -eq 0 || test -s "$qa/stderr"; then exit 1; fi
-python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert next(n for n in d["nodes"] if n["id"] == "implement")["execution"] == "main"' "$qa/stdout"
-printf 'omitted execution: status=%s stdout_bytes=%s stderr_bytes=%s (defaults to main)\n' "$result" "$(wc -c <"$qa/stdout")" "$(wc -c <"$qa/stderr")"
-
-# Unknown transition target: make implement point at a nonexistent Node.
-cp -a "$qa/untouched/." "$qa/project/"
-sed -i 's/    next: review/    next: missing-node/' "$qa/project/.unelos/workflows/implement-feature.yaml"
-check_failure missing-node
-
-# Missing project descriptor: rename it, then restore the exact name.
-cp -a "$qa/untouched/." "$qa/project/"
-mv "$qa/project/.unelos/project.yaml" "$qa/project/.unelos/project.yaml.disabled"
-check_failure project.yaml
-mv "$qa/project/.unelos/project.yaml.disabled" "$qa/project/.unelos/project.yaml"
-
-# Repeated output is byte-identical and inspection did not alter/create files.
-cp -a "$qa/untouched/." "$qa/project/"
-./target/debug/unelos --project "$qa/project" inspect implement-feature --json >"$qa/first.json"
-./target/debug/unelos --project "$qa/project" inspect implement-feature --json >"$qa/second.json"
-cmp "$qa/first.json" "$qa/second.json"
-diff -ru "$qa/untouched" "$qa/project"
+cp "$qa/project/.unelos/workflows/implement-feature.yaml" "$qa/workflow.original"
+cp "$qa/project/.unelos/project.yaml" "$qa/project.original"
 ```
 
-The fixture source is `crates/core/tests/fixtures/project/.unelos`; the CLI
-parity test compares its parsed result with this shipped example.
+Omit `--json` for readable, pretty-printed output. Add `--json` to either
+inspection command when you want compact machine-readable JSON.
+
+## Manual QA: workflow graph (T05a)
+
+1. Inspect the workflow:
+
+   ```sh
+   ./target/debug/unelos --project "$qa/project" inspect implement-feature
+   ```
+
+   Expect `name: implement-feature`, `start: plan`, five Nodes, and six edges.
+   Check the `rejected` edge goes from `approve-plan` to `plan`, and
+   `changes_requested` goes from `review` to `implement`. `plan` shows
+   `execution: main`; `implement` and `review` show `subagent`.
+
+2. Test the default execution. Open
+   `$qa/project/.unelos/workflows/implement-feature.yaml` in your editor and
+   remove the `execution: subagent` line from `implement`. Save, then rerun
+   the workflow inspection command above. Expect `implement` to show
+   `execution: main`. Restore the original before continuing:
+
+   ```sh
+   cp "$qa/workflow.original" "$qa/project/.unelos/workflows/implement-feature.yaml"
+   ```
+
+3. Test an invalid transition. In the same workflow file, change the
+   `implement` Node's `next: review` to `next: missing-node`. Rerun the
+   workflow inspection command. Expect a nonzero exit and a diagnostic naming
+   `missing-node`/`implement`; no graph is printed. Restore the file with the
+   `cp` command in step 2 before continuing.
+
+4. Test a missing project descriptor. Rename
+   `$qa/project/.unelos/project.yaml` to `project.yaml.disabled` in your file
+   manager or editor. Rerun the workflow inspection command. Expect a
+   nonzero exit and an error naming the missing descriptor path. Rename it
+   back to `project.yaml` before continuing.
+
+5. Rerun the workflow inspection command twice. Expect the same graph both
+   times; confirm `$qa/project/.unelos` has no `runs` directory or active-run
+   file. Inspection is read-only.
+
+## Manual QA: selected Task context (T06)
+
+Use this shared command for the checks below:
+
+```sh
+./target/debug/unelos --project "$qa/project" inspect implement-feature --node implement
+```
+
+1. Run the command on the untouched copy. Expect Task and Agent instructions,
+   `execution: subagent`, model/MCP/tool references, and logical `plan.md` and
+   `implementation-report.md` names. The result has no run ID, Task ID,
+   request, feedback, or concrete run paths. Rerun it and confirm the result
+   is unchanged and no run files appeared under `.unelos`.
+
+2. Open `$qa/project/.unelos/project.yaml` in your editor. In the `engineer`
+   Agent, change `skills: [rust]` to `skills: [rust, verification]`. The
+   `implement-plan` Task already selects `[verification]`. Save and rerun the
+   shared command. Expect exactly two selected Skills in order:
+   `verification`, then `rust`; this checks Task-then-Agent order and removes
+   the Agent's duplicate `verification`. Each entry includes its full content
+   and a directory under this disposable copy's `.unelos/skills`. Restore the
+   project file before the next check:
+
+   ```sh
+   cp "$qa/project.original" "$qa/project/.unelos/project.yaml"
+   ```
+
+3. Open `$qa/project/.unelos/skills/code-review/SKILL.md` and add the unique
+   line `UNRELATED_SKILL_MARKER`. This Skill is not selected by `implement`.
+   Then open `$qa/project/.unelos/skills/verification/SKILL.md` and add the
+   unique line `SELECTED_SKILL_MARKER`. Rerun the shared command. Expect the
+   complete verification Skill text, including its marker, exactly once; the
+   unrelated marker must not appear. Restore both files before continuing:
+
+   ```sh
+   cp examples/manual-project/.unelos/skills/code-review/SKILL.md "$qa/project/.unelos/skills/code-review/SKILL.md"
+   cp examples/manual-project/.unelos/skills/verification/SKILL.md "$qa/project/.unelos/skills/verification/SKILL.md"
+   ```
+
+4. Rename `$qa/project/.unelos/skills/verification/SKILL.md` to
+   `SKILL.md.disabled`, then rerun the shared command. Expect a nonzero exit
+   and an error identifying `verification` and the expected file path. While
+   it is still renamed, inspect the whole workflow by rerunning:
+
+   ```sh
+   ./target/debug/unelos --project "$qa/project" inspect implement-feature
+   ```
+
+   Expect the normal workflow graph: whole-Workflow inspection does not
+   resolve Skills. Rename `SKILL.md.disabled` back to `SKILL.md`. Remove the
+   disposable copy when finished if you no longer need it.

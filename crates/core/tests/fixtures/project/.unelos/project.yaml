@@ -16,6 +16,9 @@ agents:
   engineer:
     instructions: Follow existing project conventions.
     skills: [rust]
+    model: example-provider/example-model
+    mcps: [github]
+    tools: [read-file, run-command]
   reviewer:
     instructions: Inspect requirements and actual changes independently.
     skills: [rust]

@@ -5,8 +5,8 @@ use std::{
     process::ExitCode,
 };
 use unelos_core::{
-    build_graph, load_project, validate_project, ProjectLoadError, ProjectValidationError,
-    Settings, SettingsError,
+    build_graph, inspect_task, load_project, validate_project, ContextError, ProjectLoadError,
+    ProjectValidationError, Settings, SettingsError,
 };
 
 #[derive(Parser)]
@@ -35,8 +35,13 @@ enum Command {
         #[command(subcommand)]
         command: ConfigCommand,
     },
-    /// Inspect a normalized workflow.
-    Inspect { workflow: String },
+    /// Inspect a normalized workflow or one resolved Task context.
+    Inspect {
+        workflow: String,
+        /// Resolve an ordinary Task Node's execution context.
+        #[arg(long)]
+        node: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -70,6 +75,8 @@ enum Error {
     ProjectLoad(#[from] ProjectLoadError),
     #[error("{0}")]
     ProjectValidation(#[from] ProjectValidationError),
+    #[error("{0}")]
+    Context(#[from] ContextError),
     #[error("could not write command output")]
     Output(#[from] io::Error),
     #[error("could not serialize command output")]
@@ -84,15 +91,17 @@ impl Error {
             Self::Settings(_) => "invalid_settings",
             Self::ProjectLoad(_) => "project_load_failed",
             Self::ProjectValidation(_) => "invalid_project",
+            Self::Context(_) => "context_resolution_failed",
             _ => "operational_failure",
         }
     }
 
     fn exit_code(&self) -> ExitCode {
         match self {
-            Self::Settings(_) | Self::ProjectLoad(_) | Self::ProjectValidation(_) => {
-                ExitCode::from(2)
-            }
+            Self::Settings(_)
+            | Self::ProjectLoad(_)
+            | Self::ProjectValidation(_)
+            | Self::Context(_) => ExitCode::from(2),
             _ => ExitCode::FAILURE,
         }
     }
@@ -121,29 +130,33 @@ fn run(cli: &Cli) -> Result<(), Error> {
             };
             writeln!(io::stdout().lock(), "{output}")?;
         }
-        Command::Inspect { workflow } => {
+        Command::Inspect { workflow, node } => {
             let project = load_project(&cli.project, workflow)?;
             validate_project(&project)?;
-            let graph = build_graph(&project.workflow);
-            let nodes = project
-                .workflow
-                .nodes
-                .iter()
-                .map(|(id, node)| {
-                    let mut value = serde_json::to_value(node)?;
-                    value
-                        .as_object_mut()
-                        .expect("Node serializes as an object")
-                        .insert("id".into(), serde_json::json!(id));
-                    Ok(value)
+            let result = if let Some(node) = node {
+                serde_json::to_value(inspect_task(&project, node)?)?
+            } else {
+                let graph = build_graph(&project.workflow);
+                let nodes = project
+                    .workflow
+                    .nodes
+                    .iter()
+                    .map(|(id, node)| {
+                        let mut value = serde_json::to_value(node)?;
+                        value
+                            .as_object_mut()
+                            .expect("Node serializes as an object")
+                            .insert("id".into(), serde_json::json!(id));
+                        Ok(value)
+                    })
+                    .collect::<Result<Vec<_>, serde_json::Error>>()?;
+                serde_json::json!({
+                    "name": project.workflow.name,
+                    "start": graph.start,
+                    "nodes": nodes,
+                    "edges": graph.edges,
                 })
-                .collect::<Result<Vec<_>, serde_json::Error>>()?;
-            let result = serde_json::json!({
-                "name": project.workflow.name,
-                "start": graph.start,
-                "nodes": nodes,
-                "edges": graph.edges,
-            });
+            };
             let output = if cli.json {
                 serde_json::to_string(&result)?
             } else {
@@ -170,6 +183,9 @@ fn render_error(error: &Error, json: bool) -> String {
             Error::ProjectLoad(_) => "Check --project and the reported authoring source.",
             Error::ProjectValidation(_) => {
                 "Check --project and the reported authoring source and field."
+            }
+            Error::Context(_) => {
+                "Check the selected Node, Task Definition, Agent, and selected Skill in the reported authoring source."
             }
             _ => "Check the output destination and logging configuration.",
         };
