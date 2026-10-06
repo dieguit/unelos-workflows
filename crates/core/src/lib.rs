@@ -20,6 +20,7 @@ pub use settings::{Settings, SettingsError};
 pub use skills::{resolve_skills, ResolvedSkill, SkillResolveError};
 pub use validation::{validate_project, ProjectValidationError};
 pub use work::{
-    inspect_node, EndInspection, GateInspection, NodeInspection, ParallelInspection,
-    WorkerInspection,
+    build_work_packet, inspect_node, EndInspection, FinishedPacket, GateInspection, GatePacket,
+    NodeInspection, ParallelInspection, ParallelPacket, TaskWorkPacket, WorkPacket,
+    WorkRuntimeInput, WorkerInspection, WorkerPacket, WorkerReportBinding,
 };
