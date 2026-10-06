@@ -3,7 +3,9 @@
 mod definitions;
 mod project;
 mod settings;
+mod skills;
 
 pub use definitions::*;
 pub use project::{load_project, LoadedProject, ProjectLoadError};
 pub use settings::{Settings, SettingsError};
+pub use skills::{resolve_skills, ResolvedSkill, SkillResolveError};
