@@ -211,6 +211,189 @@ fn inspect_serializes_parallel_workers_and_gate_and_end() {
     );
 }
 
+#[test]
+fn inspect_resolves_one_task_context_deterministically_without_runtime_state() {
+    let temp = assert_fs::TempDir::new().unwrap();
+    let root = temp.path().join("project with spaces");
+    fs::create_dir_all(&root).unwrap();
+    copy_tree(&fixture(), &root);
+    let before = snapshot(&root);
+
+    let compact = inspect_node(&root, "implement", true);
+    assert!(compact.status.success(), "{compact:?}");
+    assert!(compact.stderr.is_empty());
+    let pretty = inspect_node(&root, "implement", false);
+    assert!(pretty.status.success(), "{pretty:?}");
+    assert!(String::from_utf8_lossy(&pretty.stdout).lines().count() > 1);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&compact.stdout).unwrap(),
+        serde_json::from_slice::<Value>(&pretty.stdout).unwrap()
+    );
+    assert_eq!(
+        inspect_node(&root, "implement", true).stdout,
+        compact.stdout
+    );
+
+    let value: Value = serde_json::from_slice(&compact.stdout).unwrap();
+    assert_eq!(value["kind"], "task");
+    assert_eq!(value["nodeId"], "implement");
+    assert_eq!(value["taskDefinition"], "implement-plan");
+    assert_eq!(value["agent"], "engineer");
+    assert_eq!(value["execution"], "subagent");
+    assert_eq!(
+        value["taskInstructions"],
+        "Implement the supplied plan and report verification."
+    );
+    assert_eq!(
+        value["agentInstructions"],
+        "Follow existing project conventions."
+    );
+    assert_eq!(value["inputs"], json!(["plan.md"]));
+    assert_eq!(value["outputs"], json!(["implementation-report.md"]));
+    assert_eq!(value["model"], "example-provider/example-model");
+    assert_eq!(value["mcps"], json!(["github"]));
+    assert_eq!(value["tools"], json!(["read-file", "run-command"]));
+    assert_eq!(value["skills"][0]["id"], "verification");
+    assert_eq!(value["skills"][1]["id"], "rust");
+    for (index, skill) in ["verification", "rust"].iter().enumerate() {
+        assert_eq!(
+            value["skills"][index]["content"],
+            fs::read_to_string(fixture().join(format!(".unelos/skills/{skill}/SKILL.md"))).unwrap()
+        );
+    }
+    assert_eq!(
+        value["skills"][0]["directory"],
+        root.join(".unelos/skills/verification")
+            .to_string_lossy()
+            .as_ref()
+    );
+    assert_eq!(
+        value["skills"][1]["directory"],
+        root.join(".unelos/skills/rust").to_string_lossy().as_ref()
+    );
+    for field in ["runId", "taskId", "request", "feedback"] {
+        assert!(value.get(field).is_none(), "unexpected {field}");
+    }
+    assert!(!root.join(".unelos/runs").exists());
+    assert!(!root.join(".unelos/active-run").exists());
+    assert!(!root.join(".unelos/active-run.json").exists());
+    assert_eq!(snapshot(&root), before);
+}
+
+#[test]
+fn inspect_node_reads_only_selected_skills_in_order_and_reports_missing_skill() {
+    let temp = assert_fs::TempDir::new().unwrap();
+    let root = temp.path();
+    copy_tree(&fixture(), root);
+    let project_path = root.join(".unelos/project.yaml");
+    let project = fs::read_to_string(&project_path)
+        .unwrap()
+        .replace("\r\n", "\n");
+    fs::write(
+        &project_path,
+        project.replace("skills: [rust]", "skills: [rust, verification]"),
+    )
+    .unwrap();
+    let selected_path = root.join(".unelos/skills/verification/SKILL.md");
+    let selected = fs::read_to_string(&selected_path).unwrap();
+    let selected = format!("{selected}\nSELECTED_SKILL_MARKER\n");
+    fs::write(&selected_path, &selected).unwrap();
+    let unrelated = root.join(".unelos/skills/unrelated");
+    fs::create_dir_all(&unrelated).unwrap();
+    fs::write(unrelated.join("SKILL.md"), "UNRELATED_SKILL_MARKER\n").unwrap();
+
+    let output = inspect_node(root, "implement", true);
+    assert!(output.status.success(), "{output:?}");
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let skills = value["skills"].as_array().unwrap();
+    assert_eq!(
+        skills
+            .iter()
+            .map(|skill| skill["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["verification", "rust"]
+    );
+    assert_eq!(skills[0]["content"], selected);
+    assert_eq!(
+        skills[0]["directory"],
+        root.join(".unelos/skills/verification")
+            .to_string_lossy()
+            .as_ref()
+    );
+    assert_eq!(
+        skills[1]["directory"],
+        root.join(".unelos/skills/rust").to_string_lossy().as_ref()
+    );
+    let serialized = value.to_string();
+    assert_eq!(serialized.matches("SELECTED_SKILL_MARKER").count(), 1);
+    assert!(!serialized.contains("UNRELATED_SKILL_MARKER"));
+
+    fs::rename(
+        &selected_path,
+        selected_path.with_file_name("SKILL.md.disabled"),
+    )
+    .unwrap();
+    for json_mode in [true, false] {
+        let missing = inspect_node(root, "implement", json_mode);
+        assert_eq!(missing.status.code(), Some(2));
+        assert!(missing.stdout.is_empty());
+        let stderr = String::from_utf8_lossy(&missing.stderr);
+        assert!(stderr.contains("verification"), "{stderr}");
+        assert!(stderr.contains("SKILL.md"), "{stderr}");
+        if json_mode {
+            let diagnostic: Value = serde_json::from_slice(&missing.stderr).unwrap();
+            assert_eq!(diagnostic["error"]["code"], "context_resolution_failed");
+        } else {
+            assert!(stderr.contains("selected Skill"), "{stderr}");
+        }
+    }
+    assert!(
+        inspect(root, true).status.success(),
+        "whole-Workflow inspection reads no Skills"
+    );
+}
+
+#[test]
+fn inspect_node_reports_unknown_and_unsupported_nodes_without_panicking() {
+    let temp = assert_fs::TempDir::new().unwrap();
+    let root = temp.path();
+    copy_tree(&fixture(), root);
+    for node in ["missing", "approve-plan", "done"] {
+        let output = inspect_node(root, node, true);
+        assert_eq!(output.status.code(), Some(2), "{output:?}");
+        assert!(output.stdout.is_empty());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!stderr.contains("panicked"), "{stderr}");
+        assert!(stderr.contains("context_resolution_failed"), "{stderr}");
+        assert!(stderr.contains(node), "{stderr}");
+    }
+
+    let workflow_path = root.join(".unelos/workflows/implement-feature.yaml");
+    let parallel = workflow_yaml().replace(
+        "    next: review\n  review:",
+        "    next: parallel-check\n  parallel-check:\n    type: parallel\n    tasks:\n      - task: implement-plan\n        agent: engineer\n    inputs: [plan.md]\n    outputs: [parallel.md]\n    next: review\n  review:",
+    );
+    fs::write(workflow_path, parallel).unwrap();
+    let output = inspect_node(root, "parallel-check", true);
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("parallel-check"), "{stderr}");
+    assert!(stderr.contains("ordinary Task"), "{stderr}");
+}
+
+fn inspect_node(root: &Path, node: &str, json_mode: bool) -> std::process::Output {
+    let mut command = command();
+    command
+        .arg("--project")
+        .arg(root)
+        .args(["inspect", "implement-feature", "--node", node]);
+    if json_mode {
+        command.arg("--json");
+    }
+    command.output().unwrap()
+}
+
 fn inspect(root: &Path, json_mode: bool) -> std::process::Output {
     let mut command = command();
     command
