@@ -7,5 +7,6 @@ edition.workspace = true
 camino.workspace = true
 config.workspace = true
 serde.workspace = true
+serde_yaml_ng.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

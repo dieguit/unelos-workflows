@@ -1,0 +1,39 @@
+name: implement-feature
+start: plan
+nodes:
+  plan:
+    task: create-plan
+    agent: planner
+    outputs: [plan.md]
+    next: approve-plan
+  approve-plan:
+    type: human-gate
+    inputs: [plan.md]
+    next: {approved: implement, rejected: plan}
+  implement:
+    type: task
+    task: implement-plan
+    agent: engineer
+    execution: subagent
+    inputs: [plan.md]
+    outputs: [implementation-report.md]
+    next: parallel-check
+  parallel-check:
+    type: parallel
+    inputs: [implementation-report.md]
+    tasks:
+      - task: check-api
+        agent: backend
+      - task: check-ui
+        agent: frontend
+    outputs: [checks.md]
+    next: review
+  review:
+    type: task
+    task: review-implementation
+    agent: reviewer
+    execution: main
+    inputs: [checks.md]
+    next: {approved: done, changes_requested: implement}
+  done:
+    type: end
