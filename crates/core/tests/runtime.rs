@@ -261,6 +261,41 @@ fn rejects_saved_external_output_before_returning_a_packet() {
     assert_eq!(fs::read(state_path).unwrap(), tampered);
 }
 
+#[cfg(unix)]
+#[test]
+fn rejects_literal_backslash_symlinked_output_without_mutating_state() {
+    use std::os::unix::fs::symlink;
+
+    let (_temp, root) = project_copy();
+    let project = load_project(&root, "implement-feature").unwrap();
+    start(&project, "backslash", "request").unwrap();
+    let state_path = root.join(".unelos/runs/backslash/state.json");
+    let outside = root.join("outside.md");
+    fs::write(&outside, "outside").unwrap();
+    let escaped = root.join(".unelos/runs/backslash/plan/outside\\redirect.md");
+    symlink(&outside, &escaped).unwrap();
+    let mut state: serde_json::Value =
+        serde_json::from_slice(&fs::read(&state_path).unwrap()).unwrap();
+    state["current"]["outputs"][0]["path"] = escaped.to_string().into();
+    fs::write(&state_path, serde_json::to_vec(&state).unwrap()).unwrap();
+    let tampered = fs::read(&state_path).unwrap();
+
+    assert!(status(&root).is_err());
+    assert!(next(&root).is_err());
+    assert_eq!(fs::read(&state_path).unwrap(), tampered);
+    assert_eq!(fs::read(outside).unwrap(), b"outside");
+
+    state["current"]["outputs"][0]["path"] = root
+        .join(".unelos/runs/backslash/plan/../outside.md")
+        .to_string()
+        .into();
+    fs::write(&state_path, serde_json::to_vec(&state).unwrap()).unwrap();
+    let traversed = fs::read(&state_path).unwrap();
+    assert!(status(&root).is_err());
+    assert!(next(&root).is_err());
+    assert_eq!(fs::read(state_path).unwrap(), traversed);
+}
+
 #[test]
 fn rejects_saved_external_worker_report_before_returning_a_packet() {
     let (_temp, root) = project_copy();

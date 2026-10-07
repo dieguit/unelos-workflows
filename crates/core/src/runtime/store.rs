@@ -181,26 +181,40 @@ fn validate_artifacts(state: &RunState, run_path: &Utf8Path) -> Result<(), Runti
         let relative = reference.path.strip_prefix(run_path).map_err(|_| {
             RuntimeError::InvalidState(format!("artifact path escapes run: {}", reference.path))
         })?;
-        let parts: Vec<_> = relative.as_str().split(['/', '\\']).collect();
-        if parts.len() < 2 {
+        let components: Vec<_> = relative.components().collect();
+        if components.len() < 2 {
             return Err(RuntimeError::InvalidState(format!(
                 "artifact path is outside a Node directory: {}",
                 reference.path
             )));
         }
-        for part in &parts {
-            super::check_component(part, "persisted artifact")?;
-        }
-        if expected_node.is_some_and(|node| parts[0] != node) {
+        if relative
+            .as_str()
+            .split(|separator| separator == '/' || (cfg!(windows) && separator == '\\'))
+            .any(|part| matches!(part, "" | "." | ".."))
+        {
             return Err(RuntimeError::InvalidState(format!(
-                "artifact path is outside its expected Node directory: {}",
+                "artifact path has a noncanonical component: {}",
                 reference.path
             )));
         }
         let mut path = run_path.to_owned();
-        for part in parts {
+        for (index, component) in components.into_iter().enumerate() {
+            let camino::Utf8Component::Normal(part) = component else {
+                return Err(RuntimeError::InvalidState(format!(
+                    "artifact path has a non-normal component: {}",
+                    reference.path
+                )));
+            };
+            super::check_component(part, "persisted artifact")?;
             path.push(part);
             reject_symlink(&path)?;
+            if index == 0 && expected_node.is_some_and(|node| part != node) {
+                return Err(RuntimeError::InvalidState(format!(
+                    "artifact path is outside its expected Node directory: {}",
+                    reference.path
+                )));
+            }
         }
         Ok(())
     }
