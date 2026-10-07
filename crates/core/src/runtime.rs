@@ -1,0 +1,624 @@
+use camino::{Utf8Path, Utf8PathBuf};
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    ArtifactReference, ContextError, LoadedProject, NodeDefinition, ProjectLoadError,
+    ProjectValidationError, TaskRuntimeInput, TransitionFeedback, WorkPacket, WorkRuntimeInput,
+    WorkerReportBinding,
+};
+
+mod store;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunState {
+    pub run_id: String,
+    pub name: String,
+    pub workflow_name: String,
+    pub request: String,
+    pub current: CurrentWork,
+    pub history: Vec<CompletedExecution>,
+    pub next_execution_sequence: u64,
+}
+
+impl RunState {
+    pub fn is_finished(&self) -> bool {
+        matches!(self.current, CurrentWork::Finished { .. })
+    }
+
+    pub(crate) fn allocate_execution_id(&mut self, gate: bool) -> Result<String, RuntimeError> {
+        let sequence = self.next_execution_sequence;
+        self.next_execution_sequence = sequence
+            .checked_add(1)
+            .ok_or_else(|| RuntimeError::InvalidState("execution sequence overflow".into()))?;
+        Ok(format!("{}-{sequence}", if gate { "gate" } else { "task" }))
+    }
+
+    pub fn expect_execution(&self, expected: &str) -> Result<(), RuntimeError> {
+        let current = match &self.current {
+            CurrentWork::Task(record) | CurrentWork::Parallel(record) => &record.execution_id,
+            CurrentWork::HumanGate(record) => &record.execution_id,
+            CurrentWork::Finished { .. } => {
+                return Err(RuntimeError::StaleExecution {
+                    expected: expected.into(),
+                    current: None,
+                })
+            }
+        };
+        if current != expected {
+            return Err(RuntimeError::StaleExecution {
+                expected: expected.into(),
+                current: Some(current.clone()),
+            });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+pub enum CurrentWork {
+    Task(ExecutionRecord),
+    Parallel(ExecutionRecord),
+    HumanGate(ExecutionRecord),
+    Finished { node_id: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionRecord {
+    pub node_id: String,
+    pub execution_id: String,
+    pub inputs: Vec<ArtifactReference>,
+    pub outputs: Vec<ArtifactReference>,
+    pub worker_reports: Vec<WorkerReportBinding>,
+    pub feedback: Option<TransitionFeedback>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompletedExecution {
+    pub work: CurrentWork,
+    pub outcome: Option<String>,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum RuntimeError {
+    #[error(transparent)]
+    Project(#[from] ProjectLoadError),
+    #[error(transparent)]
+    Validation(#[from] ProjectValidationError),
+    #[error(transparent)]
+    Context(#[from] ContextError),
+    #[error("filesystem error at {path}: {source}")]
+    Io {
+        path: Utf8PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("invalid JSON at {path}: {source}")]
+    Json {
+        path: Utf8PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("invalid run name {name:?}: expected lowercase ASCII letters/digits separated by hyphens, max 64 characters")]
+    InvalidName { name: String },
+    #[error("no active run in {path}")]
+    NoActiveRun { path: Utf8PathBuf },
+    #[error("run {name:?} is already active")]
+    ActiveRun { name: String },
+    #[error("run {name:?} already exists")]
+    Collision { name: String },
+    #[error("invalid persisted run state: {0}")]
+    InvalidState(String),
+    #[error("stale execution {expected:?}; current execution is {current:?}")]
+    StaleExecution {
+        expected: String,
+        current: Option<String>,
+    },
+}
+
+pub(crate) fn valid_run_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name.split('-').all(|part| {
+            !part.is_empty()
+                && part
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        })
+        && !matches!(
+            name,
+            "con"
+                | "prn"
+                | "aux"
+                | "nul"
+                | "com1"
+                | "com2"
+                | "com3"
+                | "com4"
+                | "com5"
+                | "com6"
+                | "com7"
+                | "com8"
+                | "com9"
+                | "lpt1"
+                | "lpt2"
+                | "lpt3"
+                | "lpt4"
+                | "lpt5"
+                | "lpt6"
+                | "lpt7"
+                | "lpt8"
+                | "lpt9"
+        )
+}
+
+pub(crate) fn path_error(path: &Utf8Path, source: std::io::Error) -> RuntimeError {
+    RuntimeError::Io {
+        path: path.to_owned(),
+        source,
+    }
+}
+
+pub fn start(project: &LoadedProject, name: &str, request: &str) -> Result<RunState, RuntimeError> {
+    if !valid_run_name(name) {
+        return Err(RuntimeError::InvalidName { name: name.into() });
+    }
+    crate::validate_project(project)?;
+    let store = store::RunStore::open(&project.project_root)?;
+    match store.active() {
+        Ok(state) if !state.is_finished() => {
+            return Err(RuntimeError::ActiveRun { name: state.name })
+        }
+        Ok(_) => {}
+        Err(RuntimeError::NoActiveRun { .. }) => {}
+        Err(error) => return Err(error),
+    }
+    let run_dir = project.project_root.join(".unelos/runs").join(name);
+    if run_dir.exists() || std::fs::symlink_metadata(&run_dir).is_ok() {
+        return Err(RuntimeError::Collision { name: name.into() });
+    }
+    let node_id = &project.workflow.start;
+    check_component(node_id, "Node")?;
+    let node = project.workflow.nodes.get(node_id).ok_or_else(|| {
+        RuntimeError::InvalidState(format!("Workflow start Node {node_id:?} is missing"))
+    })?;
+    let mut state = RunState {
+        run_id: name.into(),
+        name: name.into(),
+        workflow_name: project.workflow.name.clone(),
+        request: request.into(),
+        current: CurrentWork::Finished {
+            node_id: node_id.clone(),
+        },
+        history: vec![],
+        next_execution_sequence: 1,
+    };
+    let ledger_path = run_dir.join("ledger.md");
+    let node_dir = run_dir.join(node_id);
+    let (input, outputs) = match node {
+        NodeDefinition::Task(task) => {
+            reject_inputs(node_id, &task.inputs)?;
+            let outputs = allocate_outputs(&node_dir, &task.outputs)?;
+            let execution_id = state.allocate_execution_id(false)?;
+            state.current = CurrentWork::Task(ExecutionRecord {
+                node_id: node_id.clone(),
+                execution_id: execution_id.clone(),
+                inputs: vec![],
+                outputs: outputs.clone(),
+                worker_reports: vec![],
+                feedback: None,
+            });
+            (
+                WorkRuntimeInput::Task {
+                    input: task_input(&state, node_id, &execution_id, vec![], outputs.clone()),
+                    ledger_path,
+                },
+                outputs,
+            )
+        }
+        NodeDefinition::Parallel(parallel) => {
+            reject_inputs(node_id, &parallel.inputs)?;
+            let aggregate_outputs = allocate_outputs(&node_dir, &parallel.outputs)?;
+            let mut outputs = aggregate_outputs.clone();
+            let mut reports = Vec::new();
+            let mut counts = std::collections::BTreeMap::new();
+            for worker in &parallel.tasks {
+                *counts.entry(worker.agent.as_str()).or_insert(0usize) += 1;
+            }
+            for (index, worker) in parallel.tasks.iter().enumerate() {
+                check_component(&worker.agent, "Agent")?;
+                let dir = if counts[worker.agent.as_str()] > 1 {
+                    format!("{}-worker-{}", worker.agent, index + 1)
+                } else {
+                    worker.agent.clone()
+                };
+                check_component(&dir, "worker directory")?;
+                let report = ArtifactReference {
+                    name: "result.md".into(),
+                    path: node_dir.join(dir).join("result.md"),
+                };
+                reports.push(WorkerReportBinding {
+                    key: format!("worker-{}", index + 1),
+                    report: report.clone(),
+                });
+                outputs.push(report);
+            }
+            validate_paths(&outputs)?;
+            let execution_id = state.allocate_execution_id(false)?;
+            state.current = CurrentWork::Parallel(ExecutionRecord {
+                node_id: node_id.clone(),
+                execution_id: execution_id.clone(),
+                inputs: vec![],
+                outputs: aggregate_outputs.clone(),
+                worker_reports: reports.clone(),
+                feedback: None,
+            });
+            (
+                WorkRuntimeInput::Parallel {
+                    input: task_input(&state, node_id, &execution_id, vec![], aggregate_outputs),
+                    worker_reports: reports,
+                    ledger_path,
+                },
+                outputs,
+            )
+        }
+        NodeDefinition::HumanGate(gate) => {
+            reject_inputs(node_id, &gate.inputs)?;
+            let execution_id = state.allocate_execution_id(true)?;
+            state.current = CurrentWork::HumanGate(ExecutionRecord {
+                node_id: node_id.clone(),
+                execution_id: execution_id.clone(),
+                inputs: vec![],
+                outputs: vec![],
+                worker_reports: vec![],
+                feedback: None,
+            });
+            (
+                WorkRuntimeInput::HumanGate {
+                    run_id: name.into(),
+                    activation_id: execution_id,
+                    node_id: node_id.clone(),
+                    artifacts: vec![],
+                    ledger_path,
+                },
+                vec![],
+            )
+        }
+        NodeDefinition::End => (
+            WorkRuntimeInput::Finished {
+                run_id: name.into(),
+                node_id: node_id.clone(),
+                ledger_path,
+            },
+            vec![],
+        ),
+    };
+    crate::build_work_packet(project, input)?;
+    let dirs = output_directories(&node_dir, &outputs);
+    store.publish(&state, |run| {
+        if !outputs.is_empty() {
+            store::ensure_runtime_directory(&run.join(node_id))?;
+        }
+        for dir in dirs {
+            let relative = dir.strip_prefix(run.join(node_id)).unwrap_or(&dir);
+            let mut path = run.join(node_id);
+            for component in relative.components() {
+                path.push(component.as_str());
+                store::ensure_runtime_directory(&path)?;
+            }
+        }
+        Ok(())
+    })?;
+    Ok(state)
+}
+
+pub fn status(project_root: &Utf8Path) -> Result<RunState, RuntimeError> {
+    store::RunStore::open(project_root)?.active()
+}
+
+pub fn next(project_root: &Utf8Path) -> Result<WorkPacket, RuntimeError> {
+    let store = store::RunStore::open(project_root)?;
+    let state = store.active()?;
+    let project = crate::load_project(project_root, &state.workflow_name)?;
+    crate::validate_project(&project)?;
+    let record = match &state.current {
+        CurrentWork::Task(record)
+        | CurrentWork::Parallel(record)
+        | CurrentWork::HumanGate(record) => record,
+        CurrentWork::Finished { node_id } => {
+            let input = WorkRuntimeInput::Finished {
+                run_id: state.run_id,
+                node_id: node_id.clone(),
+                ledger_path: project
+                    .project_root
+                    .join(".unelos/runs")
+                    .join(&state.name)
+                    .join("ledger.md"),
+            };
+            return Ok(crate::build_work_packet(&project, input)?);
+        }
+    };
+    let node = project
+        .workflow
+        .nodes
+        .get(&record.node_id)
+        .ok_or_else(|| mismatch(&record.node_id, "current Node was removed"))?;
+    let ledger_path = project
+        .project_root
+        .join(".unelos/runs")
+        .join(&state.name)
+        .join("ledger.md");
+    let input = match (&state.current, node) {
+        (CurrentWork::Task(_), NodeDefinition::Task(_)) => WorkRuntimeInput::Task {
+            input: task_input(
+                &state,
+                &record.node_id,
+                &record.execution_id,
+                record.inputs.clone(),
+                record.outputs.clone(),
+            ),
+            ledger_path,
+        },
+        (CurrentWork::Parallel(_), NodeDefinition::Parallel(parallel)) => {
+            if record.worker_reports.len() != parallel.tasks.len() {
+                return Err(mismatch(&record.node_id, "parallel worker count changed"));
+            }
+            let reports = record.worker_reports.clone();
+            for (index, binding) in reports.iter().enumerate() {
+                if binding.key != format!("worker-{}", index + 1) {
+                    return Err(mismatch(&record.node_id, "parallel worker keys changed"));
+                }
+            }
+            let aggregate_count = parallel.outputs.len();
+            if record.outputs.len() != aggregate_count {
+                return Err(mismatch(
+                    &record.node_id,
+                    "parallel output bindings changed",
+                ));
+            }
+            WorkRuntimeInput::Parallel {
+                input: task_input(
+                    &state,
+                    &record.node_id,
+                    &record.execution_id,
+                    record.inputs.clone(),
+                    record.outputs.clone(),
+                ),
+                worker_reports: reports,
+                ledger_path,
+            }
+        }
+        (CurrentWork::HumanGate(_), NodeDefinition::HumanGate(_)) => WorkRuntimeInput::HumanGate {
+            run_id: state.run_id,
+            activation_id: record.execution_id.clone(),
+            node_id: record.node_id.clone(),
+            artifacts: record.inputs.clone(),
+            ledger_path,
+        },
+        _ => return Err(mismatch(&record.node_id, "current Node kind changed")),
+    };
+    let packet = crate::build_work_packet(&project, input)?;
+    if let (CurrentWork::Parallel(_), WorkPacket::Parallel(packet)) = (&state.current, &packet) {
+        if packet.workers.len() != record.worker_reports.len() {
+            return Err(mismatch(
+                &record.node_id,
+                "parallel worker bindings changed",
+            ));
+        }
+        for (worker, saved) in packet.workers.iter().zip(&record.worker_reports) {
+            if worker.key != saved.key || worker.outputs[0] != saved.report {
+                return Err(mismatch(
+                    &record.node_id,
+                    "parallel worker artifact bindings changed",
+                ));
+            }
+        }
+    }
+    Ok(packet)
+}
+
+fn mismatch(node: &str, cause: &str) -> RuntimeError {
+    RuntimeError::InvalidState(format!(
+        "saved work for Node {node:?} is incompatible with live Workflow: {cause}"
+    ))
+}
+fn reject_inputs(node: &str, inputs: &[String]) -> Result<(), RuntimeError> {
+    if inputs.is_empty() {
+        Ok(())
+    } else {
+        Err(RuntimeError::InvalidState(format!(
+            "start Node {node:?} declares inputs; T09 input binding is not available"
+        )))
+    }
+}
+fn task_input(
+    state: &RunState,
+    node: &str,
+    task_id: &str,
+    inputs: Vec<ArtifactReference>,
+    outputs: Vec<ArtifactReference>,
+) -> TaskRuntimeInput {
+    TaskRuntimeInput {
+        run_id: state.run_id.clone(),
+        task_id: task_id.into(),
+        node_id: node.into(),
+        request: state.request.clone(),
+        inputs,
+        outputs,
+        feedback: None,
+    }
+}
+fn allocate_outputs(
+    dir: &Utf8Path,
+    names: &[String],
+) -> Result<Vec<ArtifactReference>, RuntimeError> {
+    names
+        .iter()
+        .map(|name| {
+            for part in name.split('/') {
+                check_component(part, "artifact output")?;
+            }
+            Ok(ArtifactReference {
+                name: name.clone(),
+                path: dir.join(name),
+            })
+        })
+        .collect::<Result<Vec<_>, RuntimeError>>()
+        .and_then(|outputs| {
+            validate_paths(&outputs)?;
+            Ok(outputs)
+        })
+}
+fn check_component(component: &str, source: &str) -> Result<(), RuntimeError> {
+    let upper = component
+        .split('.')
+        .next()
+        .unwrap_or(component)
+        .to_ascii_uppercase();
+    let device = ["CON", "PRN", "AUX", "NUL"].contains(&upper.as_str())
+        || (upper.len() == 4
+            && ["COM", "LPT"].iter().any(|p| {
+                upper.starts_with(p)
+                    && upper.as_bytes()[3].is_ascii_digit()
+                    && upper.as_bytes()[3] != b'0'
+            }));
+    if component.is_empty()
+        || matches!(component, "." | "..")
+        || component.ends_with(['.', ' '])
+        || component
+            .chars()
+            .any(|c| c.is_control() || "<>:\"|?*\\/".contains(c))
+        || device
+    {
+        return Err(RuntimeError::InvalidState(format!(
+            "unsafe {source} path component {component:?}"
+        )));
+    }
+    Ok(())
+}
+fn validate_paths(paths: &[ArtifactReference]) -> Result<(), RuntimeError> {
+    let mut seen: Vec<String> = Vec::new();
+    for path in paths {
+        let normalized = path.path.as_str().to_lowercase().replace('\\', "/");
+        if seen.iter().any(|old| {
+            old == &normalized
+                || old.starts_with(&(normalized.clone() + "/"))
+                || normalized.starts_with(&(old.clone() + "/"))
+        }) {
+            return Err(RuntimeError::InvalidState(format!(
+                "colliding artifact path {}",
+                path.path
+            )));
+        }
+        seen.push(normalized);
+    }
+    Ok(())
+}
+fn output_directories(base: &Utf8Path, outputs: &[ArtifactReference]) -> Vec<Utf8PathBuf> {
+    let mut dirs = if outputs.is_empty() {
+        Vec::new()
+    } else {
+        vec![base.to_owned()]
+    };
+    for output in outputs {
+        let parent = output.path.parent().unwrap();
+        let mut current = base.to_owned();
+        if let Ok(relative) = parent.strip_prefix(base) {
+            for component in relative.components() {
+                current.push(component.as_str());
+                dirs.push(current.clone());
+            }
+        }
+    }
+    dirs.sort();
+    dirs.dedup();
+    dirs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state() -> RunState {
+        RunState {
+            run_id: "qa-run".into(),
+            name: "qa-run".into(),
+            workflow_name: "implement-feature".into(),
+            request: "Change color".into(),
+            current: CurrentWork::Finished {
+                node_id: "done".into(),
+            },
+            history: vec![],
+            next_execution_sequence: 1,
+        }
+    }
+
+    #[test]
+    fn execution_ids_allocate_monotonically_and_roundtrip() {
+        let mut state = state();
+        assert_eq!(state.allocate_execution_id(false).unwrap(), "task-1");
+        assert_eq!(state.allocate_execution_id(false).unwrap(), "task-2");
+        assert_eq!(state.allocate_execution_id(true).unwrap(), "gate-3");
+        let bytes = serde_json::to_vec(&state).unwrap();
+        assert!(std::str::from_utf8(&bytes)
+            .unwrap()
+            .contains("\"nodeId\":\"done\""));
+        assert_eq!(serde_json::from_slice::<RunState>(&bytes).unwrap(), state);
+    }
+
+    #[test]
+    fn current_execution_must_match_expected_identity() {
+        let mut state = state();
+        state.current = CurrentWork::Task(ExecutionRecord {
+            node_id: "plan".into(),
+            execution_id: "task-2".into(),
+            inputs: vec![],
+            outputs: vec![],
+            worker_reports: vec![],
+            feedback: None,
+        });
+        assert!(state.expect_execution("task-2").is_ok());
+        assert!(state.expect_execution("task-1").is_err());
+        state.current = CurrentWork::Finished {
+            node_id: "done".into(),
+        };
+        assert!(state.expect_execution("task-2").is_err());
+    }
+
+    #[test]
+    fn execution_sequence_overflow_is_an_error() {
+        let mut state = state();
+        state.next_execution_sequence = u64::MAX;
+        assert!(state.allocate_execution_id(false).is_err());
+    }
+
+    #[test]
+    fn finished_state_and_run_name_rules_are_derived_and_portable() {
+        let mut state = state();
+        assert!(state.is_finished());
+        state.current = CurrentWork::Task(ExecutionRecord {
+            node_id: "plan".into(),
+            execution_id: "task-1".into(),
+            inputs: vec![],
+            outputs: vec![],
+            worker_reports: vec![],
+            feedback: None,
+        });
+        assert!(!state.is_finished());
+        let max_name = "a".repeat(64);
+        for valid in ["qa-run", "a1", max_name.as_str()] {
+            assert!(valid_run_name(valid));
+        }
+        for invalid in ["", "../bad", "Upper", "a--b", "con", "nul"] {
+            assert!(!valid_run_name(invalid));
+        }
+    }
+}

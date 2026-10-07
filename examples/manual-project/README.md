@@ -170,3 +170,43 @@ artifacts in place and report changes; only the controller writes the
 informational ledger. Core, not ledger content, owns progression. T07
 inspection writes no runtime artifacts and does not implement dispatch,
 artifact updates, or ledger writing.
+
+## Manual QA: persisted runs (T08)
+
+Linux/Bash, from the repository root. Each `cargo run` below is a fresh process;
+the repeated `next` checks recovery/persistence, not transitions or harness
+delivery. Only the disposable copy is modified.
+
+```sh
+mkdir -p /tmp/opencode
+qa=$(mktemp -d /tmp/opencode/t08-qa.XXXXXX)
+cp -a examples/manual-project/. "$qa/"
+cargo run --locked -p unelos-core --example run_qa -- start "$qa" implement-feature change-button-color "Change the button color."
+cargo run --locked -p unelos-core --example run_qa -- status "$qa"
+cargo run --locked -p unelos-core --example run_qa -- next "$qa"
+cargo run --locked -p unelos-core --example run_qa -- next "$qa"
+cargo run --locked -p unelos-core --example run_qa -- start "$qa" implement-feature second-request "Another request."
+```
+
+The first four commands succeed. `status` and both `next` packets retain the
+request, `task-1`, and the same output path
+`$qa/.unelos/runs/change-button-color/plan/plan.md`. The last command exits 1
+with an active-run error. The initial run does not create `plan.md`, a worker
+report, or `ledger.md`.
+
+For live-definition checks, edit the disposable `$qa/.unelos/project.yaml`:
+change `create-plan.instructions` and `planner.instructions`, then rerun `next`.
+The packet shows both edits; `status` still has the same request and identity,
+and the output path is unchanged. Add a unique line to the selected Skill at
+`$qa/.unelos/skills/planning/SKILL.md`; `next` includes it. Rename that file to
+`SKILL.md.disabled`: `next` exits nonzero because the selected Skill is missing,
+while `status` still succeeds. Restore the filename. Confirm
+`$qa/.unelos/runs/change-button-color/ledger.md` and
+`$qa/.unelos/runs/change-button-color/plan/plan.md` are absent; runtime creates
+directories and allocates references only.
+
+Optional checks on a second fresh copy: invoke `start` with an invalid name such
+as `../bad` and expect exit 1 without an active pointer. Change its workflow
+start to the input-free `done` end Node before starting; the run is finished,
+and a subsequent differently named `start` succeeds. Remove disposable copies
+when finished.

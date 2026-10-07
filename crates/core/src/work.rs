@@ -1,5 +1,5 @@
 use camino::Utf8PathBuf;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use crate::{
@@ -8,7 +8,7 @@ use crate::{
     TaskInspection, TaskPacket, TaskRuntimeInput, TransitionFeedback,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkerReportBinding {
     pub key: String,
     pub report: ArtifactReference,
