@@ -292,18 +292,41 @@ pub(super) fn validate_artifacts(
 
     fn feedback(
         feedback: Option<&crate::TransitionFeedback>,
+        state: &RunState,
         run_path: &Utf8Path,
     ) -> Result<(), RuntimeError> {
         if let Some(feedback) = feedback {
             super::check_component(&feedback.source_node_id, "feedback Node")?;
+            let source_gate = state.history.iter().find_map(|entry| match &entry.work {
+                CurrentWork::HumanGate(record)
+                    if record.node_id == feedback.source_node_id
+                        && record.execution_id == feedback.source_execution_id =>
+                {
+                    Some(record)
+                }
+                _ => None,
+            });
+            if let Some(gate) = source_gate {
+                if feedback.artifacts != gate.inputs {
+                    return Err(RuntimeError::InvalidState(
+                        "gate feedback does not match presented artifacts".into(),
+                    ));
+                }
+            }
+            let expected_node =
+                source_gate.map_or(Some(feedback.source_node_id.as_str()), |_| None);
             for artifact in &feedback.artifacts {
-                binding(artifact, run_path, Some(&feedback.source_node_id))?;
+                binding(artifact, run_path, expected_node)?;
             }
         }
         Ok(())
     }
 
-    fn work(work: &super::CurrentWork, run_path: &Utf8Path) -> Result<(), RuntimeError> {
+    fn work(
+        work: &super::CurrentWork,
+        state: &RunState,
+        run_path: &Utf8Path,
+    ) -> Result<(), RuntimeError> {
         let record = match work {
             super::CurrentWork::Task(record)
             | super::CurrentWork::Parallel(record)
@@ -323,12 +346,12 @@ pub(super) fn validate_artifacts(
         for report in &record.worker_reports {
             binding(&report.report, run_path, Some(&record.node_id))?;
         }
-        feedback(record.feedback.as_ref(), run_path)
+        feedback(record.feedback.as_ref(), state, run_path)
     }
 
-    work(&state.current, run_path)?;
+    work(&state.current, state, run_path)?;
     for completed in &state.history {
-        work(&completed.work, run_path)?;
+        work(&completed.work, state, run_path)?;
     }
     Ok(())
 }
@@ -601,6 +624,49 @@ mod tests {
             pointer
         );
         assert_eq!(store.active().unwrap(), active);
+    }
+
+    #[test]
+    fn failed_gate_decision_updates_preserve_run_and_pointer() {
+        use assert_fs::fixture::PathCopy;
+
+        for (outcome, reason) in [("approved", None), ("rejected", Some("revise"))] {
+            let (_temp, project_root) = root();
+            let fixture = Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/project");
+            _temp.copy_from(fixture, &["**/*"]).unwrap();
+            let project = crate::load_project(&project_root, "implement-feature").unwrap();
+            let started = crate::start(&project, "atomic-gate", "Request").unwrap();
+            let plan = match &started.current {
+                CurrentWork::Task(record) => record,
+                _ => unreachable!(),
+            };
+            fs::write(&plan.outputs[0].path, "plan").unwrap();
+            crate::confirm_outputs(&project_root, "task-1").unwrap();
+            crate::complete(&project_root, "atomic-gate", "task-1", None, None).unwrap();
+
+            let store = RunStore::open(&project_root).unwrap();
+            let active = store.active().unwrap();
+            let state_path = project_root.join(".unelos/runs/atomic-gate/state.json");
+            let before = fs::read(&state_path).unwrap();
+            let pointer = fs::read(project_root.join(".unelos/active-run")).unwrap();
+            let project = crate::load_project(&project_root, "implement-feature").unwrap();
+            let candidate =
+                super::super::gates::prepare_decision(&project, &active, "gate-2", outcome, reason)
+                    .unwrap();
+            let error = store.update_with(&candidate, |path, _| {
+                Err(path_error(
+                    path,
+                    io::Error::other("injected gate decision persistence failure"),
+                ))
+            });
+            assert!(error.is_err());
+            assert_eq!(fs::read(state_path).unwrap(), before);
+            assert_eq!(
+                fs::read(project_root.join(".unelos/active-run")).unwrap(),
+                pointer
+            );
+            assert_eq!(store.active().unwrap(), active);
+        }
     }
 
     #[test]
