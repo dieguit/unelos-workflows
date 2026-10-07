@@ -30,8 +30,9 @@ fn rename_rebases_history_gate_feedback_and_current_work_references() {
     let renamed = rename_run(&root, &started.run_id, "updated-feature").unwrap();
     assert_eq!(renamed.history.len(), rejected.history.len());
 
-    let old_prefix = root.join(".unelos/runs/review-feature").to_string();
-    let new_prefix = root.join(".unelos/runs/updated-feature").to_string();
+    let runs = root.join(".unelos").join("runs");
+    let old_prefix = runs.join("review-feature");
+    let new_prefix = runs.join("updated-feature");
     let reference_paths = |work: &CurrentWork| {
         let (CurrentWork::Task(record)
         | CurrentWork::Parallel(record)
@@ -50,7 +51,7 @@ fn rename_rebases_history_gate_feedback_and_current_work_references() {
                     .iter()
                     .flat_map(|feedback| &feedback.artifacts),
             )
-            .map(|reference| reference.path.to_string())
+            .map(|reference| reference.path.clone())
             .collect::<Vec<_>>()
     };
     for work in
