@@ -32,6 +32,14 @@ cargo run -p unelos-cli -- config show
 cargo run -p unelos-cli -- --config settings.toml --json config show
 UNELOS_LOG_LEVEL=info cargo run -p unelos-cli -- config show
 cargo run -p unelos-cli -- config show --log-level debug
+cargo run -p unelos-cli -- --project . start
+cargo run -p unelos-cli -- --project . start implement-feature --name fix-button
+cargo run -p unelos-cli -- --project . status
+cargo run -p unelos-cli -- --project . next
+cargo run -p unelos-cli -- --project . complete plan
+cargo run -p unelos-cli -- --project . approve approve-plan
+cargo run -p unelos-cli -- --project . reject approve-plan --reason 'Revise scope.'
+cargo run -p unelos-cli -- --project . rename fix-save-button --run RUN_ID
 ```
 
 Optional `settings.toml`:
@@ -54,7 +62,25 @@ operational events as JSON lines. Application errors contain no ANSI styling.
 Clap-generated help, version, and argument/usage errors retain standard text even
 with `--json`. Broken output pipes terminate quietly.
 
-Exit codes: `0` success, `2` invalid arguments/settings, `1` operational failure.
+Exit codes: `0` success, `2` usage/domain rejection (including invalid settings
+or runtime state), `1` operational failure.
+
+### Runtime CLI (T12)
+
+The seven runtime commands are `start [WORKFLOW] [--name NAME]`, `status`,
+`next`, `complete NODE [--outcome OUTCOME]`, `approve NODE`,
+`reject NODE --reason REASON`, and `rename NAME --run RUN_ID`. `start` without
+a Workflow lists sorted choices without creating a run; with a Workflow it
+creates a run and returns its summary. `status` reports idle when no run exists;
+`next` returns the current packet. `complete NODE` confirms the declared outputs
+and advances; no execution ID or separate confirmation command is used. Node-only
+mutations cannot distinguish a delayed duplicate call from a later visit to the
+same Node; inspect `status`/`next` after an uncertain result instead of retrying
+blindly.
+
+See [coordinator instructions](docs/coordinator-instructions.md) and the
+[manual runtime walkthrough](docs/manual-runtime-cli-qa.md). Instructions are
+not automatically injected and no plugin or slash command is installed.
 
 ### Local Skill resolution (T03)
 

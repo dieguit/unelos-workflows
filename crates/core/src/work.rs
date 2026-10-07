@@ -113,7 +113,8 @@ pub enum WorkPacket {
 }
 
 const LEDGER_DUTY: &str = "Only the controller updates the supplied run ledger: record progress, received decisions, and descriptions of artifact changes. The ledger is informational; use Unelos for current work, completion, and transitions. Never use the ledger to derive destinations. Read existing declared outputs before updating them in place; preserve relevant content and do not recreate the run tree.";
-const OUTPUT_CONFIRMATION_DUTY: &str = "Before reporting completion, explicitly confirm all parent outputs for the current Task ID through Unelos; unchanged reviewed outputs may be confirmed. Workers report produced or reviewed outputs to the controller. Workers never edit the ledger or authorize progression.";
+const OUTPUT_CONFIRMATION_DUTY: &str = "Before reporting completion, confirm all declared outputs by invoking `complete NODE`; this is output confirmation, and unchanged reviewed outputs may be confirmed. After an uncertain result inspect status and next, never blindly retry a Node-based mutation. Workers report produced or reviewed outputs to the controller. Workers never edit the ledger or authorize progression.";
+const CONTEXT_AND_NAMING_DUTY: &str = "Carry relevant conversation context into current work, ask for missing information according to the Task instructions, and persist answers in reports; never invent requirements from empty request text. Read status for namingPending; once enough context is known, choose a descriptive safe name using its runId, rename once, then fetch a fresh next packet. Defer rename while workers hold old paths.";
 
 pub fn build_work_packet(
     project: &LoadedProject,
@@ -125,7 +126,9 @@ pub fn build_work_packet(
             Ok(WorkPacket::Task(Box::new(TaskWorkPacket {
                 packet,
                 ledger_path,
-                controller_instructions: format!("{LEDGER_DUTY} {OUTPUT_CONFIRMATION_DUTY}"),
+                controller_instructions: format!(
+                    "{LEDGER_DUTY} {CONTEXT_AND_NAMING_DUTY} {OUTPUT_CONFIRMATION_DUTY}"
+                ),
             })))
         }
         WorkRuntimeInput::Parallel {
@@ -227,7 +230,7 @@ pub fn build_work_packet(
                 kind: "parallel", run_id: input.run_id, task_id: input.task_id,
                 node_id: input.node_id, request: input.request, inputs, outputs,
                 feedback: input.feedback, workers, ledger_path,
-                controller_instructions: format!("{LEDGER_DUTY} {OUTPUT_CONFIRMATION_DUTY} Dispatch every listed worker; relay questions and resume the same logical work. Wait for all reports, read them, then update aggregate outputs. A worker return or question never transitions the Node. Never complete a blocked or partial parent; report completion through Unelos."),
+                controller_instructions: format!("{LEDGER_DUTY} {CONTEXT_AND_NAMING_DUTY} {OUTPUT_CONFIRMATION_DUTY} Dispatch every listed worker; relay questions and resume the same logical work. Wait for all reports, read them, then update aggregate outputs. A worker return or question never transitions the Node. Never complete a blocked or partial parent; report completion through Unelos."),
             }))
         }
         WorkRuntimeInput::HumanGate {
@@ -255,7 +258,7 @@ pub fn build_work_packet(
             Ok(WorkPacket::HumanGate(GatePacket {
                 kind: "human-gate", run_id, activation_id, node_id, artifacts,
                 decisions: inspection.decisions, rejection_reason_required: inspection.rejection_reason_required,
-                ledger_path, controller_instructions: format!("{LEDGER_DUTY} Present the exact supplied artifacts and obtain an explicit user decision. Require a nonempty rejection reason. Record the decision through Unelos; ledger notes do not authorize progression."),
+                ledger_path, controller_instructions: format!("{LEDGER_DUTY} {CONTEXT_AND_NAMING_DUTY} Present the exact supplied artifacts and obtain an explicit user decision. Require a nonempty rejection reason. Record the decision through Unelos; ledger notes do not authorize progression."),
             }))
         }
         WorkRuntimeInput::Finished {
