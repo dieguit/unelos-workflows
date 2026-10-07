@@ -18,7 +18,7 @@ pub use definitions::*;
 pub use graph::{build_graph, GraphEdge, GraphNode, NodeKind, WorkflowGraph};
 pub use project::{load_project, LoadedProject, ProjectLoadError};
 pub use runtime::{
-    complete, confirm_outputs, next, prepare_work, start, status, verify_outputs,
+    approve, complete, confirm_outputs, next, prepare_work, reject, start, status, verify_outputs,
     verify_work_outputs, CompletedExecution, CurrentWork, ExecutionRecord, RunState, RuntimeError,
 };
 pub use settings::{Settings, SettingsError};

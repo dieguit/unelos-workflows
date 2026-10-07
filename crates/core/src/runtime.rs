@@ -9,9 +9,11 @@ use crate::{
 
 mod artifacts;
 mod completion;
+mod gates;
 mod store;
 
 pub use completion::complete;
+pub use gates::{approve, reject};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

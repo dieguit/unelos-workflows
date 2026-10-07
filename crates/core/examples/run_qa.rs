@@ -2,8 +2,9 @@ use camino::Utf8Path;
 use serde::Serialize;
 use std::{fs, process};
 use unelos_core::{
-    complete, confirm_outputs, load_project, next, prepare_work, start, status, verify_outputs,
-    verify_work_outputs, CompletedExecution, CurrentWork, RuntimeError, TransitionFeedback,
+    approve, complete, confirm_outputs, load_project, next, prepare_work, reject, start, status,
+    verify_outputs, verify_work_outputs, CompletedExecution, CurrentWork, RuntimeError,
+    TransitionFeedback,
 };
 
 #[cfg(test)]
@@ -11,7 +12,100 @@ mod tests {
     use super::*;
     use assert_fs::{fixture::PathCopy, TempDir};
     use std::fs;
-    use unelos_core::{complete, confirm_outputs, CurrentWork};
+    use unelos_core::{approve, complete, confirm_outputs, reject, CurrentWork};
+
+    #[test]
+    fn rejection_reason_requires_exact_flag_and_one_value() {
+        assert_eq!(
+            rejection_reason(&["--reason".into(), "  ".into()]),
+            Ok("  ")
+        );
+        for args in [
+            vec![],
+            vec!["--reason".into()],
+            vec!["--unknown".into(), "reason".into()],
+            vec!["--reason".into(), "reason".into(), "extra".into()],
+        ] {
+            assert!(rejection_reason(&args).is_err(), "accepted {args:?}");
+        }
+    }
+
+    #[test]
+    fn gate_decision_fixture_persists_rejection_and_approval_feedback() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8Path::from_path(temp.path()).unwrap().to_owned();
+        temp.copy_from(
+            Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/manual-project"),
+            &["**/*"],
+        )
+        .unwrap();
+        let project = load_project(&root, "implement-feature").unwrap();
+        let state = start(&project, "gate-loop", "Change button color.").unwrap();
+        let CurrentWork::Task(plan) = &state.current else {
+            panic!("expected initial plan")
+        };
+        fs::write(&plan.outputs[0].path, "Plan v1").unwrap();
+        confirm_outputs(&root, "task-1").unwrap();
+        let gate = complete(&root, "gate-loop", "task-1", None, None).unwrap();
+        assert!(matches!(gate.current, CurrentWork::HumanGate(_)));
+
+        let revised = reject(
+            &root,
+            "gate-loop",
+            "gate-2",
+            "Explain migration and rollback.",
+        )
+        .unwrap();
+        let CurrentWork::Task(rework) = &revised.current else {
+            panic!("expected revised plan")
+        };
+        assert_eq!(rework.execution_id, "task-3");
+        assert_eq!(
+            rework.feedback.as_ref().and_then(|f| f.reason.as_deref()),
+            Some("Explain migration and rollback.")
+        );
+        assert_eq!(revised.history[1].outcome.as_deref(), Some("rejected"));
+        assert_eq!(
+            revised.history[1].reason.as_deref(),
+            Some("Explain migration and rollback.")
+        );
+
+        fs::write(
+            &rework.outputs[0].path,
+            "Plan v2: migration and rollback explained",
+        )
+        .unwrap();
+        confirm_outputs(&root, "task-3").unwrap();
+        complete(&root, "gate-loop", "task-3", None, None).unwrap();
+        let before_stale = fs::read(root.join(".unelos/runs/gate-loop/state.json")).unwrap();
+        assert!(approve(&root, "gate-loop", "gate-2").is_err());
+        assert_eq!(
+            fs::read(root.join(".unelos/runs/gate-loop/state.json")).unwrap(),
+            before_stale
+        );
+
+        let approved = approve(&root, "gate-loop", "gate-4").unwrap();
+        let CurrentWork::Task(implementation) = &approved.current else {
+            panic!("expected implementation")
+        };
+        assert_eq!(implementation.execution_id, "task-5");
+        assert_eq!(
+            implementation
+                .feedback
+                .as_ref()
+                .and_then(|f| f.outcome.as_deref()),
+            Some("approved")
+        );
+        assert_eq!(approved.history[3].outcome.as_deref(), Some("approved"));
+        assert_eq!(approved.history[3].reason, None);
+        assert_eq!(approved.history[1].outcome.as_deref(), Some("rejected"));
+        assert_eq!(
+            approved.history[1].reason.as_deref(),
+            Some("Explain migration and rollback.")
+        );
+        assert_eq!(status(&root).unwrap(), approved);
+        assert_eq!(next(&root).unwrap(), next(&root).unwrap());
+    }
 
     #[test]
     fn completion_options_accept_pairs_in_either_order_and_reject_bad_syntax() {
@@ -242,6 +336,15 @@ fn main() {
                 Err(_) => usage(),
             }
         }
+        [command, project, run_id, expected] if command == "approve" => {
+            json(approve(Utf8Path::new(project), run_id, expected))
+        }
+        [command, project, run_id, expected, options @ ..] if command == "reject" => {
+            match rejection_reason(options) {
+                Ok(reason) => json(reject(Utf8Path::new(project), run_id, expected, reason)),
+                Err(_) => usage(),
+            }
+        }
         [command, project] if command == "bindings-demo" => bindings_demo(Utf8Path::new(project)),
         _ => usage(),
     };
@@ -263,7 +366,7 @@ fn main() {
 
 fn usage() -> ! {
     eprintln!(
-        "usage:\n  run_qa start PROJECT WORKFLOW NAME REQUEST\n  run_qa status PROJECT\n  run_qa next PROJECT\n  run_qa confirm PROJECT EXECUTION_ID\n  run_qa verify PROJECT EXECUTION_ID\n  run_qa complete PROJECT RUN_ID EXECUTION_ID [--outcome LABEL] [--reason TEXT]\n  run_qa bindings-demo PROJECT"
+        "usage:\n  run_qa start PROJECT WORKFLOW NAME REQUEST\n  run_qa status PROJECT\n  run_qa next PROJECT\n  run_qa confirm PROJECT EXECUTION_ID\n  run_qa verify PROJECT EXECUTION_ID\n  run_qa complete PROJECT RUN_ID EXECUTION_ID [--outcome LABEL] [--reason TEXT]\n  run_qa approve PROJECT RUN_ID ACTIVATION_ID\n  run_qa reject PROJECT RUN_ID ACTIVATION_ID --reason TEXT\n  run_qa bindings-demo PROJECT"
     );
     process::exit(2)
 }
@@ -286,6 +389,13 @@ fn completion_options(args: &[String]) -> Result<(Option<&str>, Option<&str>), S
         }
     }
     Ok((outcome, reason))
+}
+
+fn rejection_reason(args: &[String]) -> Result<&str, &'static str> {
+    match args {
+        [flag, reason] if flag == "--reason" => Ok(reason),
+        _ => Err("expected --reason TEXT"),
+    }
 }
 
 fn json<T: Serialize>(
