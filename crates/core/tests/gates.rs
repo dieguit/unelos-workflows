@@ -38,6 +38,12 @@ fn state_path(root: &Utf8Path, name: &str) -> Utf8PathBuf {
     root.join(".unelos/runs").join(name).join("state.json")
 }
 
+fn replace_fixture_text(text: &str, from: &str, to: &str) -> String {
+    let text = text.replace("\r\n", "\n");
+    assert!(text.contains(from), "fixture edit did not match: {from:?}");
+    text.replace(from, to)
+}
+
 fn assert_unchanged(root: &Utf8Path, name: &str, before: &[u8], state: &RunState) {
     assert_eq!(fs::read(state_path(root, name)).unwrap(), before);
     assert_eq!(status(root).unwrap(), *state);
@@ -211,7 +217,7 @@ fn live_successor_and_gate_definition_are_validated_before_decision() {
         let workflow = root.join(".unelos/workflows/implement-feature.yaml");
         let original = fs::read_to_string(&workflow).unwrap();
         let gate = "  approve-plan:\n    type: human-gate\n    inputs: [plan.md]\n    next:\n      approved: implement\n      rejected: plan\n";
-        let edited = original.replace(gate, replacement);
+        let edited = replace_fixture_text(&original, gate, replacement);
         assert_ne!(edited, original);
         fs::write(workflow, edited).unwrap();
         let path = state_path(&root, "removed-or-changed-gate");
@@ -303,14 +309,14 @@ fn finished_and_new_same_identity_run_cannot_replay_prior_gate_decision() {
 #[test]
 fn decision_prepares_only_declared_successor_and_preserves_blocked_output_path() {
     let (_temp, root) = project_copy();
+    waiting(&root, "live-approved-edge");
     let workflow = root.join(".unelos/workflows/implement-feature.yaml");
     let original = fs::read_to_string(&workflow).unwrap();
     fs::write(
         &workflow,
-        original.replace("approved: implement", "approved: done"),
+        replace_fixture_text(&original, "approved: implement", "approved: done"),
     )
     .unwrap();
-    waiting(&root, "live-approved-edge");
     let done = approve(&root, "live-approved-edge", "gate-2").unwrap();
     assert!(done.is_finished());
     assert_eq!(next(&root).unwrap(), next(&root).unwrap());
@@ -400,9 +406,15 @@ fn missing_successor_producer_input_does_not_persist_decision() {
     let (_temp, root) = project_copy();
     let workflow = root.join(".unelos/workflows/implement-feature.yaml");
     let original = fs::read_to_string(&workflow).unwrap();
-    let edited = original
-        .replace("inputs: [plan.md]\n    outputs: [implementation-report.md]", "inputs: [phantom.md]\n    outputs: [implementation-report.md]")
-        .replace("  done:\n    type: end\n", "  unused-producer:\n    task: create-plan\n    agent: planner\n    outputs: [phantom.md]\n    next: done\n  done:\n    type: end\n");
+    let edited = replace_fixture_text(
+        &replace_fixture_text(
+            &original,
+            "inputs: [plan.md]\n    outputs: [implementation-report.md]",
+            "inputs: [phantom.md]\n    outputs: [implementation-report.md]",
+        ),
+        "  done:\n    type: end\n",
+        "  unused-producer:\n    task: create-plan\n    agent: planner\n    outputs: [phantom.md]\n    next: done\n  done:\n    type: end\n",
+    );
     assert_ne!(edited, original);
     fs::write(workflow, edited).unwrap();
     waiting(&root, "missing-successor-input");
@@ -410,4 +422,49 @@ fn missing_successor_producer_input_does_not_persist_decision() {
     let before = fs::read(&path).unwrap();
     assert!(approve(&root, "missing-successor-input", "gate-2").is_err());
     assert_eq!(fs::read(path).unwrap(), before);
+}
+
+#[test]
+fn ordinary_task_feedback_rejects_artifacts_outside_its_source_node() {
+    let (_temp, root) = project_copy();
+    let project = load_project(&root, "implement-feature").unwrap();
+    let plan = start(&project, "task-feedback-ownership", "Request").unwrap();
+    fs::write(&record(&plan).outputs[0].path, "plan").unwrap();
+    confirm_outputs(&root, "task-1").unwrap();
+    complete(&root, "task-feedback-ownership", "task-1", None, None).unwrap();
+    approve(&root, "task-feedback-ownership", "gate-2").unwrap();
+
+    let implement = status(&root).unwrap();
+    fs::write(&record(&implement).outputs[0].path, "implementation").unwrap();
+    confirm_outputs(&root, "task-3").unwrap();
+    complete(&root, "task-feedback-ownership", "task-3", None, None).unwrap();
+
+    let review = status(&root).unwrap();
+    fs::write(&record(&review).outputs[0].path, "changes requested").unwrap();
+    confirm_outputs(&root, "task-4").unwrap();
+    let feedback_state = complete(
+        &root,
+        "task-feedback-ownership",
+        "task-4",
+        Some("changes_requested"),
+        Some("revise"),
+    )
+    .unwrap();
+    assert_eq!(
+        record(&feedback_state)
+            .feedback
+            .as_ref()
+            .unwrap()
+            .source_node_id,
+        "review"
+    );
+    let plan_path = match &feedback_state.history[0].work {
+        CurrentWork::Task(record) => record.outputs[0].path.clone(),
+        _ => unreachable!(),
+    };
+    let path = state_path(&root, "task-feedback-ownership");
+    let mut saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    saved["current"]["feedback"]["artifacts"][0]["path"] = plan_path.to_string().into();
+    fs::write(path, serde_json::to_vec(&saved).unwrap()).unwrap();
+    assert!(status(&root).is_err());
 }
