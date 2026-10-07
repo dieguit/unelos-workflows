@@ -308,7 +308,7 @@ pub fn start(project: &LoadedProject, name: &str, request: &str) -> Result<RunSt
             store::ensure_runtime_directory(&run.join(node_id))?;
         }
         for dir in dirs {
-            let relative = dir.strip_prefix(&run.join(node_id)).unwrap_or(&dir);
+            let relative = dir.strip_prefix(run.join(node_id)).unwrap_or(&dir);
             let mut path = run.join(node_id);
             for component in relative.components() {
                 path.push(component.as_str());

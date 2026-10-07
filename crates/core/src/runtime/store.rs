@@ -25,6 +25,7 @@ impl RunStore {
             .create(true)
             .read(true)
             .write(true)
+            .truncate(false)
             .open(&lock_path)
             .map_err(|source| path_error(&lock_path, source))?;
         lock.lock()

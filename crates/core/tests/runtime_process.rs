@@ -35,8 +35,37 @@ fn probe(root: &Utf8Path, operation: &str, name: &str, request: &str) -> Child {
         .unwrap()
 }
 
+struct ChildGuard(Option<Child>);
+
+impl ChildGuard {
+    fn new(child: Child) -> Self {
+        Self(Some(child))
+    }
+
+    fn wait_with_output(mut self) -> std::process::Output {
+        self.0.take().unwrap().wait_with_output().unwrap()
+    }
+
+    fn kill_and_wait(mut self) {
+        if let Some(mut child) = self.0.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        if let Some(child) = &mut self.0 {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
 fn finish_probe(child: Child) -> (bool, String, String) {
-    let output = wait_with_timeout(child);
+    let output = wait_with_timeout(ChildGuard::new(child), Duration::from_secs(10))
+        .unwrap_or_else(|error| panic!("{error}"));
     (
         output.status.success(),
         String::from_utf8(output.stdout).unwrap(),
@@ -44,22 +73,37 @@ fn finish_probe(child: Child) -> (bool, String, String) {
     )
 }
 
-fn wait_with_timeout(mut child: Child) -> std::process::Output {
-    let deadline = Instant::now() + Duration::from_secs(10);
+fn wait_with_timeout(
+    mut child: ChildGuard,
+    timeout: Duration,
+) -> Result<std::process::Output, String> {
+    let deadline = Instant::now() + timeout;
     loop {
-        if child.try_wait().unwrap().is_some() {
-            return child.wait_with_output().unwrap();
+        let status = child
+            .0
+            .as_mut()
+            .unwrap()
+            .try_wait()
+            .map_err(|error| error.to_string())?;
+        if status.is_some() {
+            return Ok(child.wait_with_output());
         }
         if Instant::now() >= deadline {
-            let _ = child.kill();
-            let output = child.wait_with_output().unwrap();
-            panic!(
-                "probe timed out: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
+            return Err("probe timed out".into());
         }
         std::thread::sleep(Duration::from_millis(10));
     }
+}
+
+fn await_readiness(
+    child: ChildGuard,
+    receiver: mpsc::Receiver<std::io::Result<String>>,
+) -> Result<(ChildGuard, String), String> {
+    let line = receiver
+        .recv_timeout(Duration::from_secs(10))
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    Ok((child, line))
 }
 
 fn result(stdout: &str) -> Value {
@@ -141,12 +185,47 @@ fn separate_processes_recover_the_same_run_and_work_packet() {
 }
 
 #[test]
+fn concurrent_timeout_drops_and_reaps_both_children() {
+    let (_temp, root) = project_copy();
+    let timeout = {
+        let first = ChildGuard::new(probe(&root, "hold-lock", "", ""));
+        let _second = ChildGuard::new(probe(&root, "hold-lock", "", ""));
+        wait_with_timeout(first, Duration::from_millis(50)).map(|_| ())
+    };
+    assert!(timeout.is_err());
+
+    let start = wait_with_timeout(
+        ChildGuard::new(probe(&root, "start", "after-timeout", "fresh process")),
+        Duration::from_secs(2),
+    )
+    .unwrap();
+    assert!(start.status.success());
+}
+
+#[test]
+fn readiness_reader_error_drops_and_reaps_child() {
+    let (_temp, root) = project_copy();
+    let (tx, rx) = mpsc::channel();
+    tx.send(Err(std::io::Error::other("injected reader error")))
+        .unwrap();
+    let result = await_readiness(ChildGuard::new(probe(&root, "hold-lock", "", "")), rx);
+    assert!(result.is_err());
+
+    let start = wait_with_timeout(
+        ChildGuard::new(probe(&root, "start", "after-reader-error", "fresh process")),
+        Duration::from_secs(2),
+    )
+    .unwrap();
+    assert!(start.status.success());
+}
+
+#[test]
 fn concurrent_start_processes_publish_exactly_one_active_run() {
     let (_temp, root) = project_copy();
-    let first = probe(&root, "start", "race-one", "Request one");
-    let second = probe(&root, "start", "race-two", "Request two");
-    let first_out = wait_with_timeout(first);
-    let second_out = wait_with_timeout(second);
+    let first = ChildGuard::new(probe(&root, "start", "race-one", "Request one"));
+    let second = ChildGuard::new(probe(&root, "start", "race-two", "Request two"));
+    let first_out = wait_with_timeout(first, Duration::from_secs(10)).unwrap();
+    let second_out = wait_with_timeout(second, Duration::from_secs(10)).unwrap();
     assert_ne!(first_out.status.success(), second_out.status.success());
 
     let winner = if first_out.status.success() {
@@ -172,8 +251,8 @@ fn concurrent_start_processes_publish_exactly_one_active_run() {
 #[test]
 fn operating_system_releases_lock_when_process_is_killed() {
     let (_temp, root) = project_copy();
-    let mut child = probe(&root, "hold-lock", "", "");
-    let stdout = child.stdout.take().unwrap();
+    let mut child = ChildGuard::new(probe(&root, "hold-lock", "", ""));
+    let stdout = child.0.as_mut().unwrap().stdout.take().unwrap();
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         let mut reader = BufReader::new(stdout);
@@ -197,15 +276,8 @@ fn operating_system_releases_lock_when_process_is_killed() {
         }
     });
 
-    let ready = rx.recv_timeout(Duration::from_secs(10));
-    if ready.is_err() {
-        let _ = child.kill();
-        let _ = child.wait();
-        panic!("lock holder did not signal readiness within 10 seconds");
-    }
-    let line = ready.unwrap().unwrap();
-    child.kill().unwrap();
-    child.wait().unwrap();
+    let (child, line) = await_readiness(child, rx).unwrap();
+    child.kill_and_wait();
     assert_eq!(line.trim(), format!("{RESULT_PREFIX}ready"), "{line:?}");
 
     let start = finish_probe(probe(&root, "start", "after-kill", "fresh process"));
