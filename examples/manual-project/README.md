@@ -164,8 +164,7 @@ Illustrative flat runtime layout (not created or enforced by T07):
   parallel-research/research-summary.md
 ```
 
-The caller supplies artifact and ledger paths. Descriptive run-directory naming
-is future controller-bootstrap behavior. Future workers update existing
+The caller supplies artifact and ledger paths. Workers update existing
 artifacts in place and report changes; only the controller writes the
 informational ledger. Core, not ledger content, owns progression. T07
 inspection writes no runtime artifacts and does not implement dispatch,
@@ -254,8 +253,78 @@ review reports only at the allocated paths. `verify` success serializes as
 JSON `null`. Renaming the confirmed report makes verify exit 1; restoring it
 makes verify succeed.
 
-Confirmation is trusted controller attestation, not filesystem or semantic
-proof. The `bindings-demo` fabricates completed history only in memory because
-real routing arrives in T10; it does not persist synthetic current/history.
-Production CLI has no runtime mutation commands yet. This manual QA does not
-prove actual end-to-end workflow progression.
+Confirmation is trusted controller attestation, not semantic proof. The
+`bindings-demo` fabricates completed history only in memory; it does not persist
+synthetic current/history. Production CLI has no runtime mutation commands yet.
+This manual QA does not prove actual agent execution or output quality.
+
+## Manual QA: completion and correction loop (T10)
+
+Linux/Bash, from the repository root. Each command is a fresh process. Run
+commands individually, without `set -e`; expected failures are part of the QA.
+Only the disposable copy is modified. The loop uses the ungated
+`completion-loop` workflow and synthetic report contents.
+
+```sh
+cargo build --locked -p unelos-core --example run_qa
+qa=$(mktemp -d /tmp/opencode/t10-qa.XXXXXX)
+cp -a examples/manual-project/. "$qa/"
+./target/debug/examples/run_qa start "$qa" completion-loop color-loop "Change button color."
+./target/debug/examples/run_qa next "$qa"
+printf 'Plan v1\n' > "$qa/.unelos/runs/color-loop/plan/plan.md"
+./target/debug/examples/run_qa confirm "$qa" task-1
+./target/debug/examples/run_qa complete "$qa" color-loop task-1
+./target/debug/examples/run_qa status "$qa"
+./target/debug/examples/run_qa next "$qa"
+printf 'Implementation v1\n' > "$qa/.unelos/runs/color-loop/implement/implementation-report.md"
+./target/debug/examples/run_qa confirm "$qa" task-2
+./target/debug/examples/run_qa complete "$qa" color-loop task-2
+printf 'Review requests better contrast\n' > "$qa/.unelos/runs/color-loop/review/review.md"
+./target/debug/examples/run_qa confirm "$qa" task-3
+cp "$qa/.unelos/runs/color-loop/state.json" "$qa/before-invalid-label.json"
+./target/debug/examples/run_qa complete "$qa" color-loop task-3 --outcome rejected
+cmp "$qa/before-invalid-label.json" "$qa/.unelos/runs/color-loop/state.json"
+./target/debug/examples/run_qa complete "$qa" color-loop task-3 --reason 'Adjust color contrast' --outcome changes_requested
+./target/debug/examples/run_qa status "$qa"
+./target/debug/examples/run_qa next "$qa"
+cp "$qa/.unelos/runs/color-loop/state.json" "$qa/before-unconfirmed.json"
+./target/debug/examples/run_qa complete "$qa" color-loop task-4
+cmp "$qa/before-unconfirmed.json" "$qa/.unelos/runs/color-loop/state.json"
+printf 'Implementation v2 with requested contrast fix\n' > "$qa/.unelos/runs/color-loop/implement/implementation-report.md"
+./target/debug/examples/run_qa confirm "$qa" task-4
+cp "$qa/.unelos/runs/color-loop/state.json" "$qa/before-old-task.json"
+./target/debug/examples/run_qa complete "$qa" color-loop task-2
+cmp "$qa/before-old-task.json" "$qa/.unelos/runs/color-loop/state.json"
+cp "$qa/.unelos/runs/color-loop/state.json" "$qa/before-wrong-run.json"
+./target/debug/examples/run_qa complete "$qa" wrong-run task-4
+cmp "$qa/before-wrong-run.json" "$qa/.unelos/runs/color-loop/state.json"
+./target/debug/examples/run_qa complete "$qa" color-loop task-4
+printf 'Final review approved\n' > "$qa/.unelos/runs/color-loop/review/review.md"
+./target/debug/examples/run_qa confirm "$qa" task-5
+./target/debug/examples/run_qa complete "$qa" color-loop task-5 --outcome approved
+./target/debug/examples/run_qa status "$qa"
+cp "$qa/.unelos/runs/color-loop/state.json" "$qa/before-repeat.json"
+./target/debug/examples/run_qa complete "$qa" color-loop task-5 --outcome approved
+cmp "$qa/before-repeat.json" "$qa/.unelos/runs/color-loop/state.json"
+```
+
+The start response allocates `task-1` at
+`$qa/.unelos/runs/color-loop/plan/plan.md`. Then `task-2` implements,
+`task-3` reviews, `task-4` reimplements, and `task-5` reviews. The two
+implementations reuse the same report path; the second `printf` changes its
+contents. `status`/`next` after the first completion and after the
+`changes_requested` re-entry must show fresh IDs and feedback; the latter
+feedback has outcome `changes_requested`, reason `Adjust color contrast`, and
+the review artifact. All `cmp` checks succeed: invalid label, unconfirmed
+completion (even though the old implementation report exists), old task ID,
+wrong run ID, and repeated finished completion leave `state.json` unchanged.
+The final status is finished with five history entries, preserving both review
+outcomes and the correction reason. Malformed option syntax (for example,
+`complete "$qa" color-loop task-5 --outcome`) exits 2 with usage; core failures
+above exit 1. Core writes no ledger; a human controller may append ledger notes
+manually. This proves routing and persistence, not real model execution,
+implementation quality, or gate decisions.
+
+The existing `implement-feature` workflow remains gated. Independently verify
+that its plan completion enters `approve-plan` and ordinary `complete` on that
+gate fails; the QA workflow above is not a gate bypass for production.

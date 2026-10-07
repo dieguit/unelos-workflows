@@ -18,8 +18,8 @@ pub use definitions::*;
 pub use graph::{build_graph, GraphEdge, GraphNode, NodeKind, WorkflowGraph};
 pub use project::{load_project, LoadedProject, ProjectLoadError};
 pub use runtime::{
-    confirm_outputs, next, prepare_work, start, status, verify_outputs, verify_work_outputs,
-    CompletedExecution, CurrentWork, ExecutionRecord, RunState, RuntimeError,
+    complete, confirm_outputs, next, prepare_work, start, status, verify_outputs,
+    verify_work_outputs, CompletedExecution, CurrentWork, ExecutionRecord, RunState, RuntimeError,
 };
 pub use settings::{Settings, SettingsError};
 pub use skills::{resolve_skills, ResolvedSkill, SkillResolveError};

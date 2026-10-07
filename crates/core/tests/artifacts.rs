@@ -57,7 +57,7 @@ fn binds_latest_recorded_producer_and_preserves_feedback_and_caller_state() {
     let feedback = TransitionFeedback {
         source_node_id: "plan".into(),
         source_execution_id: "task-1".into(),
-        outcome: "rejected".into(),
+        outcome: Some("rejected".into()),
         reason: Some("Add detail".into()),
         artifacts: vec![ArtifactReference {
             name: "plan.md".into(),
@@ -150,7 +150,7 @@ fn next_keeps_frozen_inputs_and_feedback_and_rejects_missing_bound_files() {
     let feedback = TransitionFeedback {
         source_node_id: "plan".into(),
         source_execution_id: "task-1".into(),
-        outcome: "rejected".into(),
+        outcome: Some("rejected".into()),
         reason: Some("Clarify design".into()),
         artifacts: vec![original.clone()],
     };

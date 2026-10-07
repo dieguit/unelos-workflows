@@ -8,7 +8,10 @@ use crate::{
 };
 
 mod artifacts;
+mod completion;
 mod store;
+
+pub use completion::complete;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -125,6 +128,8 @@ pub enum RuntimeError {
         expected: String,
         current: Option<String>,
     },
+    #[error("stale run {expected:?}; current run is {current:?}")]
+    StaleRun { expected: String, current: String },
 }
 
 pub(crate) fn valid_run_name(name: &str) -> bool {
@@ -300,13 +305,17 @@ pub fn next(project_root: &Utf8Path) -> Result<WorkPacket, RuntimeError> {
     let state = store.active()?;
     let project = crate::load_project(project_root, &state.workflow_name)?;
     crate::validate_project(&project)?;
+    packet_for_state(&project, &state)
+}
+
+fn packet_for_state(project: &LoadedProject, state: &RunState) -> Result<WorkPacket, RuntimeError> {
     let record = match &state.current {
         CurrentWork::Task(record)
         | CurrentWork::Parallel(record)
         | CurrentWork::HumanGate(record) => record,
         CurrentWork::Finished { node_id } => {
             let input = WorkRuntimeInput::Finished {
-                run_id: state.run_id,
+                run_id: state.run_id.clone(),
                 node_id: node_id.clone(),
                 ledger_path: project
                     .project_root
@@ -314,7 +323,7 @@ pub fn next(project_root: &Utf8Path) -> Result<WorkPacket, RuntimeError> {
                     .join(&state.name)
                     .join("ledger.md"),
             };
-            return Ok(crate::build_work_packet(&project, input)?);
+            return Ok(crate::build_work_packet(project, input)?);
         }
     };
     artifacts::ensure_inputs_are_files(record)?;
@@ -335,7 +344,7 @@ pub fn next(project_root: &Utf8Path) -> Result<WorkPacket, RuntimeError> {
             }
             WorkRuntimeInput::Task {
                 input: task_input(
-                    &state,
+                    state,
                     &record.node_id,
                     &record.execution_id,
                     record.inputs.clone(),
@@ -370,7 +379,7 @@ pub fn next(project_root: &Utf8Path) -> Result<WorkPacket, RuntimeError> {
             }
             WorkRuntimeInput::Parallel {
                 input: task_input(
-                    &state,
+                    state,
                     &record.node_id,
                     &record.execution_id,
                     record.inputs.clone(),
@@ -386,7 +395,7 @@ pub fn next(project_root: &Utf8Path) -> Result<WorkPacket, RuntimeError> {
                 return Err(mismatch(&record.node_id, "gate input declarations changed"));
             }
             WorkRuntimeInput::HumanGate {
-                run_id: state.run_id,
+                run_id: state.run_id.clone(),
                 activation_id: record.execution_id.clone(),
                 node_id: record.node_id.clone(),
                 artifacts: record.inputs.clone(),
@@ -395,7 +404,7 @@ pub fn next(project_root: &Utf8Path) -> Result<WorkPacket, RuntimeError> {
         }
         _ => return Err(mismatch(&record.node_id, "current Node kind changed")),
     };
-    let packet = crate::build_work_packet(&project, input)?;
+    let packet = crate::build_work_packet(project, input)?;
     if let (CurrentWork::Parallel(_), WorkPacket::Parallel(packet)) = (&state.current, &packet) {
         if packet.workers.len() != record.worker_reports.len() {
             return Err(mismatch(

@@ -189,7 +189,7 @@ fn runtime_input() -> (TempDir, unelos_core::LoadedProject, WorkRuntimeInput) {
     let feedback = TransitionFeedback {
         source_node_id: "approve-plan".into(),
         source_execution_id: "gate-previous".into(),
-        outcome: "rejected".into(),
+        outcome: Some("rejected".into()),
         reason: Some("Explain the risks.".into()),
         artifacts: vec![binding(
             "research-summary.md",
@@ -259,6 +259,7 @@ fn composes_deterministic_parallel_workers_with_explicit_paths_and_parent_identi
             .as_str()
     );
     let instructions = value["controllerInstructions"].as_str().unwrap();
+    assert!(!instructions.contains("future completion"));
     for duty in [
         "Only the controller updates the supplied run ledger",
         "Dispatch every listed worker",

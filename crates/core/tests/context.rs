@@ -49,7 +49,7 @@ fn runtime_input(root: &Utf8Path) -> TaskRuntimeInput {
         feedback: Some(TransitionFeedback {
             source_node_id: "review".into(),
             source_execution_id: "task-2".into(),
-            outcome: "changes_requested".into(),
+            outcome: Some("changes_requested".into()),
             reason: Some("Café said \"redo\".\nAgain.".into()),
             artifacts: vec![ArtifactReference {
                 name: "review.md".into(),
@@ -384,10 +384,25 @@ fn absent_feedback_and_reason_serialize_as_null() {
     input.feedback = Some(TransitionFeedback {
         source_node_id: "gate".into(),
         source_execution_id: "opaque-id".into(),
-        outcome: "approved".into(),
+        outcome: Some("approved".into()),
         reason: None,
         artifacts: vec![],
     });
     let value = serde_json::to_value(build_task_packet(&project, input).unwrap()).unwrap();
     assert_eq!(value["feedback"]["reason"], serde_json::Value::Null);
+}
+
+#[test]
+fn feedback_outcome_accepts_old_string_null_and_missing_values() {
+    let json = r#"{"sourceNodeId":"review","sourceExecutionId":"task-2","outcome":"changes_requested","reason":null,"artifacts":[]}"#;
+    let feedback: TransitionFeedback = serde_json::from_str(json).unwrap();
+    assert_eq!(feedback.outcome.as_deref(), Some("changes_requested"));
+
+    for json in [
+        r#"{"sourceNodeId":"review","sourceExecutionId":"task-2","outcome":null,"reason":null,"artifacts":[]}"#,
+        r#"{"sourceNodeId":"review","sourceExecutionId":"task-2","reason":null,"artifacts":[]}"#,
+    ] {
+        let feedback: TransitionFeedback = serde_json::from_str(json).unwrap();
+        assert_eq!(feedback.outcome, None);
+    }
 }

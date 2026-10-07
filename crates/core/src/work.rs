@@ -113,7 +113,7 @@ pub enum WorkPacket {
 }
 
 const LEDGER_DUTY: &str = "Only the controller updates the supplied run ledger: record progress, received decisions, and descriptions of artifact changes. The ledger is informational; use Unelos for current work, completion, and transitions. Never use the ledger to derive destinations. Read existing declared outputs before updating them in place; preserve relevant content and do not recreate the run tree.";
-const OUTPUT_CONFIRMATION_DUTY: &str = "Before reporting future completion, explicitly confirm all parent outputs for the current Task ID through Unelos; unchanged reviewed outputs may be confirmed. Workers report produced or reviewed outputs to the controller. Workers never edit the ledger or authorize progression.";
+const OUTPUT_CONFIRMATION_DUTY: &str = "Before reporting completion, explicitly confirm all parent outputs for the current Task ID through Unelos; unchanged reviewed outputs may be confirmed. Workers report produced or reviewed outputs to the controller. Workers never edit the ledger or authorize progression.";
 
 pub fn build_work_packet(
     project: &LoadedProject,

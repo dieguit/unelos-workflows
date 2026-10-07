@@ -43,7 +43,7 @@ pub struct ArtifactReference {
 pub struct TransitionFeedback {
     pub source_node_id: String,
     pub source_execution_id: String,
-    pub outcome: String,
+    pub outcome: Option<String>,
     pub reason: Option<String>,
     pub artifacts: Vec<ArtifactReference>,
 }
