@@ -30,26 +30,39 @@ fn replace_fixture_text(text: &str, from: &str, to: &str) -> String {
 #[test]
 fn fixture_text_edits_work_with_crlf() {
     let fixtures = Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/project/.unelos");
-    let workflow = fs::read_to_string(fixtures.join("workflows/implement-feature.yaml")).unwrap();
-    let workflow = normalize_fixture_text(&workflow.replace('\n', "\r\n"));
-    let workflow = replace_fixture_text(&workflow, "    inputs: [plan.md]\n", "    inputs: []\n");
-    let workflow = replace_fixture_text(
-        &workflow,
-        "  plan:\n    task: create-plan\n    agent: planner\n    outputs: [plan.md]\n    next: approve-plan\n",
-        "",
+    let workflow = normalize_fixture_text(
+        &fs::read_to_string(fixtures.join("workflows/implement-feature.yaml")).unwrap(),
     );
-    let project = fs::read_to_string(fixtures.join("project.yaml")).unwrap();
-    let project = normalize_fixture_text(&project.replace('\n', "\r\n"));
-    let project = replace_fixture_text(
-        &project,
-        "agents:\n",
-        "agents:\n  \"../escape\":\n    instructions: unsafe\n",
-    );
+    let project =
+        normalize_fixture_text(&fs::read_to_string(fixtures.join("project.yaml")).unwrap());
 
-    assert!(workflow.contains("    inputs: []\n"));
-    assert!(!workflow.contains("inputs: [plan.md]"));
-    assert!(!workflow.contains("  plan:\n"));
-    assert!(project.contains("  \"../escape\":\n    instructions: unsafe\n"));
+    for (workflow, project) in [
+        (workflow.clone(), project.clone()),
+        (
+            workflow.replace('\n', "\r\n"),
+            project.replace('\n', "\r\n"),
+        ),
+    ] {
+        let workflow = normalize_fixture_text(&workflow);
+        let workflow =
+            replace_fixture_text(&workflow, "    inputs: [plan.md]\n", "    inputs: []\n");
+        let workflow = replace_fixture_text(
+            &workflow,
+            "  plan:\n    task: create-plan\n    agent: planner\n    outputs: [plan.md]\n    next: approve-plan\n",
+            "",
+        );
+        let project = normalize_fixture_text(&project);
+        let project = replace_fixture_text(
+            &project,
+            "agents:\n",
+            "agents:\n  \"../escape\":\n    instructions: unsafe\n",
+        );
+
+        assert!(workflow.contains("    inputs: []\n"));
+        assert!(!workflow.contains("inputs: [plan.md]"));
+        assert!(!workflow.contains("  plan:\n"));
+        assert!(project.contains("  \"../escape\":\n    instructions: unsafe\n"));
+    }
 }
 
 #[test]
