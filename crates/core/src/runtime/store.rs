@@ -81,6 +81,42 @@ impl RunStore {
         self.publish_with(state, prepare, atomic_write)
     }
 
+    pub(super) fn update(&self, state: &RunState) -> Result<(), RuntimeError> {
+        self.update_with(state, atomic_write)
+    }
+
+    fn update_with(
+        &self,
+        state: &RunState,
+        write: impl Fn(&Utf8Path, &[u8]) -> Result<(), RuntimeError>,
+    ) -> Result<(), RuntimeError> {
+        let active = self.active()?;
+        if state.name != active.name || state.run_id != active.run_id {
+            return Err(RuntimeError::InvalidState(
+                "run update does not match active run identity".into(),
+            ));
+        }
+        validate_state(state)?;
+        let run_path = self.root.join(".unelos/runs").join(&state.name);
+        validate_artifacts(state, &run_path)?;
+        let state_path = run_path.join("state.json");
+        reject_symlink(&state_path)?;
+        if !fs::metadata(&state_path)
+            .map_err(|source| path_error(&state_path, source))?
+            .is_file()
+        {
+            return Err(path_error(
+                &state_path,
+                io::Error::new(io::ErrorKind::InvalidInput, "state is not a regular file"),
+            ));
+        }
+        let bytes = serde_json::to_vec(state).map_err(|source| RuntimeError::Json {
+            path: state_path.clone(),
+            source,
+        })?;
+        write(&state_path, &bytes)
+    }
+
     fn publish_with(
         &self,
         state: &RunState,
@@ -138,7 +174,12 @@ impl Drop for RunStore {
     }
 }
 
-fn validate_state(state: &RunState) -> Result<(), RuntimeError> {
+pub(super) fn validate_state(state: &RunState) -> Result<(), RuntimeError> {
+    if !valid_run_name(&state.name) || state.name != state.run_id {
+        return Err(RuntimeError::InvalidState(
+            "run ID must match a valid run name".into(),
+        ));
+    }
     if state.next_execution_sequence == 0 {
         return Err(RuntimeError::InvalidState(
             "next execution sequence must be positive".into(),
@@ -169,10 +210,40 @@ fn validate_state(state: &RunState) -> Result<(), RuntimeError> {
             )));
         }
     }
+    fn validate_receipt(work: &CurrentWork) -> Result<(), RuntimeError> {
+        let record = match work {
+            CurrentWork::Task(record) | CurrentWork::Parallel(record) => record,
+            CurrentWork::HumanGate(record) => {
+                if record.confirmed_execution_id.is_some() {
+                    return Err(RuntimeError::InvalidState(
+                        "human-gate work cannot have output confirmation".into(),
+                    ));
+                }
+                return Ok(());
+            }
+            CurrentWork::Finished { .. } => return Ok(()),
+        };
+        if let Some(confirmed) = &record.confirmed_execution_id {
+            if confirmed != &record.execution_id {
+                return Err(RuntimeError::InvalidState(format!(
+                    "confirmation {confirmed:?} does not match execution {:?}",
+                    record.execution_id
+                )));
+            }
+        }
+        Ok(())
+    }
+    validate_receipt(&state.current)?;
+    for completed in &state.history {
+        validate_receipt(&completed.work)?;
+    }
     Ok(())
 }
 
-fn validate_artifacts(state: &RunState, run_path: &Utf8Path) -> Result<(), RuntimeError> {
+pub(super) fn validate_artifacts(
+    state: &RunState,
+    run_path: &Utf8Path,
+) -> Result<(), RuntimeError> {
     fn binding(
         reference: &crate::ArtifactReference,
         run_path: &Utf8Path,
@@ -468,6 +539,29 @@ mod tests {
     }
 
     #[test]
+    fn failed_update_writer_preserves_saved_state_and_active_pointer() {
+        let (_temp, root) = root();
+        let store = RunStore::open(&root).unwrap();
+        let original = state("update-run");
+        store.publish(&original, |_| Ok(())).unwrap();
+        let state_path = root.join(".unelos/runs/update-run/state.json");
+        let before = fs::read(&state_path).unwrap();
+        let pointer = fs::read(root.join(".unelos/active-run")).unwrap();
+        let mut changed = original.clone();
+        changed.request = "changed".into();
+        let error = store.update_with(&changed, |path, _| {
+            Err(path_error(
+                path,
+                io::Error::other("injected update failure"),
+            ))
+        });
+        assert!(error.is_err());
+        assert_eq!(fs::read(&state_path).unwrap(), before);
+        assert_eq!(fs::read(root.join(".unelos/active-run")).unwrap(), pointer);
+        assert_eq!(store.active().unwrap(), original);
+    }
+
+    #[test]
     fn atomic_write_does_not_publish_partial_data_on_writer_or_rename_failure() {
         let (_temp, root) = root();
         let target = root.join("target");
@@ -508,6 +602,7 @@ mod tests {
             outputs: vec![],
             worker_reports: vec![],
             feedback: None,
+            confirmed_execution_id: None,
         });
         fs::write(run.join("state.json"), serde_json::to_vec(&saved).unwrap()).unwrap();
         fs::write(runtime.join("active-run"), "bad-state").unwrap();

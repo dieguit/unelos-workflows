@@ -271,6 +271,10 @@ fn composes_deterministic_parallel_workers_with_explicit_paths_and_parent_identi
         "Never complete a blocked or partial parent",
         "Never use the ledger to derive destinations",
         "report completion through Unelos",
+        "explicitly confirm all parent outputs for the current Task ID",
+        "unchanged reviewed outputs may be confirmed",
+        "Workers report produced or reviewed outputs to the controller",
+        "Workers never edit the ledger or authorize progression",
     ] {
         assert!(instructions.contains(duty), "missing {duty}");
     }

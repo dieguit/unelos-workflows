@@ -210,3 +210,52 @@ as `../bad` and expect exit 1 without an active pointer. Change its workflow
 start to the input-free `done` end Node before starting; the run is finished,
 and a subsequent differently named `start` succeeds. Remove disposable copies
 when finished.
+
+## Manual QA: confirmed artifacts and same-path rework (T09)
+
+Linux/Bash, from the repository root. Run each command individually (do not use
+`set -e`): the expected failures are part of the check. Start from a fresh
+disposable copy, not the already-active T08 `$qa` project.
+
+```sh
+cargo build --locked -p unelos-core --example run_qa
+mkdir -p /tmp/opencode
+qa=$(mktemp -d /tmp/opencode/t09-qa.XXXXXX)
+cp -a examples/manual-project/. "$qa/"
+./target/debug/examples/run_qa start "$qa" implement-feature artifact-check "Change button color."
+./target/debug/examples/run_qa verify "$qa" task-1
+./target/debug/examples/run_qa confirm "$qa" task-1
+mkdir "$qa/.unelos/runs/artifact-check/plan/plan.md"
+./target/debug/examples/run_qa confirm "$qa" task-1
+rmdir "$qa/.unelos/runs/artifact-check/plan/plan.md"
+: > "$qa/.unelos/runs/artifact-check/plan/plan.md"
+./target/debug/examples/run_qa verify "$qa" task-1
+./target/debug/examples/run_qa confirm "$qa" task-1
+./target/debug/examples/run_qa verify "$qa" task-1
+./target/debug/examples/run_qa confirm "$qa" task-1
+./target/debug/examples/run_qa confirm "$qa" task-99
+./target/debug/examples/run_qa next "$qa"
+./target/debug/examples/run_qa bindings-demo "$qa"
+mv "$qa/.unelos/runs/artifact-check/plan/plan.md" "$qa/.unelos/runs/artifact-check/plan/plan.saved"
+./target/debug/examples/run_qa verify "$qa" task-1
+mv "$qa/.unelos/runs/artifact-check/plan/plan.saved" "$qa/.unelos/runs/artifact-check/plan/plan.md"
+./target/debug/examples/run_qa verify "$qa" task-1
+```
+
+Expected: first `verify` and `confirm` exit 1 because the plan report is
+missing. Confirming the directory also exits 1. Verification of the empty
+report exits 1 until confirmation; then confirmation, verification, and
+unchanged reconfirmation succeed. Stale `task-99` exits 1. `next` succeeds and
+still describes `plan`/`task-1`; it does not transition. `bindings-demo`
+requires that confirmed active plan, prints JSON with `sameOutputPath`,
+`newExecutionId`, `staleOutputRejected`, `feedbackPreserved`, and
+`persistedStateUnchanged` all `true`, and creates synthetic implementation and
+review reports only at the allocated paths. `verify` success serializes as
+JSON `null`. Renaming the confirmed report makes verify exit 1; restoring it
+makes verify succeed.
+
+Confirmation is trusted controller attestation, not filesystem or semantic
+proof. The `bindings-demo` fabricates completed history only in memory because
+real routing arrives in T10; it does not persist synthetic current/history.
+Production CLI has no runtime mutation commands yet. This manual QA does not
+prove actual end-to-end workflow progression.

@@ -154,6 +154,26 @@ fn process_probe() {
         }
         "status" => serde_json::to_value(unelos_core::status(root).unwrap()).unwrap(),
         "next" => serde_json::to_value(unelos_core::next(root).unwrap()).unwrap(),
+        "confirm" => match unelos_core::confirm_outputs(
+            root,
+            &std::env::var("UNELOS_RUNTIME_PROBE_NAME").unwrap(),
+        ) {
+            Ok(state) => serde_json::to_value(state).unwrap(),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        },
+        "verify" => match unelos_core::verify_outputs(
+            root,
+            &std::env::var("UNELOS_RUNTIME_PROBE_NAME").unwrap(),
+        ) {
+            Ok(()) => serde_json::to_value(unelos_core::status(root).unwrap()).unwrap(),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        },
         _ => panic!("unknown probe operation {operation}"),
     };
     println!("{RESULT_PREFIX}{value}");
@@ -182,6 +202,90 @@ fn separate_processes_recover_the_same_run_and_work_packet() {
     let output = packet["outputs"][0]["path"].as_str().unwrap();
     assert!(Utf8Path::new(output).ends_with("process-run/plan/plan.md"));
     assert_eq!(recovered["current"]["outputs"][0]["path"], output);
+    std::fs::write(output, "unchanged reviewed output").unwrap();
+    let confirmed = finish_probe(probe(&root, "confirm", "task-1", ""));
+    assert!(confirmed.0, "{}{}", confirmed.1, confirmed.2);
+    assert_eq!(
+        result(&confirmed.1)["current"]["confirmedExecutionId"],
+        "task-1"
+    );
+    let verified = finish_probe(probe(&root, "verify", "task-1", ""));
+    assert!(verified.0, "{}{}", verified.1, verified.2);
+    assert_eq!(
+        result(&verified.1)["current"]["confirmedExecutionId"],
+        "task-1"
+    );
+}
+
+#[test]
+fn confirmation_waits_for_the_project_lock_and_preserves_history() {
+    let (_temp, root) = project_copy();
+    let started = finish_probe(probe(&root, "start", "confirm-lock", "request"));
+    assert!(started.0, "{}{}", started.1, started.2);
+    let output = result(&started.1)["current"]["outputs"][0]["path"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    std::fs::write(output, "ready").unwrap();
+
+    let (tx, rx) = mpsc::channel();
+    let stdout = ChildGuard::new(probe(&root, "hold-lock", "", ""));
+    let mut stdout = stdout;
+    let reader = stdout.0.as_mut().unwrap().stdout.take().unwrap();
+    std::thread::spawn(move || {
+        let mut reader = BufReader::new(reader);
+        let mut ready = Some(tx);
+        loop {
+            let mut line = String::new();
+            match reader.read_line(&mut line) {
+                Ok(0) => {
+                    if let Some(tx) = ready.take() {
+                        let _ = tx.send(Ok(line));
+                    }
+                    return;
+                }
+                Ok(_) if line.contains(RESULT_PREFIX) => {
+                    if let Some(tx) = ready.take() {
+                        let _ = tx.send(Ok(line));
+                    }
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    if let Some(tx) = ready.take() {
+                        let _ = tx.send(Err(error));
+                    }
+                    return;
+                }
+            }
+        }
+    });
+    let (mut held, ready) = await_readiness(stdout, rx).unwrap();
+    assert_eq!(ready.trim(), format!("{RESULT_PREFIX}ready"));
+
+    let mut confirmation = ChildGuard::new(probe(&root, "confirm", "task-1", ""));
+    std::thread::sleep(Duration::from_millis(50));
+    assert!(confirmation
+        .0
+        .as_mut()
+        .unwrap()
+        .try_wait()
+        .unwrap()
+        .is_none());
+    drop(held.0.as_mut().unwrap().stdin.take());
+    let held_output = wait_with_timeout(held, Duration::from_secs(2)).unwrap();
+    assert!(
+        held_output.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&held_output.stdout),
+        String::from_utf8_lossy(&held_output.stderr)
+    );
+    let confirmation_output = wait_with_timeout(confirmation, Duration::from_secs(2)).unwrap();
+    assert!(confirmation_output.status.success());
+    let confirmed = finish_probe(probe(&root, "status", "", ""));
+    assert!(confirmed.0, "{}{}", confirmed.1, confirmed.2);
+    let confirmed = result(&confirmed.1);
+    assert_eq!(confirmed["history"], serde_json::json!([]));
+    assert_eq!(confirmed["current"]["confirmedExecutionId"], "task-1");
 }
 
 #[test]
