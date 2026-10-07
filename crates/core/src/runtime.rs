@@ -22,6 +22,8 @@ pub struct RunState {
     pub name: String,
     pub workflow_name: String,
     pub request: String,
+    #[serde(default)]
+    pub naming_pending: bool,
     pub current: CurrentWork,
     pub history: Vec<CompletedExecution>,
     pub next_execution_sequence: u64,
@@ -183,25 +185,45 @@ pub fn start(project: &LoadedProject, name: &str, request: &str) -> Result<RunSt
     }
     crate::validate_project(project)?;
     let store = store::RunStore::open(&project.project_root)?;
-    match store.active() {
-        Ok(state) if !state.is_finished() => {
-            return Err(RuntimeError::ActiveRun { name: state.name })
+    store.ensure_start_available(Some(name))?;
+    start_prepared(project, name, name, request, false, &store)
+}
+
+pub fn start_workflow(
+    root: &Utf8Path,
+    workflow: &str,
+    name: Option<&str>,
+) -> Result<RunState, RuntimeError> {
+    if let Some(name) = name {
+        if !valid_run_name(name) {
+            return Err(RuntimeError::InvalidName { name: name.into() });
         }
-        Ok(_) => {}
-        Err(RuntimeError::NoActiveRun { .. }) => {}
-        Err(error) => return Err(error),
     }
-    let run_dir = project.project_root.join(".unelos/runs").join(name);
-    if run_dir.exists() || std::fs::symlink_metadata(&run_dir).is_ok() {
-        return Err(RuntimeError::Collision { name: name.into() });
-    }
+    let project = crate::load_project(root, workflow)?;
+    crate::validate_project(&project)?;
+    let store = store::RunStore::open(&project.project_root)?;
+    store.ensure_start_available(name)?;
+    let run_id = store.allocate_run_id()?;
+    let run_name = name.unwrap_or(&run_id);
+    start_prepared(&project, &run_id, run_name, "", name.is_none(), &store)
+}
+
+fn start_prepared(
+    project: &LoadedProject,
+    run_id: &str,
+    name: &str,
+    request: &str,
+    naming_pending: bool,
+    store: &store::RunStore,
+) -> Result<RunState, RuntimeError> {
     let node_id = &project.workflow.start;
     check_component(node_id, "Node")?;
     let state = RunState {
-        run_id: name.into(),
+        run_id: run_id.into(),
         name: name.into(),
         workflow_name: project.workflow.name.clone(),
         request: request.into(),
+        naming_pending,
         current: CurrentWork::Finished {
             node_id: node_id.clone(),
         },
@@ -553,6 +575,7 @@ mod tests {
             name: "qa-run".into(),
             workflow_name: "implement-feature".into(),
             request: "Change color".into(),
+            naming_pending: false,
             current: CurrentWork::Finished {
                 node_id: "done".into(),
             },

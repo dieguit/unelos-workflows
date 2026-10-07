@@ -291,6 +291,7 @@ mod tests {
             name: name.into(),
             workflow_name: "implement-feature".into(),
             request: "demo".into(),
+            naming_pending: false,
             current: CurrentWork::Task(ExecutionRecord {
                 node_id: "implement".into(),
                 execution_id: "task-2".into(),
