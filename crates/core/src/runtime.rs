@@ -7,6 +7,7 @@ use crate::{
     WorkerReportBinding,
 };
 
+mod artifacts;
 mod store;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,6 +78,8 @@ pub struct ExecutionRecord {
     pub outputs: Vec<ArtifactReference>,
     pub worker_reports: Vec<WorkerReportBinding>,
     pub feedback: Option<TransitionFeedback>,
+    #[serde(default)]
+    pub confirmed_execution_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -187,10 +190,7 @@ pub fn start(project: &LoadedProject, name: &str, request: &str) -> Result<RunSt
     }
     let node_id = &project.workflow.start;
     check_component(node_id, "Node")?;
-    let node = project.workflow.nodes.get(node_id).ok_or_else(|| {
-        RuntimeError::InvalidState(format!("Workflow start Node {node_id:?} is missing"))
-    })?;
-    let mut state = RunState {
+    let state = RunState {
         run_id: name.into(),
         name: name.into(),
         workflow_name: project.workflow.name.clone(),
@@ -201,127 +201,98 @@ pub fn start(project: &LoadedProject, name: &str, request: &str) -> Result<RunSt
         history: vec![],
         next_execution_sequence: 1,
     };
-    let ledger_path = run_dir.join("ledger.md");
-    let node_dir = run_dir.join(node_id);
-    let (input, outputs) = match node {
-        NodeDefinition::Task(task) => {
-            reject_inputs(node_id, &task.inputs)?;
-            let outputs = allocate_outputs(&node_dir, &task.outputs)?;
-            let execution_id = state.allocate_execution_id(false)?;
-            state.current = CurrentWork::Task(ExecutionRecord {
-                node_id: node_id.clone(),
-                execution_id: execution_id.clone(),
-                inputs: vec![],
-                outputs: outputs.clone(),
-                worker_reports: vec![],
-                feedback: None,
-            });
-            (
-                WorkRuntimeInput::Task {
-                    input: task_input(&state, node_id, &execution_id, vec![], outputs.clone()),
-                    ledger_path,
-                },
-                outputs,
-            )
-        }
-        NodeDefinition::Parallel(parallel) => {
-            reject_inputs(node_id, &parallel.inputs)?;
-            let aggregate_outputs = allocate_outputs(&node_dir, &parallel.outputs)?;
-            let mut outputs = aggregate_outputs.clone();
-            let mut reports = Vec::new();
-            let mut counts = std::collections::BTreeMap::new();
-            for worker in &parallel.tasks {
-                *counts.entry(worker.agent.as_str()).or_insert(0usize) += 1;
-            }
-            for (index, worker) in parallel.tasks.iter().enumerate() {
-                check_component(&worker.agent, "Agent")?;
-                let dir = if counts[worker.agent.as_str()] > 1 {
-                    format!("{}-worker-{}", worker.agent, index + 1)
-                } else {
-                    worker.agent.clone()
-                };
-                check_component(&dir, "worker directory")?;
-                let report = ArtifactReference {
-                    name: "result.md".into(),
-                    path: node_dir.join(dir).join("result.md"),
-                };
-                reports.push(WorkerReportBinding {
-                    key: format!("worker-{}", index + 1),
-                    report: report.clone(),
-                });
-                outputs.push(report);
-            }
-            validate_paths(&outputs)?;
-            let execution_id = state.allocate_execution_id(false)?;
-            state.current = CurrentWork::Parallel(ExecutionRecord {
-                node_id: node_id.clone(),
-                execution_id: execution_id.clone(),
-                inputs: vec![],
-                outputs: aggregate_outputs.clone(),
-                worker_reports: reports.clone(),
-                feedback: None,
-            });
-            (
-                WorkRuntimeInput::Parallel {
-                    input: task_input(&state, node_id, &execution_id, vec![], aggregate_outputs),
-                    worker_reports: reports,
-                    ledger_path,
-                },
-                outputs,
-            )
-        }
-        NodeDefinition::HumanGate(gate) => {
-            reject_inputs(node_id, &gate.inputs)?;
-            let execution_id = state.allocate_execution_id(true)?;
-            state.current = CurrentWork::HumanGate(ExecutionRecord {
-                node_id: node_id.clone(),
-                execution_id: execution_id.clone(),
-                inputs: vec![],
-                outputs: vec![],
-                worker_reports: vec![],
-                feedback: None,
-            });
-            (
-                WorkRuntimeInput::HumanGate {
-                    run_id: name.into(),
-                    activation_id: execution_id,
-                    node_id: node_id.clone(),
-                    artifacts: vec![],
-                    ledger_path,
-                },
-                vec![],
-            )
-        }
-        NodeDefinition::End => (
-            WorkRuntimeInput::Finished {
-                run_id: name.into(),
-                node_id: node_id.clone(),
-                ledger_path,
-            },
-            vec![],
-        ),
-    };
-    crate::build_work_packet(project, input)?;
-    let dirs = output_directories(&node_dir, &outputs);
+    let state = artifacts::prepare_work(project, &state, node_id, None)?;
+    crate::build_work_packet(project, artifacts::runtime_input(&state, project)?)?;
     store.publish(&state, |run| {
-        if !outputs.is_empty() {
-            store::ensure_runtime_directory(&run.join(node_id))?;
-        }
-        for dir in dirs {
-            let relative = dir.strip_prefix(run.join(node_id)).unwrap_or(&dir);
-            let mut path = run.join(node_id);
-            for component in relative.components() {
-                path.push(component.as_str());
-                store::ensure_runtime_directory(&path)?;
-            }
-        }
-        Ok(())
+        artifacts::prepare_work_directories(&state, run)
     })?;
     Ok(state)
 }
 
+pub fn prepare_work(
+    project: &LoadedProject,
+    state: &RunState,
+    node_id: &str,
+    feedback: Option<TransitionFeedback>,
+) -> Result<RunState, RuntimeError> {
+    artifacts::prepare_work(project, state, node_id, feedback)
+}
+
 pub fn status(project_root: &Utf8Path) -> Result<RunState, RuntimeError> {
     store::RunStore::open(project_root)?.active()
+}
+
+pub fn confirm_outputs(
+    project_root: &Utf8Path,
+    expected_execution_id: &str,
+) -> Result<RunState, RuntimeError> {
+    let store = store::RunStore::open(project_root)?;
+    let mut state = store.active()?;
+    state.expect_execution(expected_execution_id)?;
+    let record = match &mut state.current {
+        CurrentWork::Task(record) | CurrentWork::Parallel(record) => record,
+        _ => {
+            return Err(RuntimeError::InvalidState(
+                "output confirmation requires current task work".into(),
+            ))
+        }
+    };
+    for output in &record.outputs {
+        artifacts::require_regular_file(&output.path).map_err(|cause| {
+            RuntimeError::InvalidState(format!(
+                "declared output {:?} at {} is unavailable: {cause}",
+                output.name, output.path
+            ))
+        })?;
+    }
+    record.confirmed_execution_id = Some(expected_execution_id.into());
+    store.update(&state)?;
+    Ok(state)
+}
+
+pub fn verify_outputs(
+    project_root: &Utf8Path,
+    expected_execution_id: &str,
+) -> Result<(), RuntimeError> {
+    let store = store::RunStore::open(project_root)?;
+    let state = store.active()?;
+    verify_work_outputs(project_root, &state, expected_execution_id)
+}
+
+/// Verifies caller-supplied prepared state, not a persisted progression operation.
+pub fn verify_work_outputs(
+    project_root: &Utf8Path,
+    state: &RunState,
+    expected_execution_id: &str,
+) -> Result<(), RuntimeError> {
+    let root = crate::project::absolute_root(project_root)
+        .map_err(|source| path_error(project_root, source))?;
+    let run_path = root.join(".unelos/runs").join(&state.name);
+    store::validate_state(state)?;
+    store::validate_artifacts(state, &run_path)?;
+    state.expect_execution(expected_execution_id)?;
+    let record = match &state.current {
+        CurrentWork::Task(record) | CurrentWork::Parallel(record) => record,
+        _ => {
+            return Err(RuntimeError::InvalidState(
+                "output verification requires current task work".into(),
+            ))
+        }
+    };
+    if record.confirmed_execution_id.as_deref() != Some(expected_execution_id) {
+        return Err(RuntimeError::InvalidState(format!(
+            "outputs for execution {expected_execution_id:?} have not been confirmed"
+        )));
+    }
+    for output in &record.outputs {
+        artifacts::require_regular_file(&output.path).map_err(|cause| {
+            RuntimeError::InvalidState(format!(
+                "declared output {:?} at {} is unavailable: {cause}",
+                output.name, output.path
+            ))
+        })?;
+    }
+    Ok(())
 }
 
 pub fn next(project_root: &Utf8Path) -> Result<WorkPacket, RuntimeError> {
@@ -346,6 +317,7 @@ pub fn next(project_root: &Utf8Path) -> Result<WorkPacket, RuntimeError> {
             return Ok(crate::build_work_packet(&project, input)?);
         }
     };
+    artifacts::ensure_inputs_are_files(record)?;
     let node = project
         .workflow
         .nodes
@@ -357,17 +329,29 @@ pub fn next(project_root: &Utf8Path) -> Result<WorkPacket, RuntimeError> {
         .join(&state.name)
         .join("ledger.md");
     let input = match (&state.current, node) {
-        (CurrentWork::Task(_), NodeDefinition::Task(_)) => WorkRuntimeInput::Task {
-            input: task_input(
-                &state,
-                &record.node_id,
-                &record.execution_id,
-                record.inputs.clone(),
-                record.outputs.clone(),
-            ),
-            ledger_path,
-        },
+        (CurrentWork::Task(_), NodeDefinition::Task(task)) => {
+            if !same_input_names(&task.inputs, &record.inputs) {
+                return Err(mismatch(&record.node_id, "task input declarations changed"));
+            }
+            WorkRuntimeInput::Task {
+                input: task_input(
+                    &state,
+                    &record.node_id,
+                    &record.execution_id,
+                    record.inputs.clone(),
+                    record.outputs.clone(),
+                    record.feedback.clone(),
+                ),
+                ledger_path,
+            }
+        }
         (CurrentWork::Parallel(_), NodeDefinition::Parallel(parallel)) => {
+            if !same_input_names(&parallel.inputs, &record.inputs) {
+                return Err(mismatch(
+                    &record.node_id,
+                    "parallel input declarations changed",
+                ));
+            }
             if record.worker_reports.len() != parallel.tasks.len() {
                 return Err(mismatch(&record.node_id, "parallel worker count changed"));
             }
@@ -391,18 +375,24 @@ pub fn next(project_root: &Utf8Path) -> Result<WorkPacket, RuntimeError> {
                     &record.execution_id,
                     record.inputs.clone(),
                     record.outputs.clone(),
+                    record.feedback.clone(),
                 ),
                 worker_reports: reports,
                 ledger_path,
             }
         }
-        (CurrentWork::HumanGate(_), NodeDefinition::HumanGate(_)) => WorkRuntimeInput::HumanGate {
-            run_id: state.run_id,
-            activation_id: record.execution_id.clone(),
-            node_id: record.node_id.clone(),
-            artifacts: record.inputs.clone(),
-            ledger_path,
-        },
+        (CurrentWork::HumanGate(_), NodeDefinition::HumanGate(gate)) => {
+            if !same_input_names(&gate.inputs, &record.inputs) {
+                return Err(mismatch(&record.node_id, "gate input declarations changed"));
+            }
+            WorkRuntimeInput::HumanGate {
+                run_id: state.run_id,
+                activation_id: record.execution_id.clone(),
+                node_id: record.node_id.clone(),
+                artifacts: record.inputs.clone(),
+                ledger_path,
+            }
+        }
         _ => return Err(mismatch(&record.node_id, "current Node kind changed")),
     };
     let packet = crate::build_work_packet(&project, input)?;
@@ -430,14 +420,12 @@ fn mismatch(node: &str, cause: &str) -> RuntimeError {
         "saved work for Node {node:?} is incompatible with live Workflow: {cause}"
     ))
 }
-fn reject_inputs(node: &str, inputs: &[String]) -> Result<(), RuntimeError> {
-    if inputs.is_empty() {
-        Ok(())
-    } else {
-        Err(RuntimeError::InvalidState(format!(
-            "start Node {node:?} declares inputs; T09 input binding is not available"
-        )))
-    }
+fn same_input_names(names: &[String], bindings: &[ArtifactReference]) -> bool {
+    names.len() == bindings.len()
+        && names
+            .iter()
+            .zip(bindings)
+            .all(|(name, binding)| name == &binding.name)
 }
 fn task_input(
     state: &RunState,
@@ -445,6 +433,7 @@ fn task_input(
     task_id: &str,
     inputs: Vec<ArtifactReference>,
     outputs: Vec<ArtifactReference>,
+    feedback: Option<TransitionFeedback>,
 ) -> TaskRuntimeInput {
     TaskRuntimeInput {
         run_id: state.run_id.clone(),
@@ -453,7 +442,7 @@ fn task_input(
         request: state.request.clone(),
         inputs,
         outputs,
-        feedback: None,
+        feedback,
     }
 }
 fn allocate_outputs(
@@ -584,6 +573,7 @@ mod tests {
             outputs: vec![],
             worker_reports: vec![],
             feedback: None,
+            confirmed_execution_id: None,
         });
         assert!(state.expect_execution("task-2").is_ok());
         assert!(state.expect_execution("task-1").is_err());
@@ -611,6 +601,7 @@ mod tests {
             outputs: vec![],
             worker_reports: vec![],
             feedback: None,
+            confirmed_execution_id: None,
         });
         assert!(!state.is_finished());
         let max_name = "a".repeat(64);

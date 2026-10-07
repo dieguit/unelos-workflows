@@ -1,7 +1,110 @@
 use camino::Utf8Path;
 use serde::Serialize;
-use std::process;
-use unelos_core::{load_project, next, start, status, RuntimeError};
+use std::{fs, process};
+use unelos_core::{
+    confirm_outputs, load_project, next, prepare_work, start, status, verify_outputs,
+    verify_work_outputs, CompletedExecution, CurrentWork, RuntimeError, TransitionFeedback,
+};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assert_fs::{fixture::PathCopy, TempDir};
+    use std::fs;
+    use unelos_core::{confirm_outputs, CurrentWork};
+
+    #[test]
+    fn bindings_demo_reuses_report_path_without_reusing_confirmation_or_state() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8Path::from_path(temp.path()).unwrap().to_owned();
+        temp.copy_from(
+            Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/manual-project"),
+            &["**/*"],
+        )
+        .unwrap();
+        let project = load_project(&root, "implement-feature").unwrap();
+        let state = start(&project, "bindings-demo", "Change button color.").unwrap();
+        let CurrentWork::Task(plan) = &state.current else {
+            panic!("expected plan")
+        };
+        fs::write(&plan.outputs[0].path, "confirmed plan").unwrap();
+        confirm_outputs(&root, "task-1").unwrap();
+        let state_path = root.join(".unelos/runs/bindings-demo/state.json");
+        let before = fs::read(&state_path).unwrap();
+
+        let result = bindings_demo(&root).unwrap();
+
+        assert_eq!(fs::read(state_path).unwrap(), before);
+        assert_eq!(result["sameOutputPath"], true);
+        assert_eq!(result["newExecutionId"], true);
+        assert_eq!(result["staleOutputRejected"], true);
+        assert_eq!(result["feedbackPreserved"], true);
+        assert_eq!(result["persistedStateUnchanged"], true);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn candidate_writer_rejects_symlinked_run_directory_without_writing_outside_root() {
+        use std::os::unix::fs::symlink;
+
+        let temp = TempDir::new().unwrap();
+        let project = temp.path().join("project");
+        fs::create_dir(&project).unwrap();
+        let root = Utf8Path::from_path(&project).unwrap().to_owned();
+        let outside = Utf8Path::from_path(&temp.path().join("outside"))
+            .unwrap()
+            .to_owned();
+        fs::create_dir_all(&outside).unwrap();
+        let runs = root.join(".unelos/runs");
+        fs::create_dir_all(&runs).unwrap();
+        symlink(&outside, runs.join("demo-run")).unwrap();
+        let candidate = candidate_state(
+            "demo-run",
+            root.join(".unelos/runs/demo-run/implement/report.md"),
+        );
+
+        assert!(write_candidate_outputs(&root, &candidate).is_err());
+        assert!(!outside.join("implement/report.md").exists());
+    }
+
+    #[test]
+    fn candidate_writer_rejects_non_directory_run_root() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8Path::from_path(temp.path()).unwrap().to_owned();
+        let run_dir = root.join(".unelos/runs/demo-run");
+        fs::create_dir_all(run_dir.parent().unwrap()).unwrap();
+        fs::write(&run_dir, "leave unchanged").unwrap();
+        let candidate = candidate_state("demo-run", run_dir.join("implement/report.md"));
+
+        assert!(write_candidate_outputs(&root, &candidate).is_err());
+        assert_eq!(fs::read(&run_dir).unwrap(), b"leave unchanged");
+    }
+
+    fn candidate_state(name: &str, output_path: camino::Utf8PathBuf) -> unelos_core::RunState {
+        use unelos_core::{ArtifactReference, ExecutionRecord, RunState};
+
+        RunState {
+            run_id: name.into(),
+            name: name.into(),
+            workflow_name: "implement-feature".into(),
+            request: "demo".into(),
+            current: CurrentWork::Task(ExecutionRecord {
+                node_id: "implement".into(),
+                execution_id: "task-2".into(),
+                inputs: vec![],
+                outputs: vec![ArtifactReference {
+                    name: "implementation-report.md".into(),
+                    path: output_path,
+                }],
+                worker_reports: vec![],
+                feedback: None,
+                confirmed_execution_id: None,
+            }),
+            history: vec![],
+            next_execution_sequence: 3,
+        }
+    }
+}
 
 fn main() {
     let args: Vec<_> = std::env::args().skip(1).collect();
@@ -12,9 +115,16 @@ fn main() {
         })(),
         [command, project] if command == "status" => json(status(Utf8Path::new(project))),
         [command, project] if command == "next" => json(next(Utf8Path::new(project))),
+        [command, project, expected] if command == "confirm" => {
+            json(confirm_outputs(Utf8Path::new(project), expected))
+        }
+        [command, project, expected] if command == "verify" => {
+            json(verify_outputs(Utf8Path::new(project), expected))
+        }
+        [command, project] if command == "bindings-demo" => bindings_demo(Utf8Path::new(project)),
         _ => {
             eprintln!(
-                "usage:\n  run_qa start PROJECT WORKFLOW NAME REQUEST\n  run_qa status PROJECT\n  run_qa next PROJECT"
+                "usage:\n  run_qa start PROJECT WORKFLOW NAME REQUEST\n  run_qa status PROJECT\n  run_qa next PROJECT\n  run_qa confirm PROJECT EXECUTION_ID\n  run_qa verify PROJECT EXECUTION_ID\n  run_qa bindings-demo PROJECT"
             );
             process::exit(2);
         }
@@ -39,4 +149,167 @@ fn json<T: Serialize>(
     result: Result<T, RuntimeError>,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     Ok(serde_json::to_value(result?)?)
+}
+
+fn bindings_demo(root: &Utf8Path) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let active = status(root)?;
+    let CurrentWork::Task(plan) = &active.current else {
+        return Err("bindings-demo requires current plan task work".into());
+    };
+    if plan.node_id != "plan" || active.workflow_name != "implement-feature" {
+        return Err("bindings-demo requires the active implement-feature plan".into());
+    }
+    verify_outputs(root, &plan.execution_id)?;
+    let state_path = root
+        .join(".unelos/runs")
+        .join(&active.name)
+        .join("state.json");
+    let persisted_before = fs::read(&state_path)?;
+    let project = load_project(root, "implement-feature")?;
+
+    let mut synthetic = active.clone();
+    synthetic.history.push(CompletedExecution {
+        work: synthetic.current.clone(),
+        outcome: None,
+        reason: None,
+    });
+    let implementation = prepare_work(&project, &synthetic, "implement", None)?;
+    write_candidate_outputs(root, &implementation)?;
+    let implementation_id = current_execution_id(&implementation)?;
+    let implementation_path = current_output_path(&implementation)?;
+
+    synthetic = implementation;
+    synthetic.history.push(CompletedExecution {
+        work: synthetic.current.clone(),
+        outcome: None,
+        reason: None,
+    });
+    let review = prepare_work(&project, &synthetic, "review", None)?;
+    write_candidate_outputs(root, &review)?;
+    let review_id = current_execution_id(&review)?;
+    let feedback = TransitionFeedback {
+        source_node_id: "review".into(),
+        source_execution_id: review_id,
+        outcome: "changes_requested".into(),
+        reason: Some("Demonstration correction".into()),
+        artifacts: current_outputs(&review)?,
+    };
+    synthetic = review;
+    synthetic.history.push(CompletedExecution {
+        work: synthetic.current.clone(),
+        outcome: Some("changes_requested".into()),
+        reason: feedback.reason.clone(),
+    });
+    let correction = prepare_work(&project, &synthetic, "implement", Some(feedback.clone()))?;
+    let correction_id = current_execution_id(&correction)?;
+    let correction_path = current_output_path(&correction)?;
+    let CurrentWork::Task(correction_record) = &correction.current else {
+        return Err("expected correction task".into());
+    };
+    if correction_record.confirmed_execution_id.is_some() {
+        return Err("re-entry unexpectedly retained output confirmation".into());
+    }
+    write_candidate_outputs(root, &correction)?;
+    let stale_output_rejected = verify_work_outputs(root, &correction, &implementation_id).is_err();
+    let feedback_preserved = correction_record.feedback.as_ref() == Some(&feedback);
+    let state_unchanged = fs::read(&state_path)? == persisted_before;
+    if implementation_path != correction_path
+        || implementation_id == correction_id
+        || !stale_output_rejected
+        || !feedback_preserved
+        || !state_unchanged
+    {
+        return Err("bindings-demo assertion failed".into());
+    }
+    Ok(serde_json::json!({
+        "sameOutputPath": implementation_path == correction_path,
+        "newExecutionId": implementation_id != correction_id,
+        "staleOutputRejected": stale_output_rejected,
+        "feedbackPreserved": feedback_preserved,
+        "persistedStateUnchanged": state_unchanged,
+    }))
+}
+
+fn current_execution_id(state: &unelos_core::RunState) -> Result<String, &'static str> {
+    match &state.current {
+        CurrentWork::Task(record) | CurrentWork::Parallel(record) => {
+            Ok(record.execution_id.clone())
+        }
+        _ => Err("expected task work"),
+    }
+}
+
+fn current_outputs(
+    state: &unelos_core::RunState,
+) -> Result<Vec<unelos_core::ArtifactReference>, &'static str> {
+    match &state.current {
+        CurrentWork::Task(record) | CurrentWork::Parallel(record) => Ok(record.outputs.clone()),
+        _ => Err("expected task work"),
+    }
+}
+
+fn current_output_path(state: &unelos_core::RunState) -> Result<camino::Utf8PathBuf, &'static str> {
+    current_outputs(state)?
+        .into_iter()
+        .next()
+        .map(|output| output.path)
+        .ok_or("expected declared output")
+}
+
+fn write_candidate_outputs(
+    root: &Utf8Path,
+    state: &unelos_core::RunState,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let run_dir = root.join(".unelos/runs").join(&state.name);
+    let metadata = fs::symlink_metadata(&run_dir)?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err(format!("unsafe demonstration run directory: {run_dir}").into());
+    }
+    let outputs = current_outputs(state)?;
+    for output in &outputs {
+        if !output.path.starts_with(&run_dir) || output.path == run_dir {
+            return Err(format!("unsafe demonstration output path: {}", output.path).into());
+        }
+        let relative = output.path.strip_prefix(&run_dir)?;
+        if relative
+            .components()
+            .any(|component| !matches!(component, camino::Utf8Component::Normal(_)))
+        {
+            return Err(format!("unsafe demonstration output path: {}", output.path).into());
+        }
+        let mut directory = run_dir.clone();
+        for component in relative.parent().unwrap().components() {
+            directory.push(component);
+            match fs::symlink_metadata(&directory) {
+                Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+                Ok(_) => return Err(format!("unsafe demonstration directory: {directory}").into()),
+                Err(error) => return Err(error.into()),
+            }
+        }
+        if let Ok(metadata) = fs::symlink_metadata(&output.path) {
+            if !metadata.is_file() || metadata.file_type().is_symlink() {
+                return Err(format!("unsafe demonstration output file: {}", output.path).into());
+            }
+        }
+    }
+    for output in &outputs {
+        let mut directory = run_dir.clone();
+        for component in output
+            .path
+            .strip_prefix(&run_dir)?
+            .parent()
+            .unwrap()
+            .components()
+        {
+            directory.push(component);
+            if !directory.exists() {
+                fs::create_dir(&directory)?;
+            }
+        }
+    }
+    for output in outputs {
+        fs::write(output.path, format!("Synthetic {} report\n", state.name))?;
+    }
+    Ok(())
 }
