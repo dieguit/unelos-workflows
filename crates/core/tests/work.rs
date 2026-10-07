@@ -272,10 +272,12 @@ fn composes_deterministic_parallel_workers_with_explicit_paths_and_parent_identi
         "Never complete a blocked or partial parent",
         "Never use the ledger to derive destinations",
         "report completion through Unelos",
-        "explicitly confirm all parent outputs for the current Task ID",
+        "complete NODE",
         "unchanged reviewed outputs may be confirmed",
         "Workers report produced or reviewed outputs to the controller",
         "Workers never edit the ledger or authorize progression",
+        "Carry relevant conversation context",
+        "Read status for namingPending",
     ] {
         assert!(instructions.contains(duty), "missing {duty}");
     }
@@ -515,6 +517,8 @@ fn composes_task_gate_and_finished_variants_with_controller_contracts() {
         "Require a nonempty rejection reason",
         "Record the decision through Unelos",
         "ledger notes do not authorize progression",
+        "Carry relevant conversation context",
+        "Read status for namingPending",
     ] {
         assert!(gate_instructions.contains(duty), "missing {duty}");
     }
@@ -582,6 +586,26 @@ fn composes_task_gate_and_finished_variants_with_controller_contracts() {
         .as_str()
         .unwrap()
         .contains("Read existing declared outputs"));
+    for duty in [
+        "Carry relevant conversation context",
+        "Read status for namingPending",
+        "complete NODE",
+    ] {
+        assert!(task_json["controllerInstructions"]
+            .as_str()
+            .unwrap()
+            .contains(duty));
+    }
+    for forbidden in [
+        "--execution",
+        "separate confirmation",
+        "confirm all parent outputs",
+    ] {
+        assert!(!task_json["controllerInstructions"]
+            .as_str()
+            .unwrap()
+            .contains(forbidden));
+    }
     assert_eq!(
         serde_json::to_value(inspect_node(&project, "done").unwrap()).unwrap()["kind"],
         "end"

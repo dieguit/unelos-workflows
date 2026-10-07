@@ -30,7 +30,17 @@ impl RunStore {
             .map_err(|source| path_error(&lock_path, source))?;
         lock.lock()
             .map_err(|source| path_error(&lock_path, source))?;
-        Ok(Self { root, lock })
+        let store = Self { root, lock };
+        store.recover_rename()?;
+        Ok(store)
+    }
+
+    pub(super) fn root(&self) -> &Utf8Path {
+        &self.root
+    }
+
+    pub(super) fn recover_rename(&self) -> Result<(), RuntimeError> {
+        super::rename::recover(self)
     }
 
     pub(super) fn active(&self) -> Result<RunState, RuntimeError> {
@@ -64,13 +74,122 @@ impl RunStore {
             })?;
         validate_state(&state)?;
         validate_artifacts(&state, &run_path)?;
-        if state.name != name || state.run_id != name {
+        if state.name != name {
             return Err(RuntimeError::InvalidState(format!(
-                "active pointer {name:?} does not match state name/run ID {:?}/{:?}",
-                state.name, state.run_id
+                "active pointer {name:?} does not match state name {:?}",
+                state.name
             )));
         }
         Ok(state)
+    }
+
+    pub(super) fn ensure_start_available(&self, name: Option<&str>) -> Result<(), RuntimeError> {
+        match self.active() {
+            Ok(state) if !state.is_finished() => {
+                return Err(RuntimeError::ActiveRun { name: state.name })
+            }
+            Ok(_) => {}
+            Err(RuntimeError::NoActiveRun { .. }) => {}
+            Err(error) => return Err(error),
+        }
+        if let Some(name) = name {
+            let run_dir = self.root.join(".unelos/runs").join(name);
+            if fs::symlink_metadata(&run_dir).is_ok() {
+                return Err(RuntimeError::Collision { name: name.into() });
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn allocate_run_id(&self) -> Result<String, RuntimeError> {
+        let runtime = self.root.join(".unelos");
+        let counter = runtime.join("run-sequence");
+        reject_symlink(&counter)?;
+        let bytes = match fs::read(&counter) {
+            Ok(bytes) => Some(bytes),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+            Err(source) => return Err(path_error(&counter, source)),
+        };
+        let mut sequence = if let Some(bytes) = bytes {
+            let text = std::str::from_utf8(&bytes)
+                .map_err(|_| RuntimeError::InvalidState("malformed run ID sequence".into()))?;
+            let number = text
+                .parse::<u64>()
+                .map_err(|_| RuntimeError::InvalidState("malformed run ID sequence".into()))?;
+            if number.to_string() != text {
+                return Err(RuntimeError::InvalidState(
+                    "malformed run ID sequence".into(),
+                ));
+            }
+            number
+        } else {
+            0
+        };
+
+        let runs = runtime.join("runs");
+        ensure_directory(&runs)?;
+        let mut saved_id_max = 0;
+        for entry in fs::read_dir(&runs).map_err(|source| path_error(&runs, source))? {
+            let entry = entry.map_err(|source| path_error(&runs, source))?;
+            let path = Utf8PathBuf::from_path_buf(entry.path()).map_err(|_| {
+                path_error(
+                    &runs,
+                    io::Error::new(io::ErrorKind::InvalidData, "run path is not UTF-8"),
+                )
+            })?;
+            let kind = entry
+                .file_type()
+                .map_err(|source| path_error(&path, source))?;
+            if kind.is_symlink() {
+                return Err(path_error(
+                    &path,
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "symlinked runtime path is not allowed",
+                    ),
+                ));
+            }
+            if !kind.is_dir() {
+                continue;
+            }
+            let state_path = path.join("state.json");
+            reject_symlink(&state_path)?;
+            let saved = match fs::read(&state_path) {
+                Ok(bytes) => Some(serde_json::from_slice::<RunState>(&bytes).map_err(
+                    |source| RuntimeError::Json {
+                        path: state_path.clone(),
+                        source,
+                    },
+                )?),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+                Err(source) => return Err(path_error(&state_path, source)),
+            };
+            if let Some(saved) = saved {
+                validate_state(&saved)?;
+                if let Some(id) = numeric_run_id(&saved.run_id) {
+                    saved_id_max = saved_id_max.max(id);
+                }
+            }
+        }
+        sequence = sequence.max(saved_id_max);
+
+        loop {
+            sequence = sequence
+                .checked_add(1)
+                .ok_or_else(|| RuntimeError::InvalidState("run ID sequence overflow".into()))?;
+            let id = format!("r-{sequence:06}");
+            let destination = runs.join(&id);
+            let occupied = match fs::symlink_metadata(&destination) {
+                Ok(_) => true,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+                Err(source) => return Err(path_error(&destination, source)),
+            };
+            if occupied {
+                continue;
+            }
+            atomic_write(&counter, sequence.to_string().as_bytes())?;
+            return Ok(id);
+        }
     }
 
     pub(super) fn publish(
@@ -123,16 +242,6 @@ impl RunStore {
         prepare: impl FnOnce(&Utf8Path) -> Result<(), RuntimeError>,
         write: impl Fn(&Utf8Path, &[u8]) -> Result<(), RuntimeError>,
     ) -> Result<(), RuntimeError> {
-        if !valid_run_name(&state.name) {
-            return Err(RuntimeError::InvalidName {
-                name: state.name.clone(),
-            });
-        }
-        if state.run_id != state.name {
-            return Err(RuntimeError::InvalidState(
-                "run ID must match run name".into(),
-            ));
-        }
         validate_state(state)?;
         let runtime = self.root.join(".unelos");
         ensure_directory(&runtime)?;
@@ -175,10 +284,8 @@ impl Drop for RunStore {
 }
 
 pub(super) fn validate_state(state: &RunState) -> Result<(), RuntimeError> {
-    if !valid_run_name(&state.name) || state.name != state.run_id {
-        return Err(RuntimeError::InvalidState(
-            "run ID must match a valid run name".into(),
-        ));
+    if !valid_run_name(&state.name) || !valid_run_name(&state.run_id) {
+        return Err(RuntimeError::InvalidState("invalid run ID or name".into()));
     }
     if state.next_execution_sequence == 0 {
         return Err(RuntimeError::InvalidState(
@@ -238,6 +345,15 @@ pub(super) fn validate_state(state: &RunState) -> Result<(), RuntimeError> {
         validate_receipt(&completed.work)?;
     }
     Ok(())
+}
+
+fn numeric_run_id(run_id: &str) -> Option<u64> {
+    let digits = run_id.strip_prefix("r-")?;
+    if digits.is_empty() || !digits.bytes().all(|digit| digit.is_ascii_digit()) {
+        return None;
+    }
+    let number = digits.parse::<u64>().ok()?;
+    (number > 0).then_some(number)
 }
 
 pub(super) fn validate_artifacts(
@@ -356,7 +472,7 @@ pub(super) fn validate_artifacts(
     Ok(())
 }
 
-fn reject_symlink(path: &Utf8Path) -> Result<(), RuntimeError> {
+pub(super) fn reject_symlink(path: &Utf8Path) -> Result<(), RuntimeError> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => Err(path_error(
             path,
@@ -407,7 +523,7 @@ fn check_directory(path: &Utf8Path) -> Result<(), RuntimeError> {
     }
 }
 
-fn atomic_write(target: &Utf8Path, bytes: &[u8]) -> Result<(), RuntimeError> {
+pub(super) fn atomic_write(target: &Utf8Path, bytes: &[u8]) -> Result<(), RuntimeError> {
     atomic_write_with(target, |file| file.write_all(bytes))
 }
 
@@ -465,6 +581,7 @@ mod tests {
             name: name.into(),
             workflow_name: "flow".into(),
             request: "request".into(),
+            naming_pending: false,
             current: CurrentWork::Finished {
                 node_id: "done".into(),
             },
@@ -598,16 +715,22 @@ mod tests {
             _ => unreachable!(),
         };
         fs::write(&record.outputs[0].path, "plan").unwrap();
-        crate::confirm_outputs(&project_root, "task-1").unwrap();
         let store = RunStore::open(&project_root).unwrap();
         let active = store.active().unwrap();
         let before =
             fs::read(project_root.join(".unelos/runs/atomic-completion/state.json")).unwrap();
         let pointer = fs::read(project_root.join(".unelos/active-run")).unwrap();
         let project = crate::load_project(&project_root, "implement-feature").unwrap();
-        let candidate =
-            super::super::completion::prepare_completion(&project, &active, "task-1", None, None)
-                .unwrap();
+        let mut confirmed = active.clone();
+        if let CurrentWork::Task(record) | CurrentWork::Parallel(record) = &mut confirmed.current {
+            record.confirmed_execution_id = Some(record.execution_id.clone());
+        } else {
+            unreachable!();
+        }
+        let candidate = super::super::completion::prepare_completion(
+            &project, &confirmed, "task-1", None, None,
+        )
+        .unwrap();
         let error = store.update_with(&candidate, |path, _| {
             Err(path_error(
                 path,
@@ -624,6 +747,10 @@ mod tests {
             pointer
         );
         assert_eq!(store.active().unwrap(), active);
+        assert_eq!(
+            fs::read(project_root.join(".unelos/runs/atomic-completion/state.json")).unwrap(),
+            before
+        );
     }
 
     #[test]
