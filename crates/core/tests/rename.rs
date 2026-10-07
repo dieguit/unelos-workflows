@@ -146,6 +146,25 @@ fn legacy_state_without_naming_metadata_can_be_renamed() {
 }
 
 #[test]
+fn renamed_finished_run_id_is_not_reused_after_sequence_reset() {
+    let (_temp, root) = project_copy();
+    fs::write(
+        root.join(".unelos/workflows/implement-feature.yaml"),
+        "name: implement-feature\nstart: done\nnodes:\n  done:\n    type: end\n",
+    )
+    .unwrap();
+
+    let first = start_workflow(&root, "implement-feature", None).unwrap();
+    assert!(matches!(first.current, CurrentWork::Finished { .. }));
+    rename_run(&root, &first.run_id, "renamed-finished-run").unwrap();
+    fs::remove_file(root.join(".unelos/run-sequence")).unwrap();
+
+    let second = start_workflow(&root, "implement-feature", None).unwrap();
+    assert!(matches!(second.current, CurrentWork::Finished { .. }));
+    assert_ne!(second.run_id, first.run_id);
+}
+
+#[test]
 fn rename_moves_reports_preserves_id_and_refreshes_packet_paths() {
     let (_temp, root) = project_copy();
     let started = start_workflow(&root, "implement-feature", None).unwrap();
