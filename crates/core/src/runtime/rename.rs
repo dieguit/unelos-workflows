@@ -84,7 +84,7 @@ fn rename_with_hook(
     if exists(&intent_path)? {
         return Err(recovery_error(&intent_path, "rename intent already exists"));
     }
-    validate_state_at(&original, &paths.old)?;
+    validate_state_at(original, &paths.old)?;
     let intent = RenameIntent {
         version: 1,
         old_name: original.name.clone(),
