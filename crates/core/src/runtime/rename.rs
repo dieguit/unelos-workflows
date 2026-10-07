@@ -260,6 +260,7 @@ fn rebase_reference(
 
 fn validate_state_at(state: &RunState, directory: &Utf8Path) -> Result<(), RuntimeError> {
     store::validate_state(state)?;
+    store::reject_symlink(&directory.join("ledger.md"))?;
     store::validate_artifacts(state, directory)
 }
 
@@ -466,5 +467,95 @@ mod tests {
             assert!(crate::status(&root).is_err());
             assert!(intent_path.exists());
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn recovery_rejects_ledger_symlink_without_finalizing_or_mutating_data() {
+        use std::os::unix::fs::symlink;
+
+        for stop in [RenameStage::IntentWritten, RenameStage::DirectoryMoved] {
+            let (_temp, root) = project();
+            let original = crate::start_workflow(&root, "implement-feature", None).unwrap();
+            let old = root.join(".unelos/runs").join(&original.name);
+            let new = root.join(".unelos/runs/recovered");
+            let target = root.join("outside-ledger.md");
+            fs::write(&target, "external target").unwrap();
+            let store = RunStore::open(&root).unwrap();
+            let error = rename_with_hook(&store, &original, "recovered", |stage| {
+                if stage == stop {
+                    let run = if stage == RenameStage::IntentWritten {
+                        &old
+                    } else {
+                        &new
+                    };
+                    symlink(&target, run.join("ledger.md")).unwrap();
+                    return Err(RuntimeError::Io {
+                        path: root.join(INTENT_FILE),
+                        source: io::Error::other("injected interruption"),
+                    });
+                }
+                Ok(())
+            });
+            assert!(error.is_err());
+            drop(store);
+
+            let intent = fs::read(root.join(INTENT_FILE)).ok();
+            let pointer = fs::read(root.join(".unelos/active-run")).unwrap();
+            let old_state = old.join("state.json");
+            let new_state = new.join("state.json");
+            let old_state_before = old_state.exists().then(|| fs::read(&old_state).unwrap());
+            let new_state_before = new_state.exists().then(|| fs::read(&new_state).unwrap());
+            let target_before = fs::read(&target).unwrap();
+            let old_exists = old.exists();
+            let new_exists = new.exists();
+
+            assert!(crate::status(&root).is_err());
+            assert_eq!(fs::read(root.join(INTENT_FILE)).ok(), intent);
+            assert_eq!(fs::read(root.join(".unelos/active-run")).unwrap(), pointer);
+            assert_eq!(old.exists(), old_exists);
+            assert_eq!(new.exists(), new_exists);
+            assert_eq!(
+                old_state.exists().then(|| fs::read(&old_state).unwrap()),
+                old_state_before
+            );
+            assert_eq!(
+                new_state.exists().then(|| fs::read(&new_state).unwrap()),
+                new_state_before
+            );
+            assert_eq!(fs::read(&target).unwrap(), target_before);
+            let run = if stop == RenameStage::IntentWritten {
+                &old
+            } else {
+                &new
+            };
+            assert_eq!(fs::read_link(run.join("ledger.md")).unwrap(), target);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rename_rejects_existing_ledger_symlink_before_recording_intent_or_moving() {
+        use std::os::unix::fs::symlink;
+
+        let (_temp, root) = project();
+        let original = crate::start_workflow(&root, "implement-feature", None).unwrap();
+        let old = root.join(".unelos/runs").join(&original.name);
+        let new = root.join(".unelos/runs/rejected");
+        let target = root.join("outside-ledger.md");
+        fs::write(&target, "external target").unwrap();
+        symlink(&target, old.join("ledger.md")).unwrap();
+        let state_path = old.join("state.json");
+        let state = fs::read(&state_path).unwrap();
+        let pointer = fs::read(root.join(".unelos/active-run")).unwrap();
+
+        assert!(crate::rename_run(&root, &original.run_id, "rejected").is_err());
+        assert!(!root.join(INTENT_FILE).exists());
+        assert!(old.is_dir());
+        assert!(!new.exists());
+        assert_eq!(fs::read(&state_path).unwrap(), state);
+        assert_eq!(fs::read(root.join(".unelos/active-run")).unwrap(), pointer);
+        assert_eq!(fs::read(&target).unwrap(), b"external target");
+        assert_eq!(fs::read_link(old.join("ledger.md")).unwrap(), target);
     }
 }
