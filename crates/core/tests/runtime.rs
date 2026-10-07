@@ -243,3 +243,203 @@ fn status_does_not_need_valid_live_definitions() {
     fs::write(root.join(".unelos/project.yaml"), "invalid: [").unwrap();
     assert_eq!(status(&root).unwrap(), state);
 }
+
+#[test]
+fn rejects_saved_external_output_before_returning_a_packet() {
+    let (_temp, root) = project_copy();
+    let project = load_project(&root, "implement-feature").unwrap();
+    start(&project, "tampered", "request").unwrap();
+    let state_path = root.join(".unelos/runs/tampered/state.json");
+    let mut state: serde_json::Value =
+        serde_json::from_slice(&fs::read(&state_path).unwrap()).unwrap();
+    state["current"]["outputs"][0]["path"] = root.join("outside.md").to_string().into();
+    fs::write(&state_path, serde_json::to_vec(&state).unwrap()).unwrap();
+    let tampered = fs::read(&state_path).unwrap();
+
+    assert!(next(&root).is_err());
+    assert!(status(&root).is_err());
+    assert_eq!(fs::read(state_path).unwrap(), tampered);
+}
+
+#[test]
+fn rejects_saved_external_worker_report_before_returning_a_packet() {
+    let (_temp, root) = project_copy();
+    fs::write(
+        root.join(".unelos/workflows/implement-feature.yaml"),
+        "name: implement-feature\nstart: parallel\nnodes:\n  parallel:\n    type: parallel\n    tasks:\n      - {task: create-plan, agent: planner}\n    next: done\n  done:\n    type: end\n",
+    )
+    .unwrap();
+    let project = load_project(&root, "implement-feature").unwrap();
+    start(&project, "tampered-worker", "request").unwrap();
+    let state_path = root.join(".unelos/runs/tampered-worker/state.json");
+    let mut state: serde_json::Value =
+        serde_json::from_slice(&fs::read(&state_path).unwrap()).unwrap();
+    state["current"]["workerReports"][0]["report"]["path"] =
+        root.join("outside.md").to_string().into();
+    fs::write(&state_path, serde_json::to_vec(&state).unwrap()).unwrap();
+    let tampered = fs::read(&state_path).unwrap();
+
+    assert!(next(&root).is_err());
+    assert_eq!(fs::read(state_path).unwrap(), tampered);
+}
+
+#[test]
+fn validates_saved_feedback_and_history_paths_but_allows_producer_inputs() {
+    let (_temp, root) = project_copy();
+    let project = load_project(&root, "implement-feature").unwrap();
+    start(&project, "saved-history", "request").unwrap();
+    let state_path = root.join(".unelos/runs/saved-history/state.json");
+    let original: serde_json::Value =
+        serde_json::from_slice(&fs::read(&state_path).unwrap()).unwrap();
+    let producer_path = root
+        .join(".unelos/runs/saved-history/producer/result.md")
+        .to_string();
+    let external_path = root.join("outside.md").to_string();
+
+    let mut valid = original.clone();
+    valid["current"]["inputs"] = serde_json::json!([{"name":"result.md","path":producer_path}]);
+    valid["current"]["feedback"] = serde_json::json!({
+        "sourceNodeId":"producer", "sourceExecutionId":"task-1", "outcome":"approved",
+        "reason":null, "artifacts":[{"name":"result.md","path":root.join(".unelos/runs/saved-history/producer/result.md").to_string()}]
+    });
+    fs::write(&state_path, serde_json::to_vec(&valid).unwrap()).unwrap();
+    assert!(status(&root).is_ok());
+
+    for path in ["feedback", "history"] {
+        let mut invalid = original.clone();
+        if path == "feedback" {
+            invalid["current"]["feedback"] = serde_json::json!({
+                "sourceNodeId":"producer", "sourceExecutionId":"task-1", "outcome":"approved",
+                "reason":null, "artifacts":[{"name":"result.md","path":external_path}]
+            });
+        } else {
+            let mut completed = original["current"].clone();
+            completed["outputs"][0]["path"] = external_path.clone().into();
+            invalid["history"] =
+                serde_json::json!([{"work":completed,"outcome":null,"reason":null}]);
+        }
+        fs::write(&state_path, serde_json::to_vec(&invalid).unwrap()).unwrap();
+        assert!(status(&root).is_err(), "accepted external {path} path");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn rejects_symlinked_pointer_state_artifact_and_ledger_paths() {
+    use std::os::unix::fs::symlink;
+
+    for linked in ["pointer", "state", "artifact", "ledger"] {
+        let (_temp, root) = project_copy();
+        let project = load_project(&root, "implement-feature").unwrap();
+        start(&project, "linked", "request").unwrap();
+        let runtime = root.join(".unelos");
+        let run = runtime.join("runs/linked");
+        match linked {
+            "pointer" => {
+                fs::rename(runtime.join("active-run"), root.join("pointer-target")).unwrap();
+                symlink(root.join("pointer-target"), runtime.join("active-run")).unwrap();
+            }
+            "state" => {
+                fs::rename(run.join("state.json"), root.join("state-target")).unwrap();
+                symlink(root.join("state-target"), run.join("state.json")).unwrap();
+            }
+            "artifact" => {
+                fs::rename(run.join("plan"), root.join("plan-target")).unwrap();
+                symlink(root.join("plan-target"), run.join("plan")).unwrap();
+            }
+            "ledger" => symlink(root.join("outside-ledger"), run.join("ledger.md")).unwrap(),
+            _ => unreachable!(),
+        }
+        assert!(status(&root).is_err(), "accepted symlinked {linked}");
+    }
+}
+
+#[test]
+fn rejects_aliased_worker_suffix_and_nested_output_collisions() {
+    let (_temp, root) = project_copy();
+    fs::write(
+        root.join(".unelos/workflows/implement-feature.yaml"),
+        "name: implement-feature\nstart: parallel\nnodes:\n  parallel:\n    type: parallel\n    tasks:\n      - {task: create-plan, agent: planner}\n      - {task: create-plan, agent: planner}\n      - {task: create-plan, agent: planner-worker-1}\n    next: done\n  done:\n    type: end\n",
+    )
+    .unwrap();
+    let project = load_project(&root, "implement-feature").unwrap();
+    assert!(start(&project, "alias", "request").is_err());
+    assert!(!root.join(".unelos/active-run").exists());
+
+    let (_temp, root) = project_copy();
+    fs::write(
+        root.join(".unelos/workflows/implement-feature.yaml"),
+        "name: implement-feature\nstart: parallel\nnodes:\n  parallel:\n    type: parallel\n    tasks:\n      - {task: create-plan, agent: planner}\n    outputs: [planner]\n    next: done\n  done:\n    type: end\n",
+    )
+    .unwrap();
+    let project = load_project(&root, "implement-feature").unwrap();
+    assert!(start(&project, "nested", "request").is_err());
+    assert!(!root.join(".unelos/active-run").exists());
+}
+
+#[test]
+fn rejects_existing_run_path_and_unsafe_runtime_components_without_publication() {
+    for (workflow, expected) in [
+        (
+            "name: implement-feature\nstart: ../escape\nnodes:\n  ../escape:\n    type: end\n",
+            "unsafe-node",
+        ),
+        (
+            "name: implement-feature\nstart: parallel\nnodes:\n  parallel:\n    type: parallel\n    tasks:\n      - {task: create-plan, agent: ../escape}\n    next: done\n  done:\n    type: end\n",
+            "unsafe-agent",
+        ),
+    ] {
+        let (_temp, root) = project_copy();
+        fs::write(root.join(".unelos/workflows/implement-feature.yaml"), workflow).unwrap();
+        if expected == "unsafe-agent" {
+            let project_path = root.join(".unelos/project.yaml");
+            let project_yaml = fs::read_to_string(&project_path).unwrap();
+            fs::write(
+                project_path,
+                project_yaml.replace(
+                    "agents:\n",
+                    "agents:\n  \"../escape\":\n    instructions: unsafe\n",
+                ),
+            )
+            .unwrap();
+        }
+        let project = load_project(&root, "implement-feature").unwrap();
+        let error = start(&project, expected, "request").unwrap_err();
+        assert!(error.to_string().contains(if expected == "unsafe-node" {
+            "unsafe Node"
+        } else {
+            "unsafe Agent"
+        }));
+        assert!(!root.join(".unelos/active-run").exists());
+        assert!(!root.join(format!(".unelos/runs/{expected}")).exists());
+    }
+
+    let (_temp, root) = project_copy();
+    let project = load_project(&root, "implement-feature").unwrap();
+    fs::create_dir_all(root.join(".unelos/runs/existing")).unwrap();
+    fs::write(root.join(".unelos/runs/existing/keep"), "untouched").unwrap();
+    assert!(start(&project, "existing", "request").is_err());
+    assert_eq!(
+        fs::read(root.join(".unelos/runs/existing/keep")).unwrap(),
+        b"untouched"
+    );
+    assert!(!root.join(".unelos/active-run").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn start_rejects_existing_symlinked_run_path_without_touching_target() {
+    use std::os::unix::fs::symlink;
+
+    let (_temp, root) = project_copy();
+    let project = load_project(&root, "implement-feature").unwrap();
+    let target = root.join("keep");
+    fs::create_dir(&target).unwrap();
+    fs::write(target.join("marker"), "untouched").unwrap();
+    fs::create_dir_all(root.join(".unelos/runs")).unwrap();
+    symlink(&target, root.join(".unelos/runs/linked-run")).unwrap();
+
+    assert!(start(&project, "linked-run", "request").is_err());
+    assert_eq!(fs::read(target.join("marker")).unwrap(), b"untouched");
+    assert!(!root.join(".unelos/active-run").exists());
+}

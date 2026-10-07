@@ -37,6 +37,7 @@ impl RunStore {
         let runtime = self.root.join(".unelos");
         ensure_directory(&runtime)?;
         let pointer_path = runtime.join("active-run");
+        reject_symlink(&pointer_path)?;
         let pointer = match fs::read_to_string(&pointer_path) {
             Ok(pointer) => pointer,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -52,7 +53,9 @@ impl RunStore {
         check_directory(&runs_path)?;
         let run_path = runs_path.join(name);
         reject_symlink(&run_path)?;
+        reject_symlink(&run_path.join("ledger.md"))?;
         let state_path = run_path.join("state.json");
+        reject_symlink(&state_path)?;
         let bytes = fs::read(&state_path).map_err(|source| path_error(&state_path, source))?;
         let state: RunState =
             serde_json::from_slice(&bytes).map_err(|source| RuntimeError::Json {
@@ -60,6 +63,7 @@ impl RunStore {
                 source,
             })?;
         validate_state(&state)?;
+        validate_artifacts(&state, &run_path)?;
         if state.name != name || state.run_id != name {
             return Err(RuntimeError::InvalidState(format!(
                 "active pointer {name:?} does not match state name/run ID {:?}/{:?}",
@@ -164,6 +168,82 @@ fn validate_state(state: &RunState) -> Result<(), RuntimeError> {
                 state.next_execution_sequence
             )));
         }
+    }
+    Ok(())
+}
+
+fn validate_artifacts(state: &RunState, run_path: &Utf8Path) -> Result<(), RuntimeError> {
+    fn binding(
+        reference: &crate::ArtifactReference,
+        run_path: &Utf8Path,
+        expected_node: Option<&str>,
+    ) -> Result<(), RuntimeError> {
+        let relative = reference.path.strip_prefix(run_path).map_err(|_| {
+            RuntimeError::InvalidState(format!("artifact path escapes run: {}", reference.path))
+        })?;
+        let parts: Vec<_> = relative.as_str().split(['/', '\\']).collect();
+        if parts.len() < 2 {
+            return Err(RuntimeError::InvalidState(format!(
+                "artifact path is outside a Node directory: {}",
+                reference.path
+            )));
+        }
+        for part in &parts {
+            super::check_component(part, "persisted artifact")?;
+        }
+        if expected_node.is_some_and(|node| parts[0] != node) {
+            return Err(RuntimeError::InvalidState(format!(
+                "artifact path is outside its expected Node directory: {}",
+                reference.path
+            )));
+        }
+        let mut path = run_path.to_owned();
+        for part in parts {
+            path.push(part);
+            reject_symlink(&path)?;
+        }
+        Ok(())
+    }
+
+    fn feedback(
+        feedback: Option<&crate::TransitionFeedback>,
+        run_path: &Utf8Path,
+    ) -> Result<(), RuntimeError> {
+        if let Some(feedback) = feedback {
+            super::check_component(&feedback.source_node_id, "feedback Node")?;
+            for artifact in &feedback.artifacts {
+                binding(artifact, run_path, Some(&feedback.source_node_id))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn work(work: &super::CurrentWork, run_path: &Utf8Path) -> Result<(), RuntimeError> {
+        let record = match work {
+            super::CurrentWork::Task(record)
+            | super::CurrentWork::Parallel(record)
+            | super::CurrentWork::HumanGate(record) => record,
+            super::CurrentWork::Finished { node_id } => {
+                super::check_component(node_id, "Node")?;
+                return Ok(());
+            }
+        };
+        super::check_component(&record.node_id, "Node")?;
+        for artifact in &record.inputs {
+            binding(artifact, run_path, None)?;
+        }
+        for artifact in &record.outputs {
+            binding(artifact, run_path, Some(&record.node_id))?;
+        }
+        for report in &record.worker_reports {
+            binding(&report.report, run_path, Some(&record.node_id))?;
+        }
+        feedback(record.feedback.as_ref(), run_path)
+    }
+
+    work(&state.current, run_path)?;
+    for completed in &state.history {
+        work(&completed.work, run_path)?;
     }
     Ok(())
 }
