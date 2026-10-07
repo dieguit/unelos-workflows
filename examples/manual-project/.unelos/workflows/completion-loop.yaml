@@ -1,0 +1,26 @@
+name: completion-loop
+start: plan
+nodes:
+  plan:
+    task: create-plan
+    agent: planner
+    outputs: [plan.md]
+    next: implement
+  implement:
+    task: implement-plan
+    agent: engineer
+    execution: subagent
+    inputs: [plan.md]
+    outputs: [implementation-report.md]
+    next: review
+  review:
+    task: review-implementation
+    agent: reviewer
+    execution: subagent
+    inputs: [plan.md, implementation-report.md]
+    outputs: [review.md]
+    next:
+      approved: done
+      changes_requested: implement
+  done:
+    type: end

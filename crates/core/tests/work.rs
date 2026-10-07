@@ -259,6 +259,7 @@ fn composes_deterministic_parallel_workers_with_explicit_paths_and_parent_identi
             .as_str()
     );
     let instructions = value["controllerInstructions"].as_str().unwrap();
+    assert!(!instructions.contains("future completion"));
     for duty in [
         "Only the controller updates the supplied run ledger",
         "Dispatch every listed worker",

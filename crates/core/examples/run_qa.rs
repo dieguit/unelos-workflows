@@ -2,7 +2,7 @@ use camino::Utf8Path;
 use serde::Serialize;
 use std::{fs, process};
 use unelos_core::{
-    confirm_outputs, load_project, next, prepare_work, start, status, verify_outputs,
+    complete, confirm_outputs, load_project, next, prepare_work, start, status, verify_outputs,
     verify_work_outputs, CompletedExecution, CurrentWork, RuntimeError, TransitionFeedback,
 };
 
@@ -11,7 +11,116 @@ mod tests {
     use super::*;
     use assert_fs::{fixture::PathCopy, TempDir};
     use std::fs;
-    use unelos_core::{confirm_outputs, CurrentWork};
+    use unelos_core::{complete, confirm_outputs, CurrentWork};
+
+    #[test]
+    fn completion_options_accept_pairs_in_either_order_and_reject_bad_syntax() {
+        assert_eq!(completion_options(&[]).unwrap(), (None, None));
+        assert_eq!(
+            completion_options(&["--outcome".into(), "approved".into()]).unwrap(),
+            (Some("approved"), None)
+        );
+        assert_eq!(
+            completion_options(&["--reason".into(), "Looks good".into()]).unwrap(),
+            (None, Some("Looks good"))
+        );
+        assert_eq!(
+            completion_options(&[
+                "--reason".into(),
+                "Looks good".into(),
+                "--outcome".into(),
+                "approved".into()
+            ])
+            .unwrap(),
+            (Some("approved"), Some("Looks good"))
+        );
+        for args in [
+            vec!["--reason".into()],
+            vec![
+                "--reason".into(),
+                "reason".into(),
+                "--reason".into(),
+                "again".into(),
+            ],
+            vec![
+                "--outcome".into(),
+                "ok".into(),
+                "--outcome".into(),
+                "no".into(),
+            ],
+            vec!["--unknown".into(), "value".into()],
+        ] {
+            assert!(completion_options(&args).is_err(), "accepted {args:?}");
+        }
+    }
+
+    #[test]
+    fn completion_loop_fixture_finishes_with_review_feedback_in_history() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8Path::from_path(temp.path()).unwrap().to_owned();
+        temp.copy_from(
+            Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/manual-project"),
+            &["**/*"],
+        )
+        .unwrap();
+        let project = load_project(&root, "completion-loop").unwrap();
+        let mut state = start(&project, "qa-loop", "Change button color.").unwrap();
+        for (id, report) in [
+            ("task-1", "plan"),
+            ("task-2", "implementation"),
+            ("task-3", "review"),
+            ("task-4", "corrected implementation"),
+            ("task-5", "final review"),
+        ] {
+            let CurrentWork::Task(work) = &state.current else {
+                panic!("expected task {id}")
+            };
+            fs::write(&work.outputs[0].path, report).unwrap();
+            confirm_outputs(&root, id).unwrap();
+            state = complete(
+                &root,
+                "qa-loop",
+                id,
+                match id {
+                    "task-3" => Some("changes_requested"),
+                    "task-5" => Some("approved"),
+                    _ => None,
+                },
+                (id == "task-3").then_some("Adjust color contrast"),
+            )
+            .unwrap();
+            if id == "task-3" {
+                let CurrentWork::Task(rework) = &state.current else {
+                    panic!("expected rework task")
+                };
+                assert_eq!(
+                    rework
+                        .feedback
+                        .as_ref()
+                        .and_then(|feedback| feedback.outcome.as_deref()),
+                    Some("changes_requested")
+                );
+                assert_eq!(
+                    rework
+                        .feedback
+                        .as_ref()
+                        .and_then(|feedback| feedback.reason.as_deref()),
+                    Some("Adjust color contrast")
+                );
+            }
+        }
+        assert!(matches!(state.current, CurrentWork::Finished { .. }));
+        assert_eq!(state.history.len(), 5);
+        assert_eq!(
+            state.history[2].outcome.as_deref(),
+            Some("changes_requested")
+        );
+        assert_eq!(
+            state.history[2].reason.as_deref(),
+            Some("Adjust color contrast")
+        );
+        assert_eq!(state.history[4].outcome.as_deref(), Some("approved"));
+    }
 
     #[test]
     fn bindings_demo_reuses_report_path_without_reusing_confirmation_or_state() {
@@ -121,13 +230,20 @@ fn main() {
         [command, project, expected] if command == "verify" => {
             json(verify_outputs(Utf8Path::new(project), expected))
         }
-        [command, project] if command == "bindings-demo" => bindings_demo(Utf8Path::new(project)),
-        _ => {
-            eprintln!(
-                "usage:\n  run_qa start PROJECT WORKFLOW NAME REQUEST\n  run_qa status PROJECT\n  run_qa next PROJECT\n  run_qa confirm PROJECT EXECUTION_ID\n  run_qa verify PROJECT EXECUTION_ID\n  run_qa bindings-demo PROJECT"
-            );
-            process::exit(2);
+        [command, project, run_id, expected, options @ ..] if command == "complete" => {
+            match completion_options(options) {
+                Ok((outcome, reason)) => json(complete(
+                    Utf8Path::new(project),
+                    run_id,
+                    expected,
+                    outcome,
+                    reason,
+                )),
+                Err(_) => usage(),
+            }
         }
+        [command, project] if command == "bindings-demo" => bindings_demo(Utf8Path::new(project)),
+        _ => usage(),
     };
 
     match result {
@@ -143,6 +259,33 @@ fn main() {
             process::exit(1);
         }
     }
+}
+
+fn usage() -> ! {
+    eprintln!(
+        "usage:\n  run_qa start PROJECT WORKFLOW NAME REQUEST\n  run_qa status PROJECT\n  run_qa next PROJECT\n  run_qa confirm PROJECT EXECUTION_ID\n  run_qa verify PROJECT EXECUTION_ID\n  run_qa complete PROJECT RUN_ID EXECUTION_ID [--outcome LABEL] [--reason TEXT]\n  run_qa bindings-demo PROJECT"
+    );
+    process::exit(2)
+}
+
+fn completion_options(args: &[String]) -> Result<(Option<&str>, Option<&str>), String> {
+    let (mut outcome, mut reason) = (None, None);
+    let mut args = args.iter();
+    while let Some(flag) = args.next() {
+        let value = args
+            .next()
+            .filter(|value| !value.starts_with("--"))
+            .ok_or_else(|| format!("missing value for {flag}"))?;
+        let target = match flag.as_str() {
+            "--outcome" => &mut outcome,
+            "--reason" => &mut reason,
+            _ => return Err(format!("unknown option {flag}")),
+        };
+        if target.replace(value.as_str()).is_some() {
+            return Err(format!("repeated option {flag}"));
+        }
+    }
+    Ok((outcome, reason))
 }
 
 fn json<T: Serialize>(
