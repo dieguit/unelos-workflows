@@ -6,18 +6,14 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-// Task 2 connects this private store to the public runtime operations.
-#[allow(dead_code)]
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
-#[allow(dead_code)]
 pub(super) struct RunStore {
     root: Utf8PathBuf,
     lock: File,
 }
 
 impl RunStore {
-    #[allow(dead_code)]
     pub(super) fn open(root: &Utf8Path) -> Result<Self, RuntimeError> {
         let root =
             crate::project::absolute_root(root).map_err(|source| path_error(root, source))?;
@@ -36,7 +32,6 @@ impl RunStore {
         Ok(Self { root, lock })
     }
 
-    #[allow(dead_code)]
     pub(super) fn active(&self) -> Result<RunState, RuntimeError> {
         let runtime = self.root.join(".unelos");
         ensure_directory(&runtime)?;
@@ -73,7 +68,6 @@ impl RunStore {
         Ok(state)
     }
 
-    #[allow(dead_code)]
     pub(super) fn publish(
         &self,
         state: &RunState,
@@ -82,7 +76,6 @@ impl RunStore {
         self.publish_with(state, prepare, atomic_write)
     }
 
-    #[allow(dead_code)]
     fn publish_with(
         &self,
         state: &RunState,
@@ -140,7 +133,6 @@ impl Drop for RunStore {
     }
 }
 
-#[allow(dead_code)]
 fn validate_state(state: &RunState) -> Result<(), RuntimeError> {
     if state.next_execution_sequence == 0 {
         return Err(RuntimeError::InvalidState(
@@ -175,7 +167,6 @@ fn validate_state(state: &RunState) -> Result<(), RuntimeError> {
     Ok(())
 }
 
-#[allow(dead_code)]
 fn reject_symlink(path: &Utf8Path) -> Result<(), RuntimeError> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => Err(path_error(
@@ -191,7 +182,6 @@ fn reject_symlink(path: &Utf8Path) -> Result<(), RuntimeError> {
     }
 }
 
-#[allow(dead_code)]
 fn ensure_directory(path: &Utf8Path) -> Result<(), RuntimeError> {
     reject_symlink(path)?;
     match fs::create_dir(path) {
@@ -211,7 +201,10 @@ fn ensure_directory(path: &Utf8Path) -> Result<(), RuntimeError> {
     }
 }
 
-#[allow(dead_code)]
+pub(super) fn ensure_runtime_directory(path: &Utf8Path) -> Result<(), RuntimeError> {
+    ensure_directory(path)
+}
+
 fn check_directory(path: &Utf8Path) -> Result<(), RuntimeError> {
     reject_symlink(path)?;
     let metadata = fs::metadata(path).map_err(|source| path_error(path, source))?;
@@ -225,12 +218,10 @@ fn check_directory(path: &Utf8Path) -> Result<(), RuntimeError> {
     }
 }
 
-#[allow(dead_code)]
 fn atomic_write(target: &Utf8Path, bytes: &[u8]) -> Result<(), RuntimeError> {
     atomic_write_with(target, |file| file.write_all(bytes))
 }
 
-#[allow(dead_code)]
 fn atomic_write_with(
     target: &Utf8Path,
     write: impl FnOnce(&mut File) -> io::Result<()>,

@@ -17,7 +17,9 @@ pub use context::{
 pub use definitions::*;
 pub use graph::{build_graph, GraphEdge, GraphNode, NodeKind, WorkflowGraph};
 pub use project::{load_project, LoadedProject, ProjectLoadError};
-pub use runtime::{CompletedExecution, CurrentWork, ExecutionRecord, RunState, RuntimeError};
+pub use runtime::{
+    next, start, status, CompletedExecution, CurrentWork, ExecutionRecord, RunState, RuntimeError,
+};
 pub use settings::{Settings, SettingsError};
 pub use skills::{resolve_skills, ResolvedSkill, SkillResolveError};
 pub use validation::{validate_project, ProjectValidationError};
