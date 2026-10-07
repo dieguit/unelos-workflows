@@ -1,7 +1,10 @@
 use assert_fs::{fixture::PathCopy, TempDir};
 use camino::{Utf8Path, Utf8PathBuf};
 use std::fs;
-use unelos_core::{list_workflows, load_project, next, start, start_workflow, status};
+use unelos_core::{
+    approve_node, complete_node, list_workflows, load_project, next, reject_node, start,
+    start_workflow, status, CurrentWork,
+};
 
 fn project_copy() -> (TempDir, Utf8PathBuf) {
     let temp = TempDir::new().unwrap();
@@ -145,4 +148,153 @@ fn allocation_skips_legacy_generated_id_and_corrupt_counter_does_not_publish() {
     assert!(start_workflow(&root, "finished", Some("third")).is_err());
     assert_eq!(fs::read(root.join(".unelos/active-run")).unwrap(), pointer);
     assert!(!root.join(".unelos/runs/third").exists());
+}
+
+#[test]
+fn node_completion_confirms_outputs_and_waits_for_gate() {
+    let (_temp, root) = project_copy();
+    let started = start_workflow(&root, "implement-feature", None).unwrap();
+    let CurrentWork::Task(record) = &started.current else {
+        panic!("task");
+    };
+    fs::write(&record.outputs[0].path, "plan").unwrap();
+    let gate = complete_node(&root, "plan", None).unwrap();
+    assert!(matches!(gate.current, CurrentWork::HumanGate(_)));
+    assert_eq!(gate.history.len(), 1);
+}
+
+#[test]
+fn rejected_completion_does_not_persist_output_confirmation() {
+    let (_temp, root) = project_copy();
+    let started = start_workflow(&root, "implement-feature", None).unwrap();
+    let CurrentWork::Task(record) = &started.current else {
+        panic!("task");
+    };
+    fs::write(&record.outputs[0].path, "plan").unwrap();
+    let path = root
+        .join(".unelos/runs")
+        .join(&started.name)
+        .join("state.json");
+    let before = fs::read(&path).unwrap();
+    assert!(complete_node(&root, "plan", Some("approved")).is_err());
+    assert!(matches!(
+        complete_node(&root, "implement", None),
+        Err(unelos_core::RuntimeError::WrongNode { expected, current })
+            if expected == "implement" && current == "plan"
+    ));
+    assert_eq!(fs::read(path).unwrap(), before);
+    assert_eq!(status(&root).unwrap(), started);
+}
+
+#[test]
+fn node_completion_accepts_parallel_work() {
+    let (_temp, root) = project_copy();
+    fs::write(
+        root.join(".unelos/workflows/parallel.yaml"),
+        "name: parallel\nstart: parallel\nnodes:\n  parallel:\n    type: parallel\n    tasks:\n      - {task: create-plan, agent: planner}\n    outputs: [summary.md]\n    next: done\n  done:\n    type: end\n",
+    )
+    .unwrap();
+    let started = start_workflow(&root, "parallel", None).unwrap();
+    let CurrentWork::Parallel(record) = &started.current else {
+        panic!("parallel")
+    };
+    fs::write(&record.outputs[0].path, "summary").unwrap();
+    fs::write(&record.worker_reports[0].report.path, "worker result").unwrap();
+    let finished = complete_node(&root, "parallel", None).unwrap();
+    assert!(finished.is_finished());
+    assert_eq!(finished.history.len(), 1);
+}
+
+#[test]
+fn node_operations_follow_feedback_loop_and_reject_invalid_mutations_atomically() {
+    let (_temp, root) = project_copy();
+    let mut state = start_workflow(&root, "implement-feature", Some("task")).unwrap();
+    let state_path = root.join(".unelos/runs/task/state.json");
+    let pointer_path = root.join(".unelos/active-run");
+
+    let CurrentWork::Task(plan) = &state.current else {
+        panic!("plan task")
+    };
+    let plan_path = plan.outputs[0].path.clone();
+    let before = (
+        fs::read(&state_path).unwrap(),
+        fs::read(&pointer_path).unwrap(),
+    );
+    assert!(complete_node(&root, "implement", None).is_err());
+    assert_eq!(fs::read(&state_path).unwrap(), before.0);
+    assert_eq!(fs::read(&pointer_path).unwrap(), before.1);
+    assert!(complete_node(&root, "plan", None).is_err());
+    assert_eq!(fs::read(&state_path).unwrap(), before.0);
+    fs::create_dir_all(&plan_path).unwrap();
+    assert!(complete_node(&root, "plan", None).is_err());
+    assert_eq!(fs::read(&state_path).unwrap(), before.0);
+    fs::remove_dir(&plan_path).unwrap();
+
+    fs::write(&plan_path, "plan").unwrap();
+    state = complete_node(&root, "plan", None).unwrap();
+    assert!(matches!(state.current, CurrentWork::HumanGate(_)));
+    assert!(complete_node(&root, "approve-plan", None).is_err());
+    assert_eq!(status(&root).unwrap(), state);
+    fs::remove_file(&plan_path).unwrap();
+    assert!(approve_node(&root, "approve-plan").is_err());
+    assert_eq!(status(&root).unwrap(), state);
+    fs::write(&plan_path, "plan").unwrap();
+    for reason in ["  ", "\u{2003}"] {
+        assert!(reject_node(&root, "approve-plan", reason).is_err());
+        assert_eq!(status(&root).unwrap(), state);
+    }
+    assert!(approve_node(&root, "plan").is_err());
+    state = reject_node(&root, "approve-plan", "  revise plan  ").unwrap();
+    assert_eq!(
+        state.history.last().unwrap().reason.as_deref(),
+        Some("revise plan")
+    );
+    let CurrentWork::Task(revised) = &state.current else {
+        panic!("revised plan")
+    };
+    assert_eq!(revised.outputs[0].path, plan_path);
+    assert_eq!(
+        revised.feedback.as_ref().unwrap().reason.as_deref(),
+        Some("revise plan")
+    );
+    fs::write(&plan_path, "revised plan").unwrap();
+    complete_node(&root, "plan", None).unwrap();
+    state = approve_node(&root, "approve-plan").unwrap();
+    let CurrentWork::Task(implement) = &state.current else {
+        panic!("implementation")
+    };
+    let report_path = implement.outputs[0].path.clone();
+    fs::write(&report_path, "implementation").unwrap();
+    state = complete_node(&root, "implement", None).unwrap();
+    let CurrentWork::Task(review) = &state.current else {
+        panic!("review")
+    };
+    let review_path = review.outputs[0].path.clone();
+    assert!(complete_node(&root, "review", None).is_err());
+    assert!(complete_node(&root, "review", Some("unknown")).is_err());
+    assert_eq!(status(&root).unwrap(), state);
+    fs::write(&review_path, "review").unwrap();
+    state = complete_node(&root, "review", Some("changes_requested")).unwrap();
+    let CurrentWork::Task(implement) = &state.current else {
+        panic!("implementation retry")
+    };
+    assert_eq!(implement.outputs[0].path, report_path);
+    assert_eq!(status(&root).unwrap(), state);
+    fs::write(&report_path, "revised implementation").unwrap();
+    state = complete_node(&root, "implement", None).unwrap();
+    let CurrentWork::Task(review) = &state.current else {
+        panic!("review retry")
+    };
+    assert_eq!(review.outputs[0].path, review_path);
+    state = complete_node(&root, "review", Some("approved")).unwrap();
+    assert!(state.is_finished());
+    assert_eq!(state.history.len(), 8);
+    assert_eq!(fs::read_to_string(review_path).unwrap(), "review");
+    let saved = (
+        fs::read(&state_path).unwrap(),
+        fs::read(&pointer_path).unwrap(),
+    );
+    assert!(complete_node(&root, "review", Some("approved")).is_err());
+    assert_eq!(fs::read(&state_path).unwrap(), saved.0);
+    assert_eq!(fs::read(&pointer_path).unwrap(), saved.1);
 }

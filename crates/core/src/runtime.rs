@@ -8,11 +8,13 @@ use crate::{
 };
 
 mod artifacts;
+mod commands;
 mod completion;
 mod gates;
 mod rename;
 mod store;
 
+pub use commands::{approve_node, complete_node, reject_node};
 pub use completion::complete;
 pub use gates::{approve, reject};
 pub use rename::rename_run;
@@ -136,6 +138,8 @@ pub enum RuntimeError {
     },
     #[error("stale run {expected:?}; current run is {current:?}")]
     StaleRun { expected: String, current: String },
+    #[error("wrong Node {expected:?}; current Node is {current:?}")]
+    WrongNode { expected: String, current: String },
 }
 
 pub(crate) fn valid_run_name(name: &str) -> bool {

@@ -715,16 +715,22 @@ mod tests {
             _ => unreachable!(),
         };
         fs::write(&record.outputs[0].path, "plan").unwrap();
-        crate::confirm_outputs(&project_root, "task-1").unwrap();
         let store = RunStore::open(&project_root).unwrap();
         let active = store.active().unwrap();
         let before =
             fs::read(project_root.join(".unelos/runs/atomic-completion/state.json")).unwrap();
         let pointer = fs::read(project_root.join(".unelos/active-run")).unwrap();
         let project = crate::load_project(&project_root, "implement-feature").unwrap();
-        let candidate =
-            super::super::completion::prepare_completion(&project, &active, "task-1", None, None)
-                .unwrap();
+        let mut confirmed = active.clone();
+        if let CurrentWork::Task(record) | CurrentWork::Parallel(record) = &mut confirmed.current {
+            record.confirmed_execution_id = Some(record.execution_id.clone());
+        } else {
+            unreachable!();
+        }
+        let candidate = super::super::completion::prepare_completion(
+            &project, &confirmed, "task-1", None, None,
+        )
+        .unwrap();
         let error = store.update_with(&candidate, |path, _| {
             Err(path_error(
                 path,
@@ -741,6 +747,10 @@ mod tests {
             pointer
         );
         assert_eq!(store.active().unwrap(), active);
+        assert_eq!(
+            fs::read(project_root.join(".unelos/runs/atomic-completion/state.json")).unwrap(),
+            before
+        );
     }
 
     #[test]
