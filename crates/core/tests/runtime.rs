@@ -246,14 +246,14 @@ fn parallel_workers_get_stable_distinct_report_paths() {
     let packet = serde_json::to_value(next(&root).unwrap()).unwrap();
     assert_eq!(packet["workers"][0]["key"], "worker-1");
     assert_eq!(packet["workers"][1]["key"], "worker-2");
-    assert!(packet["workers"][0]["outputs"][0]["path"]
-        .as_str()
-        .unwrap()
-        .ends_with("planner-worker-1/result.md"));
-    assert!(packet["workers"][1]["outputs"][0]["path"]
-        .as_str()
-        .unwrap()
-        .ends_with("planner-worker-2/result.md"));
+    assert!(
+        Utf8Path::new(packet["workers"][0]["outputs"][0]["path"].as_str().unwrap())
+            .ends_with("planner-worker-1/result.md")
+    );
+    assert!(
+        Utf8Path::new(packet["workers"][1]["outputs"][0]["path"].as_str().unwrap())
+            .ends_with("planner-worker-2/result.md")
+    );
     assert!(root
         .join(".unelos/runs/parallel-run/parallel/planner-worker-1")
         .is_dir());
