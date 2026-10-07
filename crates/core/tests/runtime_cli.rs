@@ -17,6 +17,17 @@ fn project_copy() -> (TempDir, Utf8PathBuf) {
     (temp, root)
 }
 
+fn progression_bytes(root: &Utf8Path, name: &str) -> (Vec<u8>, Vec<u8>) {
+    (
+        fs::read(root.join(".unelos/runs").join(name).join("state.json")).unwrap(),
+        fs::read(root.join(".unelos/active-run")).unwrap(),
+    )
+}
+
+fn assert_progression_unchanged(root: &Utf8Path, name: &str, before: &(Vec<u8>, Vec<u8>)) {
+    assert_eq!(progression_bytes(root, name), *before);
+}
+
 #[test]
 fn discovery_does_not_allocate_a_run() {
     let (_temp, root) = project_copy();
@@ -171,18 +182,15 @@ fn rejected_completion_does_not_persist_output_confirmation() {
         panic!("task");
     };
     fs::write(&record.outputs[0].path, "plan").unwrap();
-    let path = root
-        .join(".unelos/runs")
-        .join(&started.name)
-        .join("state.json");
-    let before = fs::read(&path).unwrap();
+    let before = progression_bytes(&root, &started.name);
     assert!(complete_node(&root, "plan", Some("approved")).is_err());
+    assert_progression_unchanged(&root, &started.name, &before);
     assert!(matches!(
         complete_node(&root, "implement", None),
         Err(unelos_core::RuntimeError::WrongNode { expected, current })
             if expected == "implement" && current == "plan"
     ));
-    assert_eq!(fs::read(path).unwrap(), before);
+    assert_progression_unchanged(&root, &started.name, &before);
     assert_eq!(status(&root).unwrap(), started);
 }
 
@@ -209,41 +217,40 @@ fn node_completion_accepts_parallel_work() {
 fn node_operations_follow_feedback_loop_and_reject_invalid_mutations_atomically() {
     let (_temp, root) = project_copy();
     let mut state = start_workflow(&root, "implement-feature", Some("task")).unwrap();
-    let state_path = root.join(".unelos/runs/task/state.json");
-    let pointer_path = root.join(".unelos/active-run");
 
     let CurrentWork::Task(plan) = &state.current else {
         panic!("plan task")
     };
     let plan_path = plan.outputs[0].path.clone();
-    let before = (
-        fs::read(&state_path).unwrap(),
-        fs::read(&pointer_path).unwrap(),
-    );
+    let before = progression_bytes(&root, "task");
     assert!(complete_node(&root, "implement", None).is_err());
-    assert_eq!(fs::read(&state_path).unwrap(), before.0);
-    assert_eq!(fs::read(&pointer_path).unwrap(), before.1);
+    assert_progression_unchanged(&root, "task", &before);
     assert!(complete_node(&root, "plan", None).is_err());
-    assert_eq!(fs::read(&state_path).unwrap(), before.0);
+    assert_progression_unchanged(&root, "task", &before);
     fs::create_dir_all(&plan_path).unwrap();
     assert!(complete_node(&root, "plan", None).is_err());
-    assert_eq!(fs::read(&state_path).unwrap(), before.0);
+    assert_progression_unchanged(&root, "task", &before);
     fs::remove_dir(&plan_path).unwrap();
 
     fs::write(&plan_path, "plan").unwrap();
     state = complete_node(&root, "plan", None).unwrap();
+    let gate_before = progression_bytes(&root, "task");
     assert!(matches!(state.current, CurrentWork::HumanGate(_)));
     assert!(complete_node(&root, "approve-plan", None).is_err());
     assert_eq!(status(&root).unwrap(), state);
+    assert_progression_unchanged(&root, "task", &gate_before);
     fs::remove_file(&plan_path).unwrap();
     assert!(approve_node(&root, "approve-plan").is_err());
     assert_eq!(status(&root).unwrap(), state);
+    assert_progression_unchanged(&root, "task", &gate_before);
     fs::write(&plan_path, "plan").unwrap();
     for reason in ["  ", "\u{2003}"] {
         assert!(reject_node(&root, "approve-plan", reason).is_err());
         assert_eq!(status(&root).unwrap(), state);
+        assert_progression_unchanged(&root, "task", &gate_before);
     }
     assert!(approve_node(&root, "plan").is_err());
+    assert_progression_unchanged(&root, "task", &gate_before);
     state = reject_node(&root, "approve-plan", "  revise plan  ").unwrap();
     assert_eq!(
         state.history.last().unwrap().reason.as_deref(),
@@ -270,10 +277,16 @@ fn node_operations_follow_feedback_loop_and_reject_invalid_mutations_atomically(
         panic!("review")
     };
     let review_path = review.outputs[0].path.clone();
+    let missing_output_before = progression_bytes(&root, "task");
     assert!(complete_node(&root, "review", None).is_err());
-    assert!(complete_node(&root, "review", Some("unknown")).is_err());
-    assert_eq!(status(&root).unwrap(), state);
+    assert_progression_unchanged(&root, "task", &missing_output_before);
     fs::write(&review_path, "review").unwrap();
+    let invalid_outcome_before = progression_bytes(&root, "task");
+    assert!(complete_node(&root, "review", None).is_err());
+    assert_progression_unchanged(&root, "task", &invalid_outcome_before);
+    assert!(complete_node(&root, "review", Some("unknown")).is_err());
+    assert_progression_unchanged(&root, "task", &invalid_outcome_before);
+    assert_eq!(status(&root).unwrap(), state);
     state = complete_node(&root, "review", Some("changes_requested")).unwrap();
     let CurrentWork::Task(implement) = &state.current else {
         panic!("implementation retry")
@@ -290,11 +303,7 @@ fn node_operations_follow_feedback_loop_and_reject_invalid_mutations_atomically(
     assert!(state.is_finished());
     assert_eq!(state.history.len(), 8);
     assert_eq!(fs::read_to_string(review_path).unwrap(), "review");
-    let saved = (
-        fs::read(&state_path).unwrap(),
-        fs::read(&pointer_path).unwrap(),
-    );
+    let saved = progression_bytes(&root, "task");
     assert!(complete_node(&root, "review", Some("approved")).is_err());
-    assert_eq!(fs::read(&state_path).unwrap(), saved.0);
-    assert_eq!(fs::read(&pointer_path).unwrap(), saved.1);
+    assert_progression_unchanged(&root, "task", &saved);
 }
