@@ -1,5 +1,5 @@
 use camino::Utf8PathBuf;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use crate::{
@@ -32,13 +32,13 @@ pub struct TaskInspection {
     pub outputs: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArtifactReference {
     pub name: String,
     pub path: Utf8PathBuf,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransitionFeedback {
     pub source_node_id: String,
