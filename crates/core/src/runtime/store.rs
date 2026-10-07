@@ -30,7 +30,17 @@ impl RunStore {
             .map_err(|source| path_error(&lock_path, source))?;
         lock.lock()
             .map_err(|source| path_error(&lock_path, source))?;
-        Ok(Self { root, lock })
+        let store = Self { root, lock };
+        store.recover_rename()?;
+        Ok(store)
+    }
+
+    pub(super) fn root(&self) -> &Utf8Path {
+        &self.root
+    }
+
+    pub(super) fn recover_rename(&self) -> Result<(), RuntimeError> {
+        super::rename::recover(self)
     }
 
     pub(super) fn active(&self) -> Result<RunState, RuntimeError> {
@@ -462,7 +472,7 @@ pub(super) fn validate_artifacts(
     Ok(())
 }
 
-fn reject_symlink(path: &Utf8Path) -> Result<(), RuntimeError> {
+pub(super) fn reject_symlink(path: &Utf8Path) -> Result<(), RuntimeError> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => Err(path_error(
             path,
@@ -513,7 +523,7 @@ fn check_directory(path: &Utf8Path) -> Result<(), RuntimeError> {
     }
 }
 
-fn atomic_write(target: &Utf8Path, bytes: &[u8]) -> Result<(), RuntimeError> {
+pub(super) fn atomic_write(target: &Utf8Path, bytes: &[u8]) -> Result<(), RuntimeError> {
     atomic_write_with(target, |file| file.write_all(bytes))
 }
 

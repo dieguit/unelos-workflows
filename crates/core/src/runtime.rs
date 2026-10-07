@@ -10,10 +10,12 @@ use crate::{
 mod artifacts;
 mod completion;
 mod gates;
+mod rename;
 mod store;
 
 pub use completion::complete;
 pub use gates::{approve, reject};
+pub use rename::rename_run;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -18,9 +18,9 @@ pub use definitions::*;
 pub use graph::{build_graph, GraphEdge, GraphNode, NodeKind, WorkflowGraph};
 pub use project::{list_workflows, load_project, LoadedProject, ProjectLoadError};
 pub use runtime::{
-    approve, complete, confirm_outputs, next, prepare_work, reject, start, start_workflow, status,
-    verify_outputs, verify_work_outputs, CompletedExecution, CurrentWork, ExecutionRecord,
-    RunState, RuntimeError,
+    approve, complete, confirm_outputs, next, prepare_work, reject, rename_run, start,
+    start_workflow, status, verify_outputs, verify_work_outputs, CompletedExecution, CurrentWork,
+    ExecutionRecord, RunState, RuntimeError,
 };
 pub use settings::{Settings, SettingsError};
 pub use skills::{resolve_skills, ResolvedSkill, SkillResolveError};
