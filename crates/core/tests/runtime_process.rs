@@ -174,6 +174,19 @@ fn process_probe() {
                 std::process::exit(1);
             }
         },
+        "complete" => match unelos_core::complete(
+            root,
+            &std::env::var("UNELOS_RUNTIME_PROBE_NAME").unwrap(),
+            &std::env::var("UNELOS_RUNTIME_PROBE_REQUEST").unwrap(),
+            None,
+            None,
+        ) {
+            Ok(state) => serde_json::to_value(state).unwrap(),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        },
         _ => panic!("unknown probe operation {operation}"),
     };
     println!("{RESULT_PREFIX}{value}");
@@ -350,6 +363,41 @@ fn concurrent_start_processes_publish_exactly_one_active_run() {
     )
     .unwrap();
     assert_eq!(saved, winner);
+}
+
+#[test]
+fn concurrent_completion_processes_advance_once_and_recover_gate() {
+    let (_temp, root) = project_copy();
+    let started = finish_probe(probe(&root, "start", "completion-race", "Request"));
+    assert!(started.0, "{}{}", started.1, started.2);
+    let output = result(&started.1)["current"]["outputs"][0]["path"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    std::fs::write(output, "plan").unwrap();
+    let confirmed = finish_probe(probe(&root, "confirm", "task-1", ""));
+    assert!(confirmed.0, "{}{}", confirmed.1, confirmed.2);
+
+    let first = ChildGuard::new(probe(&root, "complete", "completion-race", "task-1"));
+    let second = ChildGuard::new(probe(&root, "complete", "completion-race", "task-1"));
+    let first_out = wait_with_timeout(first, Duration::from_secs(10)).unwrap();
+    let second_out = wait_with_timeout(second, Duration::from_secs(10)).unwrap();
+    assert_ne!(first_out.status.success(), second_out.status.success());
+    let loser = if first_out.status.success() {
+        String::from_utf8(second_out.stderr).unwrap()
+    } else {
+        String::from_utf8(first_out.stderr).unwrap()
+    };
+    assert!(loser.contains("stale execution"), "{loser}");
+
+    let status = finish_probe(probe(&root, "status", "", ""));
+    assert!(status.0, "{}{}", status.1, status.2);
+    let recovered = result(&status.1);
+    assert_eq!(recovered["history"].as_array().unwrap().len(), 1);
+    assert_eq!(recovered["current"]["kind"], "human-gate");
+    let packet = finish_probe(probe(&root, "next", "", ""));
+    assert!(packet.0, "{}{}", packet.1, packet.2);
+    assert_eq!(result(&packet.1)["kind"], "human-gate");
 }
 
 #[test]

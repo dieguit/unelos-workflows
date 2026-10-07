@@ -562,6 +562,47 @@ mod tests {
     }
 
     #[test]
+    fn failed_update_of_prepared_completion_preserves_run_and_pointer() {
+        use assert_fs::fixture::PathCopy;
+
+        let (_temp, project_root) = root();
+        let fixture = Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/project");
+        _temp.copy_from(fixture, &["**/*"]).unwrap();
+        let project = crate::load_project(&project_root, "implement-feature").unwrap();
+        let started = crate::start(&project, "atomic-completion", "Request").unwrap();
+        let record = match &started.current {
+            CurrentWork::Task(record) => record,
+            _ => unreachable!(),
+        };
+        fs::write(&record.outputs[0].path, "plan").unwrap();
+        crate::confirm_outputs(&project_root, "task-1").unwrap();
+        let store = RunStore::open(&project_root).unwrap();
+        let active = store.active().unwrap();
+        let before =
+            fs::read(project_root.join(".unelos/runs/atomic-completion/state.json")).unwrap();
+        let pointer = fs::read(project_root.join(".unelos/active-run")).unwrap();
+        let project = crate::load_project(&project_root, "implement-feature").unwrap();
+        let candidate =
+            super::super::prepare_completion(&project, &active, "task-1", None, None).unwrap();
+        let error = store.update_with(&candidate, |path, _| {
+            Err(path_error(
+                path,
+                io::Error::other("injected completion persistence failure"),
+            ))
+        });
+        assert!(error.is_err());
+        assert_eq!(
+            fs::read(project_root.join(".unelos/runs/atomic-completion/state.json")).unwrap(),
+            before
+        );
+        assert_eq!(
+            fs::read(project_root.join(".unelos/active-run")).unwrap(),
+            pointer
+        );
+        assert_eq!(store.active().unwrap(), active);
+    }
+
+    #[test]
     fn atomic_write_does_not_publish_partial_data_on_writer_or_rename_failure() {
         let (_temp, root) = root();
         let target = root.join("target");

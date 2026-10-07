@@ -190,7 +190,7 @@ fn bindings_demo(root: &Utf8Path) -> Result<serde_json::Value, Box<dyn std::erro
     let feedback = TransitionFeedback {
         source_node_id: "review".into(),
         source_execution_id: review_id,
-        outcome: "changes_requested".into(),
+        outcome: Some("changes_requested".into()),
         reason: Some("Demonstration correction".into()),
         artifacts: current_outputs(&review)?,
     };

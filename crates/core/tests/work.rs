@@ -189,7 +189,7 @@ fn runtime_input() -> (TempDir, unelos_core::LoadedProject, WorkRuntimeInput) {
     let feedback = TransitionFeedback {
         source_node_id: "approve-plan".into(),
         source_execution_id: "gate-previous".into(),
-        outcome: "rejected".into(),
+        outcome: Some("rejected".into()),
         reason: Some("Explain the risks.".into()),
         artifacts: vec![binding(
             "research-summary.md",
