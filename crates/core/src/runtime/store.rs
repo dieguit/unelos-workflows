@@ -393,6 +393,14 @@ mod tests {
         assert!(error.is_err());
         assert_eq!(fs::read(&target).unwrap(), b"old");
         assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+        atomic_write(&target, b"replacement").unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"replacement");
+        let error = atomic_write_with(&target, |file| {
+            file.write_all(b"prefix")?;
+            Err(io::Error::other("injected failure"))
+        });
+        assert!(error.is_err());
+        assert_eq!(fs::read(&target).unwrap(), b"replacement");
         let destination = root.join("directory");
         fs::create_dir(&destination).unwrap();
         assert!(atomic_write(&destination, b"new").is_err());
