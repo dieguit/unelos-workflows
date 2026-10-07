@@ -328,3 +328,72 @@ implementation quality, or gate decisions.
 The existing `implement-feature` workflow remains gated. Independently verify
 that its plan completion enters `approve-plan` and ordinary `complete` on that
 gate fails; the QA workflow above is not a gate bypass for production.
+
+## Manual QA: human gate decisions (T11)
+
+Linux/Bash, from the repository root. Run each command individually, without
+`set -e`; expected failures are part of the check. Every command uses a fresh
+process against a disposable copy. No command edits the shipped fixture.
+
+```sh
+cargo build --locked -p unelos-core --example run_qa
+mkdir -p /tmp/opencode
+qa=$(mktemp -d /tmp/opencode/t11-qa.XXXXXX)
+cp -a examples/manual-project/. "$qa/"
+./target/debug/examples/run_qa start "$qa" implement-feature gate-loop "Change button color."
+printf 'Plan v1\n' > "$qa/.unelos/runs/gate-loop/plan/plan.md"
+./target/debug/examples/run_qa confirm "$qa" task-1
+./target/debug/examples/run_qa complete "$qa" gate-loop task-1
+./target/debug/examples/run_qa next "$qa"
+./target/debug/examples/run_qa next "$qa"
+cp "$qa/.unelos/runs/gate-loop/state.json" "$qa/before-missing-plan.json"
+mv "$qa/.unelos/runs/gate-loop/plan/plan.md" "$qa/.unelos/runs/gate-loop/plan/plan.saved"
+./target/debug/examples/run_qa approve "$qa" gate-loop gate-2
+cmp "$qa/before-missing-plan.json" "$qa/.unelos/runs/gate-loop/state.json"
+mv "$qa/.unelos/runs/gate-loop/plan/plan.saved" "$qa/.unelos/runs/gate-loop/plan/plan.md"
+cp "$qa/.unelos/runs/gate-loop/state.json" "$qa/before-invalid.json"
+./target/debug/examples/run_qa reject "$qa" gate-loop gate-2 --reason
+./target/debug/examples/run_qa reject "$qa" gate-loop gate-2 --note 'wrong flag'
+./target/debug/examples/run_qa reject "$qa" gate-loop gate-2 --reason 'reason' extra
+cmp "$qa/before-invalid.json" "$qa/.unelos/runs/gate-loop/state.json"
+./target/debug/examples/run_qa reject "$qa" gate-loop gate-2 --reason '   '
+cmp "$qa/before-invalid.json" "$qa/.unelos/runs/gate-loop/state.json"
+./target/debug/examples/run_qa reject "$qa" gate-loop gate-2 --reason 'Explain migration and rollback.'
+./target/debug/examples/run_qa next "$qa"
+printf 'Plan v2: migration and rollback explained\n' > "$qa/.unelos/runs/gate-loop/plan/plan.md"
+./target/debug/examples/run_qa confirm "$qa" task-3
+./target/debug/examples/run_qa complete "$qa" gate-loop task-3
+cp "$qa/.unelos/runs/gate-loop/state.json" "$qa/before-stale.json"
+./target/debug/examples/run_qa approve "$qa" gate-loop gate-2
+cmp "$qa/before-stale.json" "$qa/.unelos/runs/gate-loop/state.json"
+./target/debug/examples/run_qa reject "$qa" gate-loop gate-2 --reason 'stale rejection'
+cmp "$qa/before-stale.json" "$qa/.unelos/runs/gate-loop/state.json"
+./target/debug/examples/run_qa approve "$qa" gate-loop gate-4
+cp "$qa/.unelos/runs/gate-loop/state.json" "$qa/before-duplicate.json"
+./target/debug/examples/run_qa approve "$qa" gate-loop gate-4
+cmp "$qa/before-duplicate.json" "$qa/.unelos/runs/gate-loop/state.json"
+./target/debug/examples/run_qa status "$qa"
+./target/debug/examples/run_qa next "$qa"
+cat "$qa/.unelos/runs/gate-loop/plan/plan.md"
+grep -nE 'rejected|approved|Explain migration|plan/plan.md' "$qa/.unelos/runs/gate-loop/state.json"
+```
+
+`start`, `confirm`, `complete`, both `next` checks, the non-empty `reject`,
+the non-stale `approve`, `status`, and final `next` succeed (exit 0) and print
+one JSON value each. Every `cmp` succeeds (exit 0), proving missing input,
+malformed syntax, whitespace-only reason, stale approval/rejection, and duplicate
+approval leave state bytes unchanged. Missing-file, whitespace-reason, stale,
+and duplicate core errors exit 1; malformed reject syntax exits 2 with usage.
+Errors are diagnostics on stderr, not extra stdout JSON.
+
+The IDs are `task-1` plan, `gate-2` first decision, `task-3` rejected-plan
+revision, `gate-4` second decision, and `task-5` implementation after approval.
+The blank `--reason` is syntactically accepted but rejected by core validation;
+the other three malformed calls fail grammar parsing. After rejection, `next`
+recovers `task-3` in a new process with `rejected` feedback and the reason.
+After the revised plan is completed, stale `gate-2` decisions fail. Approving
+`gate-4` recovers `task-5` in new `status`/`next` processes with `approved`
+feedback. History links the gate decisions and feedback to
+`$qa/.unelos/runs/gate-loop/plan/plan.md`; that reused file contains the revised
+bytes shown by `cat`. The example writes no ledger and runs no model; decisions
+are explicit controller commands, not production `unelos` commands.
