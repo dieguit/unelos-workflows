@@ -14,6 +14,44 @@ fn project_copy() -> (TempDir, camino::Utf8PathBuf) {
     (temp, root)
 }
 
+fn normalize_fixture_text(text: &str) -> String {
+    text.replace("\r\n", "\n")
+}
+
+fn read_fixture_text(path: impl AsRef<std::path::Path>) -> String {
+    normalize_fixture_text(&fs::read_to_string(path).unwrap())
+}
+
+fn replace_fixture_text(text: &str, from: &str, to: &str) -> String {
+    assert!(text.contains(from), "fixture edit did not match: {from:?}");
+    text.replace(from, to)
+}
+
+#[test]
+fn fixture_text_edits_work_with_crlf() {
+    let fixtures = Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/project/.unelos");
+    let workflow = fs::read_to_string(fixtures.join("workflows/implement-feature.yaml")).unwrap();
+    let workflow = normalize_fixture_text(&workflow.replace('\n', "\r\n"));
+    let workflow = replace_fixture_text(&workflow, "    inputs: [plan.md]\n", "    inputs: []\n");
+    let workflow = replace_fixture_text(
+        &workflow,
+        "  plan:\n    task: create-plan\n    agent: planner\n    outputs: [plan.md]\n    next: approve-plan\n",
+        "",
+    );
+    let project = fs::read_to_string(fixtures.join("project.yaml")).unwrap();
+    let project = normalize_fixture_text(&project.replace('\n', "\r\n"));
+    let project = replace_fixture_text(
+        &project,
+        "agents:\n",
+        "agents:\n  \"../escape\":\n    instructions: unsafe\n",
+    );
+
+    assert!(workflow.contains("    inputs: []\n"));
+    assert!(!workflow.contains("inputs: [plan.md]"));
+    assert!(!workflow.contains("  plan:\n"));
+    assert!(project.contains("  \"../escape\":\n    instructions: unsafe\n"));
+}
+
 #[test]
 fn starts_and_recovers_a_live_task_packet() {
     let (_temp, root) = project_copy();
@@ -37,24 +75,27 @@ fn starts_and_recovers_a_live_task_packet() {
 fn live_task_and_skill_edits_change_packet_without_changing_saved_state() {
     let (_temp, root) = project_copy();
     let workflow = root.join(".unelos/workflows/implement-feature.yaml");
-    let yaml = fs::read_to_string(&workflow)
-        .unwrap()
-        .replace("start: plan", "start: implement");
+    let yaml = replace_fixture_text(
+        &read_fixture_text(&workflow),
+        "start: plan",
+        "start: implement",
+    );
     fs::write(
         &workflow,
-        yaml.replace("    inputs: [plan.md]\n", "    inputs: []\n"),
+        replace_fixture_text(&yaml, "    inputs: [plan.md]\n", "    inputs: []\n"),
     )
     .unwrap();
     let project = load_project(&root, "implement-feature").unwrap();
     let state = start(&project, "live-edit", "request").unwrap();
     let state_path = root.join(".unelos/runs/live-edit/state.json");
     let bytes = fs::read(&state_path).unwrap();
-    let mut definitions = fs::read_to_string(root.join(".unelos/project.yaml")).unwrap();
-    definitions = definitions.replace(
+    let definitions = replace_fixture_text(
+        &read_fixture_text(root.join(".unelos/project.yaml")),
         "Implement the supplied plan and report verification.",
         "Changed task live.",
     );
-    definitions = definitions.replace(
+    let definitions = replace_fixture_text(
+        &definitions,
         "Follow existing project conventions.",
         "Changed agent live.",
     );
@@ -76,10 +117,15 @@ fn live_task_and_skill_edits_change_packet_without_changing_saved_state() {
 fn incompatible_live_edits_error_without_rewriting_state_or_paths() {
     let (_temp, root) = project_copy();
     let workflow = root.join(".unelos/workflows/implement-feature.yaml");
-    let yaml = fs::read_to_string(&workflow)
-        .unwrap()
-        .replace("start: plan", "start: implement")
-        .replace("    inputs: [plan.md]\n", "    inputs: []\n");
+    let yaml = replace_fixture_text(
+        &replace_fixture_text(
+            &read_fixture_text(&workflow),
+            "start: plan",
+            "start: implement",
+        ),
+        "    inputs: [plan.md]\n",
+        "    inputs: []\n",
+    );
     fs::write(&workflow, yaml).unwrap();
     let project = load_project(&root, "implement-feature").unwrap();
     start(&project, "incompatible", "request").unwrap();
@@ -93,19 +139,19 @@ fn incompatible_live_edits_error_without_rewriting_state_or_paths() {
 
 #[test]
 fn removed_or_changed_current_task_definition_errors_without_mutating_state() {
-    let original = fs::read_to_string(
+    let original = read_fixture_text(
         Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/project/.unelos/workflows/implement-feature.yaml"),
-    )
-    .unwrap();
+    );
     let node = "  plan:\n    task: create-plan\n    agent: planner\n    outputs: [plan.md]\n    next: approve-plan\n";
     for edit in [
-        original.replace(node, ""),
-        original.replace(
+        replace_fixture_text(&original, node, ""),
+        replace_fixture_text(
+            &original,
             node,
             "  plan:\n    type: human-gate\n    next:\n      approved: done\n      rejected: done\n",
         ),
-        original.replace("outputs: [plan.md]", "outputs: [changed.md]"),
+        replace_fixture_text(&original, "outputs: [plan.md]", "outputs: [changed.md]"),
     ] {
         let (_temp, root) = project_copy();
         let project = load_project(&root, "implement-feature").unwrap();
@@ -159,9 +205,11 @@ fn rejects_input_nodes_and_unsafe_names_without_publishing() {
         assert!(start(&project, name, "request").is_err(), "{name:?}");
     }
     let workflow = root.join(".unelos/workflows/implement-feature.yaml");
-    let yaml = fs::read_to_string(&workflow)
-        .unwrap()
-        .replace("start: plan", "start: implement");
+    let yaml = replace_fixture_text(
+        &read_fixture_text(&workflow),
+        "start: plan",
+        "start: implement",
+    );
     fs::write(&workflow, yaml).unwrap();
     let project = load_project(&root, "implement-feature").unwrap();
     assert!(start(&project, "inputs", "request").is_err());
@@ -224,7 +272,8 @@ fn added_parallel_worker_does_not_reallocate_saved_work() {
     let saved = fs::read(&path).unwrap();
     fs::write(
         &workflow,
-        parallel.replace(
+        replace_fixture_text(
+            parallel,
             "    next: done",
             "      - {task: create-plan, agent: planner}\n    next: done",
         ),
@@ -428,10 +477,11 @@ fn rejects_existing_run_path_and_unsafe_runtime_components_without_publication()
         fs::write(root.join(".unelos/workflows/implement-feature.yaml"), workflow).unwrap();
         if expected == "unsafe-agent" {
             let project_path = root.join(".unelos/project.yaml");
-            let project_yaml = fs::read_to_string(&project_path).unwrap();
+            let project_yaml = read_fixture_text(&project_path);
             fs::write(
                 project_path,
-                project_yaml.replace(
+                replace_fixture_text(
+                    &project_yaml,
                     "agents:\n",
                     "agents:\n  \"../escape\":\n    instructions: unsafe\n",
                 ),
