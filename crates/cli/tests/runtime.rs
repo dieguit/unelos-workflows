@@ -60,6 +60,75 @@ fn selection_start_status_next_and_node_completion() {
 }
 
 #[test]
+fn gate_rejections_and_reads_preserve_published_progression() {
+    let temp = project_copy();
+    let root = temp.path();
+    let started = result(root, &["start", "implement-feature"]);
+    let state_path =
+        std::path::Path::new(started["runDirectory"].as_str().unwrap()).join("state.json");
+    let pointer_path = root.join(".unelos/active-run");
+    let bytes = || {
+        (
+            fs::read(&state_path).unwrap(),
+            fs::read(&pointer_path).unwrap(),
+        )
+    };
+
+    let task_before = bytes();
+    result(root, &["status"]);
+    let packet = result(root, &["next"]);
+    assert_eq!(packet, result(root, &["next"]));
+    assert_eq!(bytes(), task_before);
+
+    let plan_path = packet["outputs"][0]["path"].as_str().unwrap();
+    fs::write(plan_path, "Plan").unwrap();
+    result(root, &["complete", "plan"]);
+    let gate_before = bytes();
+    result(root, &["status"]);
+    let gate = result(root, &["next"]);
+    assert_eq!(gate, result(root, &["next"]));
+    assert_eq!(bytes(), gate_before);
+
+    for reason in ["", " ", "\u{2003}"] {
+        let output = command(root)
+            .args(["reject", "approve-plan", "--reason", reason])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2), "{output:?}");
+        assert!(output.stdout.is_empty());
+        let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert_eq!(error["error"]["code"], "invalid_runtime_state");
+        assert!(error["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("reason"));
+        assert_eq!(bytes(), gate_before);
+    }
+
+    fs::remove_file(plan_path).unwrap();
+    for args in [
+        vec!["approve", "approve-plan"],
+        vec!["reject", "approve-plan", "--reason", "Explain rollback."],
+    ] {
+        let output = command(root).args(args).output().unwrap();
+        assert_eq!(output.status.code(), Some(2), "{output:?}");
+        assert!(output.stdout.is_empty());
+        let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert_eq!(error["error"]["code"], "invalid_runtime_state");
+        assert!(error["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains(plan_path));
+        assert_eq!(bytes(), gate_before);
+    }
+    fs::write(plan_path, "Plan").unwrap();
+    assert_eq!(
+        result(root, &["approve", "approve-plan"])["current"]["nodeId"],
+        "implement"
+    );
+}
+
+#[test]
 fn selection_validates_every_discovered_definition() {
     let temp = project_copy();
     let workflows = temp.path().join(".unelos/workflows");
@@ -287,11 +356,20 @@ fn rejection_correction_and_finished_state_survive_process_restarts() {
     write_outputs(&final_review, "Review approved");
     result(root, &["complete", "review", "--outcome", "approved"]);
 
+    let finished_bytes = fs::read(&state_path).unwrap();
+    let pointer_bytes = fs::read(root.join(".unelos/active-run")).unwrap();
     let finished = result(root, &["status"]);
     assert_eq!(finished["status"], "finished");
     assert_eq!(finished["runId"], run_id);
     assert_eq!(finished["history"].as_array().unwrap().len(), 8);
-    assert_eq!(result(root, &["next"])["kind"], "finished");
+    let finished_packet = result(root, &["next"]);
+    assert_eq!(finished_packet["kind"], "finished");
+    assert_eq!(finished_packet, result(root, &["next"]));
+    assert_eq!(fs::read(&state_path).unwrap(), finished_bytes);
+    assert_eq!(
+        fs::read(root.join(".unelos/active-run")).unwrap(),
+        pointer_bytes
+    );
 }
 
 #[test]

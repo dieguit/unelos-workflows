@@ -72,11 +72,15 @@ The seven runtime commands are `start [WORKFLOW] [--name NAME]`, `status`,
 `reject NODE --reason REASON`, and `rename NAME --run RUN_ID`. `start` without
 a Workflow lists sorted choices without creating a run; with a Workflow it
 creates a run and returns its summary. `status` reports idle when no run exists;
-`next` returns the current packet. `complete NODE` confirms the declared outputs
-and advances; no execution ID or separate confirmation command is used. Node-only
-mutations cannot distinguish a delayed duplicate call from a later visit to the
-same Node; inspect `status`/`next` after an uncertain result instead of retrying
-blindly.
+`next` returns the current packet using the current authoring files: Definitions
+and Skills are not snapshotted. CLI start persists empty request text; the
+controller supplies conversation context and records required answers in reports.
+Persisted progression alone does not preserve unsaved conversation context.
+`complete NODE` explicitly confirms existing declared output files for current
+work and advances after validation. Unchanged reviewed outputs are allowed; the
+CLI does not automatically check content/mtime freshness or report quality.
+Node-only mutations cannot identify a delayed callback to a later visit to the
+same Node; inspect `status`/`next` after an uncertain result, never blindly retry.
 
 See [coordinator instructions](docs/coordinator-instructions.md) and the
 [manual runtime walkthrough](docs/manual-runtime-cli-qa.md). Instructions are
