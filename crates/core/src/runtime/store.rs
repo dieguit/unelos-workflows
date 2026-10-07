@@ -583,7 +583,8 @@ mod tests {
         let pointer = fs::read(project_root.join(".unelos/active-run")).unwrap();
         let project = crate::load_project(&project_root, "implement-feature").unwrap();
         let candidate =
-            super::super::prepare_completion(&project, &active, "task-1", None, None).unwrap();
+            super::super::completion::prepare_completion(&project, &active, "task-1", None, None)
+                .unwrap();
         let error = store.update_with(&candidate, |path, _| {
             Err(path_error(
                 path,
