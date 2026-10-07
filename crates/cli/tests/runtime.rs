@@ -156,10 +156,10 @@ fn explicit_name_rename_and_mutations_preserve_identity() {
     assert_eq!(state["history"][1]["reason"], "Revise scope.");
     let feedback = result(root, &["next"])["feedback"].clone();
     assert_eq!(feedback["reason"], "Revise scope.");
-    assert!(feedback["artifacts"][0]["path"]
-        .as_str()
-        .unwrap()
-        .ends_with("/plan/plan.md"));
+    assert!(
+        std::path::Path::new(feedback["artifacts"][0]["path"].as_str().unwrap())
+            .ends_with(std::path::Path::new("plan").join("plan.md"))
+    );
 }
 
 #[test]
@@ -253,10 +253,12 @@ fn rejection_correction_and_finished_state_survive_process_restarts() {
     );
     let revised = result(root, &["next"]);
     assert_eq!(revised["feedback"]["reason"], "Explain the rollback.");
-    assert!(revised["feedback"]["artifacts"][0]["path"]
-        .as_str()
-        .unwrap()
-        .ends_with("/plan/plan.md"));
+    assert!(std::path::Path::new(
+        revised["feedback"]["artifacts"][0]["path"]
+            .as_str()
+            .unwrap()
+    )
+    .ends_with(std::path::Path::new("plan").join("plan.md")));
     write_outputs(&revised, "Plan v2 with rollback.");
     result(root, &["complete", "plan"]);
     result(root, &["approve", "approve-plan"]);

@@ -189,7 +189,11 @@ fn rename_moves_reports_preserves_id_and_refreshes_packet_paths() {
     assert_eq!(status(&root).unwrap(), renamed);
     let packet = serde_json::to_value(next(&root).unwrap()).unwrap();
     let path = packet["outputs"][0]["path"].as_str().unwrap();
-    assert!(path.contains("/fix-save-button/plan/plan.md"));
+    assert!(std::path::Path::new(path).ends_with(
+        std::path::Path::new("fix-save-button")
+            .join("plan")
+            .join("plan.md")
+    ));
     assert_eq!(fs::read_to_string(path).unwrap(), "Keep these bytes");
     assert_eq!(
         fs::read_to_string(root.join(".unelos/runs/fix-save-button/ledger.md")).unwrap(),
