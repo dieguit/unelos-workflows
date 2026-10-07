@@ -14,6 +14,43 @@ fn project_copy() -> (TempDir, camino::Utf8PathBuf) {
     (temp, root)
 }
 
+fn normalize_fixture_text(text: &str) -> String {
+    text.replace("\r\n", "\n")
+}
+
+fn read_fixture_text(path: impl AsRef<std::path::Path>) -> String {
+    normalize_fixture_text(&fs::read_to_string(path).unwrap())
+}
+
+fn replace_fixture_text(text: &str, from: &str, to: &str) -> String {
+    let text = normalize_fixture_text(text);
+    assert!(text.contains(from), "fixture edit did not match: {from:?}");
+    text.replace(from, to)
+}
+
+#[test]
+fn multiline_fixture_edits_match_lf_and_crlf() {
+    let source = read_fixture_text(
+        Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/project/.unelos/workflows/implement-feature.yaml"),
+    );
+    let node = "  plan:\n    task: create-plan\n    agent: planner\n    outputs: [plan.md]\n    next: approve-plan\n";
+    let inputs = "inputs: [plan.md]\n    outputs: [implementation-report.md]";
+
+    for source in [source.clone(), source.replace('\n', "\r\n")] {
+        let edited = replace_fixture_text(&source, node, "  plan:\n    type: human-gate\n");
+        let edited = replace_fixture_text(
+            &edited,
+            inputs,
+            "inputs: [phantom.md]\n    outputs: [implementation-report.md]",
+        );
+
+        assert!(edited.contains("  plan:\n    type: human-gate\n"));
+        assert!(edited.contains("inputs: [phantom.md]\n    outputs: [implementation-report.md]"));
+        assert!(!edited.contains(node));
+    }
+}
+
 #[test]
 fn completion_requires_confirmation_and_enters_the_waiting_gate() {
     let (_temp, root) = project_copy();
@@ -61,10 +98,10 @@ fn execution(state: &unelos_core::RunState) -> &unelos_core::ExecutionRecord {
 fn completion_routes_a_correction_loop_with_fresh_ids_and_feedback() {
     let (_temp, root) = project_copy();
     let workflow = root.join(".unelos/workflows/implement-feature.yaml");
-    let source = fs::read_to_string(&workflow).unwrap();
+    let source = read_fixture_text(&workflow);
     fs::write(
         &workflow,
-        source.replacen("next: approve-plan", "next: implement", 1),
+        replace_fixture_text(&source, "next: approve-plan", "next: implement"),
     )
     .unwrap();
     let project = load_project(&root, "implement-feature").unwrap();
@@ -162,10 +199,10 @@ fn invalid_identity_and_outcome_completions_leave_state_bytes_unchanged() {
 fn outcome_routes_require_an_exact_declared_label() {
     let (_temp, root) = project_copy();
     let workflow = root.join(".unelos/workflows/implement-feature.yaml");
-    let source = fs::read_to_string(&workflow).unwrap();
+    let source = read_fixture_text(&workflow);
     fs::write(
         &workflow,
-        source.replacen("next: approve-plan", "next: implement", 1),
+        replace_fixture_text(&source, "next: approve-plan", "next: implement"),
     )
     .unwrap();
     let project = load_project(&root, "implement-feature").unwrap();
@@ -211,9 +248,11 @@ fn finished_and_reentered_runs_reject_duplicate_or_old_run_completion() {
     confirm_current(&root, &state, "plan");
     fs::write(
         root.join(".unelos/workflows/implement-feature.yaml"),
-        fs::read_to_string(root.join(".unelos/workflows/implement-feature.yaml"))
-            .unwrap()
-            .replacen("next: approve-plan", "next: done", 1),
+        replace_fixture_text(
+            &read_fixture_text(root.join(".unelos/workflows/implement-feature.yaml")),
+            "next: approve-plan",
+            "next: done",
+        ),
     )
     .unwrap();
     let finished = complete(&root, &state.run_id, "task-1", None, None).unwrap();
@@ -239,9 +278,11 @@ fn compatible_live_next_edit_is_used_and_unconfirmed_or_missing_outputs_fail() {
     confirm_outputs(&root, "task-1").unwrap();
     fs::write(
         root.join(".unelos/workflows/implement-feature.yaml"),
-        fs::read_to_string(root.join(".unelos/workflows/implement-feature.yaml"))
-            .unwrap()
-            .replacen("next: approve-plan", "next: done", 1),
+        replace_fixture_text(
+            &read_fixture_text(root.join(".unelos/workflows/implement-feature.yaml")),
+            "next: approve-plan",
+            "next: done",
+        ),
     )
     .unwrap();
     let completed = complete(&root, &state.run_id, "task-1", None, None).unwrap();
@@ -267,17 +308,16 @@ fn confirmed_completion_rechecks_that_outputs_remain_regular_files() {
 
 #[test]
 fn incompatible_live_bindings_and_missing_successor_skill_do_not_advance() {
-    let original = fs::read_to_string(
+    let original = read_fixture_text(
         Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/project/.unelos/workflows/implement-feature.yaml"),
-    )
-    .unwrap();
+    );
     for edited in [
-        original.replacen("outputs: [plan.md]", "outputs: [changed.md]", 1),
-        original.replacen(
+        replace_fixture_text(&original, "outputs: [plan.md]", "outputs: [changed.md]"),
+        replace_fixture_text(
+            &original,
             "  plan:\n    task: create-plan\n    agent: planner\n    outputs: [plan.md]\n    next: approve-plan\n",
             "  plan:\n    type: human-gate\n    next:\n      approved: implement\n      rejected: implement\n",
-            1,
         ),
     ] {
         let (_temp, root) = project_copy();
@@ -295,7 +335,7 @@ fn incompatible_live_bindings_and_missing_successor_skill_do_not_advance() {
     let workflow = root.join(".unelos/workflows/implement-feature.yaml");
     fs::write(
         &workflow,
-        original.replacen("next: approve-plan", "next: implement", 1),
+        replace_fixture_text(&original, "next: approve-plan", "next: implement"),
     )
     .unwrap();
     let project = load_project(&root, "implement-feature").unwrap();
@@ -307,13 +347,11 @@ fn incompatible_live_bindings_and_missing_successor_skill_do_not_advance() {
     let before = fs::read(&path).unwrap();
     fs::write(
         &workflow,
-        original
-            .replacen("next: approve-plan", "next: implement", 1)
-            .replacen(
-                "inputs: [plan.md]\n    outputs: [implementation-report.md]",
-                "inputs: []\n    outputs: [implementation-report.md]",
-                1,
-            ),
+        replace_fixture_text(
+            &replace_fixture_text(&original, "next: approve-plan", "next: implement"),
+            "inputs: [plan.md]\n    outputs: [implementation-report.md]",
+            "inputs: []\n    outputs: [implementation-report.md]",
+        ),
     )
     .unwrap();
     assert!(complete(&root, &state.run_id, "task-2", None, None).is_err());
@@ -323,7 +361,7 @@ fn incompatible_live_bindings_and_missing_successor_skill_do_not_advance() {
     let workflow = root.join(".unelos/workflows/implement-feature.yaml");
     fs::write(
         &workflow,
-        original.replacen("next: approve-plan", "next: implement", 1),
+        replace_fixture_text(&original, "next: approve-plan", "next: implement"),
     )
     .unwrap();
     let project = load_project(&root, "implement-feature").unwrap();
@@ -366,14 +404,15 @@ fn parallel_completion_requires_only_confirmed_parent_aggregate() {
 fn missing_successor_producer_input_fails_without_persisting_completion() {
     let (_temp, root) = project_copy();
     let workflow = root.join(".unelos/workflows/implement-feature.yaml");
-    let source = fs::read_to_string(&workflow).unwrap();
-    let source = source.replacen("next: approve-plan", "next: implement", 1);
-    let source = source.replacen(
+    let source = read_fixture_text(&workflow);
+    let source = replace_fixture_text(&source, "next: approve-plan", "next: implement");
+    let source = replace_fixture_text(
+        &source,
         "inputs: [plan.md]\n    outputs: [implementation-report.md]",
         "inputs: [phantom.md]\n    outputs: [implementation-report.md]",
-        1,
     );
-    let source = source.replace(
+    let source = replace_fixture_text(
+        &source,
         "  done:\n    type: end\n",
         "  unvisited:\n    task: create-plan\n    agent: planner\n    outputs: [phantom.md]\n    next: done\n  done:\n    type: end\n",
     );
@@ -391,10 +430,10 @@ fn missing_successor_producer_input_fails_without_persisting_completion() {
 fn successor_directory_failure_does_not_advance_state() {
     let (_temp, root) = project_copy();
     let workflow = root.join(".unelos/workflows/implement-feature.yaml");
-    let source = fs::read_to_string(&workflow).unwrap();
+    let source = read_fixture_text(&workflow);
     fs::write(
         &workflow,
-        source.replacen("next: approve-plan", "next: implement", 1),
+        replace_fixture_text(&source, "next: approve-plan", "next: implement"),
     )
     .unwrap();
     let project = load_project(&root, "implement-feature").unwrap();
@@ -422,10 +461,10 @@ fn successor_directory_symlink_failure_does_not_write_outside_run() {
 
     let (_temp, root) = project_copy();
     let workflow = root.join(".unelos/workflows/implement-feature.yaml");
-    let source = fs::read_to_string(&workflow).unwrap();
+    let source = read_fixture_text(&workflow);
     fs::write(
         &workflow,
-        source.replacen("next: approve-plan", "next: implement", 1),
+        replace_fixture_text(&source, "next: approve-plan", "next: implement"),
     )
     .unwrap();
     let project = load_project(&root, "implement-feature").unwrap();
