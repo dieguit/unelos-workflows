@@ -1,6 +1,6 @@
 import { readFile, realpath } from 'node:fs/promises';
 import { cliJson, readCurrent } from './cli.js';
-import { CONTEXT_TAG, controllerText, validatePacket,
+import { CONTEXT_TAG, controllerText, workflowChoices, validatePacket,
   validateModel, requireConfiguration } from './packet.js';
 
 const OWNER = 'unelos.opencode';
@@ -44,14 +44,14 @@ async function commandGuidance(binary, project, words) {
   if (words[0] === 'off') return 'Continue without Unelos. Do not issue Unelos progression commands in this session.';
   const current = await readCurrent(binary, project);
   if (['running', 'waiting'].includes(current.status.status)) {
-    return `Continue the existing run ${JSON.stringify(current.status.runId)}; never replace it.`;
+    return `Existing run: ${JSON.stringify(current.status.runId)}. Recover current state and report it: read fresh next, then the ledger brief and existing reports. This command does not authorize Task work or progression. Honor the user's latest instructions; do not dispatch workers, write reports/ledger, complete, decide a gate, start another run, or rename during recovery. Wait for explicit authorization to resume Task work; a human gate still requires the user's explicit decision for that gate.`;
   }
   if (words[1]) return `Workflow explicitly selected: ${JSON.stringify(words[1])}. Obtain the agreed goal, supply a descriptive name at start, and write the ledger brief before work. Core validates the Workflow.`;
   if (current.status.status === 'finished' && !words.length) {
     return 'The current run is finished. Report that result; do not start another run.';
   }
   const workflows = current.workflows ?? (await cliJson(binary, project, 'start')).workflows;
-  return `Offer Workflow choices ${JSON.stringify(workflows)} and Continue without Unelos (/unelos off); wait for selection even if there is only one choice.`;
+  return workflowChoices(workflows);
 }
 
 function metadataFor(session, project, off) {

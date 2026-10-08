@@ -83,6 +83,18 @@ test('malformed packets fail before rendering or preflight', () => {
     { code: 'invalid_packet' });
 });
 
+test('idle controller delivers numbered choices including opt-out without auto-selecting', () => {
+  for (const workflows of [[], ['guide'], ['guide', 'review']]) {
+    const text = controllerText({ workflows }, options);
+    const lines = text.split('\n').filter(line => /^\d+\. /.test(line));
+    const expected = workflows.map((name, index) => `${index + 1}. ${name}`);
+    expected.push(`${workflows.length + 1}. Continue without Unelos (/unelos off)`);
+    assert.deepEqual(lines, expected);
+    assert.ok(text.includes('Reply with a number or Workflow name'));
+    assert.ok(text.includes('wait for explicit selection'));
+  }
+});
+
 test('model references retain slash IDs and requested variants; unavailable settings reject', () => {
   assert.deepEqual(parseModel('provider/family/model#high'),
     { providerID: 'provider', id: 'family/model', variant: 'high' });

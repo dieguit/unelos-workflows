@@ -40,15 +40,25 @@ never overwrite it. V2 registers its command natively, with no Markdown copy.
 Default `binary` is `unelos`; it is executed directly, never interpreted by a shell.
 Restart/reload your native project's plugins after configuration changes.
 
+Project Task/Agent definitions and prompts are in `.unelos/project.yaml`
+(`taskDefinitions`, `agents`); `.unelos/workflows/*.yaml` references them.
+No native OpenCode Agent configs are generated. The integration delivers their
+resolved instructions/settings through the selected packet.
+
 ## Use
 
-- `/unelos`: activate this controller; offer Workflow choices if idle, continue
-  existing work if running/waiting, report finished if finished.
+- `/unelos`: activate this controller; offer Workflow choices if idle, recover
+  and report existing state if running/waiting, report finished if finished.
 - `/unelos start`: offer choices, including after a finished run.
 - `/unelos start WORKFLOW`: explicitly select a Workflow; an existing unfinished
-  run is continued, never replaced.
+  run is recovered and reported, never replaced.
 - `/unelos off`: Continue without Unelos; clear only this session's activation.
   The run and unrelated native metadata stay unchanged.
+
+Workflow choices are delivered as a numbered list, with Continue without Unelos
+last. Reply with a number or Workflow name; the controller maps the reply to the
+displayed choices and asks if ambiguous. The bootstrap includes a compact CLI
+reference, so routine operations should not need repeated help discovery.
 
 Supply your goal in ordinary conversation. Controller starts with a descriptive
 name and records the agreed goal/constraints under `## Brief` in the supplied
@@ -56,6 +66,10 @@ name and records the agreed goal/constraints under `## Brief` in the supplied
 then ledger/reports; missing brief means ask, not invent. Only the controller
 writes the ledger; decisions needed downstream belong in declared reports.
 Native activation persists across restart. Fresh sessions require `/unelos`.
+Existing-run commands do not authorize execution or progression: after recovery,
+explicitly ask to resume Task work, or give an explicit decision for the current
+human gate. Latest user constraints remain in force. This is wording, not a
+permission sandbox; earlier V1 recovery failures still require manual QA.
 Moved sessions require explicit reactivation in the new project. Children never
 inherit controller bootstrap.
 

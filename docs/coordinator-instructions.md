@@ -5,7 +5,9 @@ The raw CLI does not install or inject these instructions. The optional
 `/unelos`, `/unelos start`, `/unelos start WORKFLOW`, and `/unelos off`.
 Activate only the current main session. When idle, offer discovered Workflow
 choices plus **Continue without Unelos** (`/unelos off`) and wait for selection.
-Continue running/waiting work; report finished rather than silently starting
+Recover and report running/waiting state without authorizing execution or
+progression; wait for explicit authorization to resume Task work, or an explicit
+decision for the current gate. Report finished rather than silently starting
 again. `/unelos start` may offer new choices after finished. Ordinary sessions
 and children do not inherit controller bootstrap. See
 [native verification limits](opencode-delivery-verification.md).

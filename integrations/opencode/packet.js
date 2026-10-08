@@ -73,6 +73,14 @@ export function executorText(packet, brief, workerKey) {
   ].join('\n\n');
 }
 
+export function workflowChoices(workflows) {
+  if (!stringArray(workflows)) fail('invalid_packet', 'Invalid Workflow choices');
+  return ['Present this numbered list; wait for explicit selection even if there is only one Workflow:',
+    ...workflows.map((name, index) => `${index + 1}. ${name}`),
+    `${workflows.length + 1}. Continue without Unelos (/unelos off)`,
+    'Reply with a number or Workflow name. Map the reply to this displayed list; ask if ambiguous. Never auto-start.'].join('\n');
+}
+
 export function controllerText(current, { binary, project, bootstrap, version }) {
   const header = [CONTEXT_TAG, bootstrap,
     `CLI executable: ${JSON.stringify(binary)}; project: ${JSON.stringify(project)}`,
@@ -81,9 +89,7 @@ export function controllerText(current, { binary, project, bootstrap, version })
       ? 'Native worker tool: task(subagent_type, description, prompt, task_id for continuation).'
       : 'Native worker tool: subagent(agent, description, prompt, model, sessionID for continuation).'];
   if (!current.packet) {
-    if (!stringArray(current.workflows)) fail('invalid_packet', 'Invalid Workflow choices');
-    return [...header, 'Workflow choices; wait for explicit selection:',
-      JSON.stringify(current.workflows), 'Continue without Unelos: /unelos off'].join('\n\n');
+    return [...header, workflowChoices(current.workflows)].join('\n\n');
   }
   const packet = validatePacket(current.packet);
   if (!strings(packet, ['ledgerPath', 'controllerInstructions'])) {

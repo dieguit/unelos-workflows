@@ -98,12 +98,32 @@ for (const version of ['v1', 'v2']) {
     await f.context(event); assert.equal(f.blocks(event).length, 0); assert.deepEqual(f.calls(), []);
     await f.command(''); assert.equal(f.session.metadata['unelos.opencode'].project, f.project);
     assert.deepEqual(f.session.metadata.other, { keep: true });
-    assert.ok(JSON.stringify(f.prompts).includes('wait for selection'));
+    assert.ok(JSON.stringify(f.prompts).includes('wait for explicit selection'));
     const count = f.calls().length;
     await f.command('off'); assert.equal(f.session.metadata['unelos.opencode'], undefined);
     assert.equal(f.calls().length, count);
     await f.context(event); assert.equal(f.blocks(event).length, 0);
     assert.deepEqual(f.session.metadata.other, { keep: true });
+  });
+  test(`${version}: idle command and delivered context share numbered choices and CLI operations`, async t => {
+    const f = await fixture(t, version);
+    await f.command('');
+    const command = f.prompts.at(-1);
+    const commandText = version === 'v2' ? command.text : command.parts.find(part => part.type === 'text').text;
+    const event = f.event(); await f.context(event);
+    const context = f.blocks(event)[0].text;
+    const choices = text => text.split('\n').filter(line => /^\d+\. /.test(line));
+    assert.deepEqual(choices(commandText), ['1. guide', '2. Continue without Unelos (/unelos off)']);
+    assert.deepEqual(choices(context), choices(commandText));
+    for (const operation of ['status --json', 'next --json', 'start --json',
+      'start WORKFLOW --name NAME --json', 'complete NODE --json',
+      'complete NODE --outcome OUTCOME --json', 'approve NODE --json',
+      'reject NODE --reason REASON --json', 'rename NAME --run RUN_ID --json']) {
+      assert.ok(context.includes(operation), `Missing operation guidance: ${operation}`);
+    }
+    assert.ok(context.includes('supplied CLI executable'));
+    assert.ok(context.includes('--project'));
+    assert.ok(f.calls().every(command => ['status', 'start'].includes(command)));
   });
   test(`${version}: repeated callbacks replace owned content; changed Skill and restart recover same identity`, async t => {
     const f = await fixture(t, version); f.set(task); await f.command('');
@@ -143,6 +163,25 @@ for (const version of ['v1', 'v2']) {
       assert.ok(!f.calls().slice(count).includes('start'));
     }
     await f.command('start'); assert.ok(f.calls().includes('start'));
+  });
+  test(`${version}: existing-run command delivers recovery-only guidance, not authorization to continue`, async t => {
+    const f = await fixture(t, version);
+    for (const packet of [task, { kind: 'human-gate', runId: task.runId, nodeId: 'approve', activationId: 'gate-2',
+      artifacts: [], decisions: ['approved', 'rejected'], rejectionReasonRequired: true,
+      ledgerPath: task.ledgerPath, controllerInstructions: 'Wait for approval' }]) {
+      f.set(packet);
+      for (const command of ['', 'start', 'start guide']) {
+        await f.command(command);
+        const output = f.prompts.at(-1);
+        const text = version === 'v2' ? output.text : output.parts.find(part => part.type === 'text').text;
+        assert.ok(text.includes('Recover current state and report it'));
+        assert.ok(text.includes('does not authorize Task work or progression'));
+        assert.ok(text.includes("Honor the user's latest instructions"));
+        assert.ok(text.includes('r-000001'));
+        assert.ok(!text.includes('Continue the existing run'));
+      }
+    }
+    assert.ok(f.calls().every(command => ['status', 'next'].includes(command)));
   });
   test(`${version}: configured main model applied at admission and checked at dispatch`, async t => {
     const f = await fixture(t, version); f.set({ ...task, model: 'provider/required' }); await f.command('');

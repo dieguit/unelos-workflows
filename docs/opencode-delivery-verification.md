@@ -68,6 +68,21 @@ native-written reports/brief (not a repeat main/worker-generation acceptance).
 `retest-next-*`, `retest-recovery`, `retest-verdict.json` retain both results.
 Original failed snapshots were not overwritten or called passing.
 
+Follow-up manual-QA preparation corrected the existing-run native command from
+“Continue the existing run” to recovery-only guidance that explicitly does not
+authorize Task work/progression and honors the latest user constraints. The V1
+Markdown template was aligned; both native command paths have regression checks.
+This removes a conflicting prompt, not an enforcement boundary. Earlier failures
+remain evidence; native adherence with the corrected command awaits manual QA.
+
+Subsequent manual QA found unnumbered choices and repeated CLI help discovery.
+Command/context delivery now share a deterministic numbered list and accept
+number/name selection instructions. Bootstrap now includes exact CLI grammar,
+Node-only mutation/approval rules and project definition locations. Regression
+checks verify delivered payloads, not that every model follows the guidance.
+The installed synthetic `qa-draft` fixture/run was archived outside the test
+project for a future realistic workflow; automatic orchestration remains T16.
+
 Hooks invoke only read-only CLI operations. These failures are actual native
 model tool behavior; the package does not add a permission sandbox or guarantee
 instruction adherence. **Do not claim full V1 recovery support or T15 acceptance**
