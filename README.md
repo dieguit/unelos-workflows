@@ -83,8 +83,11 @@ Node-only mutations cannot identify a delayed callback to a later visit to the
 same Node; inspect `status`/`next` after an uncertain result, never blindly retry.
 
 See [coordinator instructions](docs/coordinator-instructions.md) and the
-[manual runtime walkthrough](docs/manual-runtime-cli-qa.md). Instructions are
-not automatically injected and no plugin or slash command is installed.
+[manual runtime walkthrough](docs/manual-runtime-cli-qa.md). The raw CLI does not
+inject instructions. Optional [OpenCode delivery](integrations/opencode/README.md)
+installs explicit `/unelos` activation; see its
+[verification limits](docs/opencode-delivery-verification.md). The controller
+records the agreed brief in `ledger.md`; CLI request text remains unchanged.
 
 ### Local Skill resolution (T03)
 

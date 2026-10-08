@@ -1,0 +1,20 @@
+taskDefinitions:
+  outline-guide:
+    instructions: |
+      Read guide.md and the supplied outline Skill. The agreed goal and audience
+      are supplied by the controller. Write a short outline at the declared path.
+      Preserve existing useful sections. This is a delivery check: report the
+      path and do not call progression commands; the operator controls this check.
+    skills: [outline]
+  review-guide:
+    instructions: |
+      Read guide.md, the bound outline, existing report and supplied readability
+      checklist. Review for the audience in the controller-supplied brief.
+      Write findings at the declared output path; preserve useful sections.
+      Return changed paths. Never edit the ledger or call progression commands.
+    skills: [readability]
+agents:
+  writer:
+    instructions: Make the setup guide understandable for engineers new to the project.
+  reviewer:
+    instructions: Cite actual checklist criteria rather than only repeating markers.

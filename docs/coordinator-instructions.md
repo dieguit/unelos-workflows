@@ -1,15 +1,22 @@
 # Unelos coordinator instructions
 
-These are repository instructions for a future harness bootstrap. T12 does not
-install or inject them. `/unelos`, `/unelos start`, and `/unelos start WORKFLOW`
-are future entry points, not implemented slash commands: the first two should
-offer discovered Workflow choices plus **Continue without Unelos**, wait for a
-selection, then start it; the third should select that Workflow directly.
+The raw CLI does not install or inject these instructions. The optional
+[OpenCode package](../integrations/opencode/README.md) supplies explicit
+`/unelos`, `/unelos start`, `/unelos start WORKFLOW`, and `/unelos off`.
+Activate only the current main session. When idle, offer discovered Workflow
+choices plus **Continue without Unelos** (`/unelos off`) and wait for selection.
+Recover and report running/waiting state without authorizing execution or
+progression; wait for explicit authorization to resume Task work, or an explicit
+decision for the current gate. Report finished rather than silently starting
+again. `/unelos start` may offer new choices after finished. Ordinary sessions
+and children do not inherit controller bootstrap. See
+[native verification limits](opencode-delivery-verification.md).
 
 For conversational requests, run `unelos start` to discover choices. Offer
 suitable choices and **Continue without Unelos**; wait for the user's selection.
 For the latter, do not use Unelos progression commands. Start the selected
-Workflow with `unelos start WORKFLOW`. No CLI interview exists.
+Workflow with `unelos start WORKFLOW --name DESCRIPTIVE_NAME` after agreeing on
+the goal. No CLI interview exists.
 
 ## Running work
 
@@ -17,12 +24,21 @@ Workflow with `unelos start WORKFLOW`. No CLI interview exists.
   information according to the Task instructions and persist answers in reports.
   Empty request text is not permission to invent requirements.
 - CLI start persists empty request text. The controller supplies conversation
-  context and records required answers in reports; Definitions and Skills load
+  context and records the agreed goal/constraints under `## Brief` in the supplied
+  run ledger before Task work (create that file if absent at initial start).
+  Record required downstream answers in reports; Definitions and Skills load
   from current authoring files, not snapshots. Persisted progression alone does
   not preserve unsaved conversation context.
 - Fetch `unelos next` before execution or recovery. Treat persisted state as the
   progression authority. Honor selected Skills, placement, and configuration;
   surface harness capabilities that are unsupported.
+- Recover by reading the ledger brief and applicable reports after fresh `next`.
+  Missing/unclear brief means ask, not invent. Ledger prose never authorizes
+  destinations or gates. Do not automatically redispatch, replay report writes,
+  rename or advance on recovery; wait for authorization to resume Task work.
+- Supplied selected Skill bodies are already loaded. Never re-resolve ambient
+  names. Worker context is code-prepared with the relevant brief separately;
+  exclude controller ledger metadata/duties. Production worker dispatch is T16.
 - Read existing outputs and update them in place, preserving useful content.
   Only the coordinator writes ledger progress, decisions received, and artifact
   change notes. Workers do not edit ledgers or authorize progression.
