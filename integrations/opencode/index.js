@@ -81,9 +81,13 @@ export default {
   async setup(ctx) {
     const binary = binaryOption(ctx.options);
     const bootstrap = await readFile(new URL('./bootstrap.md', import.meta.url), 'utf8');
-    const models = async project => (await ctx.model.list({ location: { directory: project } }))
-      .map(item => ({ providerID: item.providerID, id: item.id, enabled: item.enabled,
+    const models = async project => {
+      const result = await ctx.model.list({ location: { directory: project } });
+      if (!Array.isArray(result.data)) throw error('model_catalogue_unavailable',
+        'Unelos (v2): native model catalogue unavailable');
+      return result.data.map(item => ({ providerID: item.providerID, id: item.id, enabled: item.enabled,
         variants: Array.isArray(item.variants) ? item.variants.map(variant => variant.id) : [] }));
+    };
     const get = async sessionID => checkSession(await ctx.session.get({ sessionID }), sessionID);
     await ctx.command.transform(editor => editor.add({
       name: 'unelos', description: 'Select or continue an explicitly activated Unelos workflow',

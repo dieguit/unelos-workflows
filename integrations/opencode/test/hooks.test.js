@@ -53,7 +53,9 @@ console.log(fs.readFileSync(project+'/'+command+'.json','utf8'));
         hook: async (name, fn) => { hooks.set(name, fn); },
       },
       command: { transform: async fn => fn({ add: command => commands.set(command.name, command) }) },
-      model: { list: async ({ location }) => { assert.equal(location.directory, project); return models; } },
+      model: { list: async ({ location }) => {
+        assert.equal(location.directory, project); return { location, data: models };
+      } },
     };
     f.restart = () => plugin.setup(ctx);
     await f.restart();

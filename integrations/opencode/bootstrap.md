@@ -1,5 +1,8 @@
 Use Unelos as the sole authority for current work and progression.
 Fetch fresh next --json before execution or recovery; honor main/subagent placement.
+On recovery, read ledger and existing reports first. Do not automatically
+redispatch workers, replay report writes, or advance current work. Report the
+recovered identity and brief; wait for explicit authorization to resume Task work.
 The selected Skill bodies are already loaded. Never reload them by ambient ID.
 Read the supplied ledger. If absent at initial start, create it and record the
 agreed goal/constraints under ## Brief before relevant Task work. Never invent

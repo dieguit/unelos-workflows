@@ -20,7 +20,7 @@ V2:
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugins": [{"package":"file:///absolute/path/to/package/index.js",
+  "plugins": [{"package":"file:///absolute/path/to/package",
     "options":{"binary":"/absolute/path/to/unelos"}}]
 }
 ```
