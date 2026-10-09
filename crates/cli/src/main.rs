@@ -1,15 +1,19 @@
 use camino::Utf8PathBuf;
 use clap::{Parser, Subcommand};
 use std::{
-    io::{self, Write},
+    io::{self, Read, Write},
     process::ExitCode,
 };
 use unelos_core::{
-    approve_node, build_graph, complete_node, inspect_node, list_workflows, load_project, next,
-    reject_node, rename_run, start_workflow, status, validate_project, ContextError,
-    ProjectLoadError, ProjectValidationError, RuntimeError, Settings, SettingsError,
+    approve_node, build_graph, complete_node, execution_continue, execution_mutate, execution_new,
+    execution_next, execution_resume, execution_runs, execution_start, inspect_node,
+    list_workflows, load_project, next, reject_node, rename_run, start_workflow, status,
+    validate_project, ContextError, ContinuationControl, ExecutionControl, ExecutionError,
+    ExecutionOperation, ProjectLoadError, ProjectValidationError, RuntimeError, Settings,
+    SettingsError,
 };
 
+mod opencode;
 mod runtime_output;
 
 #[derive(Parser)]
@@ -33,6 +37,19 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Install a Workflow and optionally generate native OpenCode agents.
+    Install {
+        workflow: String,
+        #[arg(long)]
+        source: Option<Utf8PathBuf>,
+        #[arg(long, value_enum)]
+        opencode: Option<opencode::Version>,
+    },
+    /// Core-owned execution packages and identity-guarded progression.
+    Execution {
+        #[command(subcommand)]
+        command: ExecutionCommand,
+    },
     /// Inspect application settings.
     Config {
         #[command(subcommand)]
@@ -52,26 +69,40 @@ enum Command {
         #[arg(long, requires = "workflow")]
         name: Option<String>,
     },
-    /// Show active run status and history.
-    Status,
+    /// Show selected run status and history.
+    Status {
+        #[command(flatten)]
+        target: RunSelector,
+    },
     /// Read the current work packet without advancing it.
-    Next,
+    Next {
+        #[command(flatten)]
+        target: RunSelector,
+    },
     /// Confirm current Task/parallel outputs and advance the named Node.
     Complete {
+        #[command(flatten)]
+        target: RunSelector,
         node: String,
         /// Outcome for an outcome-map Node.
         #[arg(long)]
         outcome: Option<String>,
     },
     /// Approve the current human gate.
-    Approve { node: String },
+    Approve {
+        node: String,
+        #[command(flatten)]
+        target: RunSelector,
+    },
     /// Reject the current human gate with feedback.
     Reject {
+        #[command(flatten)]
+        target: RunSelector,
         node: String,
         #[arg(long, required = true)]
         reason: String,
     },
-    /// Rename the active run without changing its immutable run ID.
+    /// Rename the selected run without changing its immutable run ID.
     Rename {
         name: String,
         #[arg(long = "run", required = true)]
@@ -83,6 +114,47 @@ enum Command {
 enum ConfigCommand {
     /// Show the effective settings.
     Show,
+}
+
+#[derive(Subcommand)]
+enum ExecutionCommand {
+    New,
+    Runs,
+    Resume {
+        #[command(flatten)]
+        target: RunSelector,
+    },
+    Next {
+        #[command(flatten)]
+        target: RunSelector,
+    },
+    Start {
+        workflow: String,
+        #[arg(long)]
+        name: Option<String>,
+    },
+    Complete {
+        #[command(flatten)]
+        target: RunSelector,
+    },
+    Approve {
+        #[command(flatten)]
+        target: RunSelector,
+    },
+    Reject {
+        #[command(flatten)]
+        target: RunSelector,
+    },
+    Continue {
+        #[command(flatten)]
+        target: RunSelector,
+    },
+}
+
+#[derive(clap::Args)]
+struct RunSelector {
+    #[arg(long = "run")]
+    run_id: String,
 }
 
 #[tokio::main]
@@ -104,6 +176,10 @@ async fn main() -> ExitCode {
 
 #[derive(Debug, thiserror::Error)]
 enum Error {
+    #[error(transparent)]
+    Install(#[from] unelos_core::InstallError),
+    #[error(transparent)]
+    Execution(#[from] ExecutionError),
     #[error("{0}")]
     Settings(#[from] SettingsError),
     #[error("{0}")]
@@ -127,15 +203,17 @@ enum Error {
 impl Error {
     fn code(&self) -> &'static str {
         match self {
+            Self::Install(error) => error.code,
+            Self::Execution(error) => error.code(),
             Self::Settings(_) => "invalid_settings",
             Self::ProjectLoad(_) => "project_load_failed",
             Self::ProjectValidation(_) => "invalid_project",
             Self::Context(_) => "context_resolution_failed",
             Self::Runtime(error) => match error {
                 RuntimeError::WrongNode { .. } => "wrong_node",
-                RuntimeError::NoActiveRun { .. } => "no_active_run",
+                RuntimeError::UnknownRun { .. } => "unknown_run",
                 RuntimeError::InvalidName { .. } => "invalid_run_name",
-                RuntimeError::ActiveRun { .. } => "active_run_exists",
+                RuntimeError::DuplicateRunId { .. } => "duplicate_run_id",
                 RuntimeError::Collision { .. } => "run_name_collision",
                 RuntimeError::StaleRun { .. } => "wrong_run",
                 RuntimeError::InvalidState(_) => "invalid_runtime_state",
@@ -176,6 +254,91 @@ fn run(cli: &Cli) -> Result<(), Error> {
         subscriber.try_init().map_err(Error::Logging)?;
     }
     match &cli.command {
+        Command::Install {
+            workflow,
+            source,
+            opencode,
+        } => {
+            if opencode.is_some() {
+                let agents = unelos_core::export_workflow_agents(
+                    source.as_deref().unwrap_or(&cli.project),
+                    workflow,
+                )?;
+                opencode::check_agents(&cli.project, &agents)?;
+            }
+            let installed =
+                unelos_core::install_workflow(&cli.project, source.as_deref(), workflow)?;
+            let native_agents = match opencode {
+                Some(version) => opencode::write_agents(&cli.project, *version, &installed.agents)?,
+                None => Vec::new(),
+            };
+            let value = serde_json::json!({"workflow":installed.workflow,"agents":installed.agents,"nativeAgents":native_agents});
+            emit(
+                &value,
+                cli.json,
+                format!("Installed workflow {}", installed.workflow),
+            )?;
+        }
+        Command::Execution { command } => {
+            if matches!(command, ExecutionCommand::Runs) {
+                let value = serde_json::to_value(execution_runs(&cli.project)?)?;
+                return emit(&value, cli.json, runtime_output::readable_packet(&value));
+            }
+            let mutating = matches!(
+                command,
+                ExecutionCommand::Start { .. }
+                    | ExecutionCommand::Complete { .. }
+                    | ExecutionCommand::Approve { .. }
+                    | ExecutionCommand::Reject { .. }
+            );
+            let package = match command {
+                ExecutionCommand::New => execution_new(&cli.project)?,
+                ExecutionCommand::Resume { target } => {
+                    execution_resume(&cli.project, &target.run_id)?
+                }
+                ExecutionCommand::Next { target } => execution_next(&cli.project, &target.run_id)?,
+                ExecutionCommand::Start { workflow, name } => {
+                    execution_start(&cli.project, workflow, name.as_deref())?
+                }
+                ExecutionCommand::Continue { target } => execution_continue(
+                    &cli.project,
+                    &target.run_id,
+                    &read_control::<ContinuationControl>()?,
+                )?,
+                operation => {
+                    let (operation, target) = match operation {
+                        ExecutionCommand::Complete { target } => {
+                            (ExecutionOperation::Complete, target)
+                        }
+                        ExecutionCommand::Approve { target } => {
+                            (ExecutionOperation::Approve, target)
+                        }
+                        ExecutionCommand::Reject { target } => (ExecutionOperation::Reject, target),
+                        _ => unreachable!(),
+                    };
+                    execution_mutate(
+                        &cli.project,
+                        &target.run_id,
+                        operation,
+                        &read_control::<ExecutionControl>()?,
+                    )?
+                }
+            };
+            let value = serde_json::to_value(&package).map_err(|error| {
+                if mutating {
+                    mutation_response_error(package.run_id.as_deref())
+                } else {
+                    Error::Serialize(error)
+                }
+            })?;
+            emit(&value, cli.json, runtime_output::readable(&value)).map_err(|error| {
+                if mutating {
+                    mutation_response_error(package.run_id.as_deref())
+                } else {
+                    error
+                }
+            })?;
+        }
         Command::Config {
             command: ConfigCommand::Show,
         } => {
@@ -232,35 +395,39 @@ fn run(cli: &Cli) -> Result<(), Error> {
             };
             emit(&value, cli.json, runtime_output::readable(&value))?;
         }
-        Command::Status => {
-            let value = match status(&cli.project) {
-                Ok(state) => {
-                    runtime_output::status(&cli.project, &state).map_err(Error::RuntimeOutput)?
-                }
-                Err(RuntimeError::NoActiveRun { .. }) => serde_json::json!({"status":"idle"}),
-                Err(error) => return Err(error.into()),
-            };
+        Command::Status { target } => {
+            let state = status(&cli.project, &target.run_id)?;
+            let value =
+                runtime_output::status(&cli.project, &state).map_err(Error::RuntimeOutput)?;
             emit(&value, cli.json, runtime_output::readable(&value))?;
         }
-        Command::Next => {
-            let packet = next(&cli.project)?;
+        Command::Next { target } => {
+            let packet = next(&cli.project, &target.run_id)?;
             let value = serde_json::to_value(packet)?;
             emit(&value, cli.json, runtime_output::readable_packet(&value))?;
         }
-        Command::Complete { node, outcome } => {
-            let state = complete_node(&cli.project, node, outcome.as_deref())?;
+        Command::Complete {
+            node,
+            outcome,
+            target,
+        } => {
+            let state = complete_node(&cli.project, &target.run_id, node, outcome.as_deref())?;
             let value =
                 runtime_output::summary(&cli.project, &state).map_err(Error::RuntimeOutput)?;
             emit(&value, cli.json, runtime_output::readable(&value))?;
         }
-        Command::Approve { node } => {
-            let state = approve_node(&cli.project, node)?;
+        Command::Approve { node, target } => {
+            let state = approve_node(&cli.project, &target.run_id, node)?;
             let value =
                 runtime_output::summary(&cli.project, &state).map_err(Error::RuntimeOutput)?;
             emit(&value, cli.json, runtime_output::readable(&value))?;
         }
-        Command::Reject { node, reason } => {
-            let state = reject_node(&cli.project, node, reason)?;
+        Command::Reject {
+            node,
+            reason,
+            target,
+        } => {
+            let state = reject_node(&cli.project, &target.run_id, node, reason)?;
             let value =
                 runtime_output::summary(&cli.project, &state).map_err(Error::RuntimeOutput)?;
             emit(&value, cli.json, runtime_output::readable(&value))?;
@@ -283,6 +450,32 @@ fn emit(value: &serde_json::Value, json: bool, readable: String) -> Result<(), E
     };
     writeln!(io::stdout().lock(), "{output}")?;
     Ok(())
+}
+
+fn mutation_response_error(run_id: Option<&str>) -> Error {
+    ExecutionError::Protocol {
+        code: "mutation_uncertain",
+        message: format!("State committed but response unavailable; reconcile with execution next --run {}; never blindly retry", run_id.unwrap_or("RUN_ID")),
+    }
+    .into()
+}
+
+fn read_control<T: serde::de::DeserializeOwned>() -> Result<T, Error> {
+    let invalid = || {
+        Error::Execution(ExecutionError::Protocol {
+            code: "invalid_control",
+            message: "Provide one valid execution control JSON object (maximum 1 MiB)".into(),
+        })
+    };
+    let mut bytes = Vec::new();
+    io::stdin()
+        .take(1024 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| invalid())?;
+    if bytes.len() > 1024 * 1024 {
+        return Err(invalid());
+    }
+    serde_json::from_slice(&bytes).map_err(|_| invalid())
 }
 
 fn render_error(error: &Error, json: bool) -> String {

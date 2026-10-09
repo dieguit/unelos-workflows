@@ -13,7 +13,7 @@ pub fn complete(
     reason: Option<&str>,
 ) -> Result<RunState, RuntimeError> {
     let store = store::RunStore::open(project_root)?;
-    let state = store.active()?;
+    let state = store.run(run_id)?;
     if state.run_id != run_id {
         return Err(RuntimeError::StaleRun {
             expected: run_id.into(),

@@ -3,7 +3,9 @@
 Checked 2026-10-08: **OpenCode V1.18.29**, **V2.0.25** isolated and alongside
 existing plugins. The opt-in package is implemented; **full acceptance is not
 green**. V1 recovery replay remains a model-adherence blocker, not fixed by
-delivery hooks. Production dispatch/question relay remains T16.
+delivery hooks. Subsequent execution implementation and user-run setup are in
+[T16 verification](opencode-execution-verification.md); that report does not
+replace the historical failures below.
 
 ## Installation and evidence
 
@@ -92,3 +94,6 @@ V1 effective-tool inspection and authored variant inventory remain unverified.
 Package regression suite: `node --test integrations/opencode/test/*.test.js`.
 Core/CLI request handling and progression grammar remain unchanged; CLI mutations
 are still Node-only, without stale-same-Node callback protection.
+# Historical report
+
+Current architecture/evidence: [thin native adapter](opencode-thin-adapter-verification.md).

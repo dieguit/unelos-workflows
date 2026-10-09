@@ -158,12 +158,15 @@ fn next_keeps_frozen_inputs_and_feedback_and_rejects_missing_bound_files() {
     let state_path = root.join(".unelos/runs/frozen-binding/state.json");
     fs::write(&state_path, serde_json::to_vec(&state).unwrap()).unwrap();
 
-    let first = serde_json::to_value(next(&root).unwrap()).unwrap();
+    let first = serde_json::to_value(next(&root, "frozen-binding").unwrap()).unwrap();
     assert_eq!(first["feedback"]["reason"], "Clarify design");
-    assert_eq!(serde_json::to_value(next(&root).unwrap()).unwrap(), first);
+    assert_eq!(
+        serde_json::to_value(next(&root, "frozen-binding").unwrap()).unwrap(),
+        first
+    );
     fs::write(&original.path, "edited report bytes").unwrap();
     assert_eq!(
-        serde_json::to_value(next(&root).unwrap()).unwrap()["feedback"],
+        serde_json::to_value(next(&root, "frozen-binding").unwrap()).unwrap()["feedback"],
         first["feedback"]
     );
 
@@ -181,11 +184,11 @@ fn next_keeps_frozen_inputs_and_feedback_and_rejects_missing_bound_files() {
         reason: None,
     });
     fs::write(&state_path, serde_json::to_vec(&saved).unwrap()).unwrap();
-    let repeated = serde_json::to_value(next(&root).unwrap()).unwrap();
+    let repeated = serde_json::to_value(next(&root, "frozen-binding").unwrap()).unwrap();
     assert_eq!(repeated["inputs"][0]["path"], original.path.as_str());
 
     fs::remove_file(&original.path).unwrap();
-    assert!(next(&root).is_err());
+    assert!(next(&root, "frozen-binding").is_err());
     assert_eq!(state.current, saved.current);
     assert_eq!(
         feedback,
@@ -218,7 +221,7 @@ fn next_rejects_changed_live_input_declarations_without_rebinding() {
     let workflow = root.join(".unelos/workflows/implement-feature.yaml");
     let changed = text(&workflow).replace("inputs: [plan.md]", "inputs: []");
     fs::write(workflow, changed).unwrap();
-    assert!(next(&root).is_err());
+    assert!(next(&root, "changed-input").is_err());
     assert_eq!(fs::read(state_path).unwrap(), bytes);
 }
 
@@ -259,21 +262,24 @@ fn confirms_outputs_only_for_current_execution_and_rechecks_files() {
     let project = load_project(&root, "implement-feature").unwrap();
     let state = start(&project, "confirm-run", "request").unwrap();
 
-    assert!(verify_outputs(&root, "task-1").is_err());
-    assert!(confirm_outputs(&root, "task-1").is_err());
+    assert!(verify_outputs(&root, "confirm-run", "task-1").is_err());
+    assert!(confirm_outputs(&root, "confirm-run", "task-1").is_err());
     let path = root.join(".unelos/runs/confirm-run/plan/plan.md");
     fs::write(&path, "").unwrap();
-    let confirmed = confirm_outputs(&root, "task-1").unwrap();
-    assert!(verify_outputs(&root, "task-1").is_ok());
+    let confirmed = confirm_outputs(&root, "confirm-run", "task-1").unwrap();
+    assert!(verify_outputs(&root, "confirm-run", "task-1").is_ok());
     verify_work_outputs(&root, &confirmed, "task-1").unwrap();
-    assert_eq!(confirm_outputs(&root, "task-1").unwrap(), confirmed);
-    assert!(confirm_outputs(&root, "task-99").is_err());
+    assert_eq!(
+        confirm_outputs(&root, "confirm-run", "task-1").unwrap(),
+        confirmed
+    );
+    assert!(confirm_outputs(&root, "confirm-run", "task-99").is_err());
     let state_path = root.join(".unelos/runs/confirm-run/state.json");
     let confirmed_bytes = fs::read(&state_path).unwrap();
     fs::remove_file(&path).unwrap();
     fs::create_dir(&path).unwrap();
-    assert!(verify_outputs(&root, "task-1").is_err());
-    assert!(confirm_outputs(&root, "task-1").is_err());
+    assert!(verify_outputs(&root, "confirm-run", "task-1").is_err());
+    assert!(confirm_outputs(&root, "confirm-run", "task-1").is_err());
     assert_eq!(fs::read(&state_path).unwrap(), confirmed_bytes);
 
     let unconfirmed = state;
@@ -294,13 +300,13 @@ fn old_state_defaults_to_unconfirmed_and_receipts_must_match() {
         .remove("confirmedExecutionId");
     fs::write(&state_path, serde_json::to_vec(&saved).unwrap()).unwrap();
     assert!(
-        matches!(status(&root).unwrap().current, CurrentWork::Task(record) if record.confirmed_execution_id.is_none())
+        matches!(status(&root, "old-state").unwrap().current, CurrentWork::Task(record) if record.confirmed_execution_id.is_none())
     );
-    assert!(verify_outputs(&root, "task-1").is_err());
+    assert!(verify_outputs(&root, "old-state", "task-1").is_err());
 
     saved["current"]["confirmedExecutionId"] = "task-99".into();
     fs::write(&state_path, serde_json::to_vec(&saved).unwrap()).unwrap();
-    assert!(status(&root).is_err());
+    assert!(status(&root, "old-state").is_err());
 }
 
 #[test]
@@ -313,7 +319,7 @@ fn rework_resets_confirmation_even_when_it_reuses_the_output_path() {
     };
     let output = record.outputs[0].path.clone();
     fs::write(&output, "reviewed unchanged").unwrap();
-    let confirmed = confirm_outputs(&root, "task-1").unwrap();
+    let confirmed = confirm_outputs(&root, "reconfirm-run", "task-1").unwrap();
     assert!(matches!(confirmed.current, CurrentWork::Task(_)));
     state.history.push(CompletedExecution {
         work: confirmed.current.clone(),
@@ -341,21 +347,21 @@ fn confirmation_is_atomic_for_all_outputs_and_required_even_for_empty_outputs() 
         panic!("expected task")
     };
     fs::write(&record.outputs[0].path, "one").unwrap();
-    assert!(confirm_outputs(&root, "task-1").is_err());
+    assert!(confirm_outputs(&root, "atomic-confirm", "task-1").is_err());
     assert!(
-        matches!(status(&root).unwrap().current, CurrentWork::Task(record) if record.confirmed_execution_id.is_none())
+        matches!(status(&root, "atomic-confirm").unwrap().current, CurrentWork::Task(record) if record.confirmed_execution_id.is_none())
     );
     fs::write(&record.outputs[1].path, "two").unwrap();
-    confirm_outputs(&root, "task-1").unwrap();
-    assert!(verify_outputs(&root, "task-1").is_ok());
+    confirm_outputs(&root, "atomic-confirm", "task-1").unwrap();
+    assert!(verify_outputs(&root, "atomic-confirm", "task-1").is_ok());
 
     let (_temp, root) = project_copy();
     fs::write(root.join(".unelos/workflows/implement-feature.yaml"), "name: implement-feature\nstart: plan\nnodes:\n  plan:\n    task: create-plan\n    agent: planner\n    outputs: []\n    next: done\n  done:\n    type: end\n").unwrap();
     let project = load_project(&root, "implement-feature").unwrap();
     start(&project, "empty-confirm", "request").unwrap();
-    assert!(verify_outputs(&root, "task-1").is_err());
-    assert!(confirm_outputs(&root, "task-1").is_ok());
-    assert!(verify_outputs(&root, "task-1").is_ok());
+    assert!(verify_outputs(&root, "empty-confirm", "task-1").is_err());
+    assert!(confirm_outputs(&root, "empty-confirm", "task-1").is_ok());
+    assert!(verify_outputs(&root, "empty-confirm", "task-1").is_ok());
 }
 
 #[test]
@@ -369,10 +375,10 @@ fn parallel_verification_requires_only_parent_aggregate_outputs() {
     };
     fs::write(&record.outputs[0].path, "aggregate").unwrap();
     assert!(!record.worker_reports[0].report.path.exists());
-    confirm_outputs(&root, "task-1").unwrap();
-    assert!(verify_outputs(&root, "task-1").is_ok());
+    confirm_outputs(&root, "aggregate-only", "task-1").unwrap();
+    assert!(verify_outputs(&root, "aggregate-only", "task-1").is_ok());
     fs::remove_file(&record.outputs[0].path).unwrap();
-    assert!(verify_outputs(&root, "task-1").is_err());
+    assert!(verify_outputs(&root, "aggregate-only", "task-1").is_err());
 }
 
 #[test]
@@ -385,6 +391,6 @@ fn confirmation_rejects_gates_and_finished_work() {
         fs::write(root.join(".unelos/workflows/implement-feature.yaml"), workflow).unwrap();
         let project = load_project(&root, "implement-feature").unwrap();
         let state = start(&project, name, "request").unwrap();
-        assert!(confirm_outputs(&root, if state.is_finished() { "task-1" } else { "gate-1" }).is_err());
+        assert!(confirm_outputs(&root, name, if state.is_finished() { "task-1" } else { "gate-1" }).is_err());
     }
 }

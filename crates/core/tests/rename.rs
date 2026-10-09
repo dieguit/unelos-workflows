@@ -24,7 +24,7 @@ fn rename_rebases_history_gate_feedback_and_current_work_references() {
         panic!("task");
     };
     fs::write(&plan.outputs[0].path, "plan").unwrap();
-    confirm_outputs(&root, "task-1").unwrap();
+    confirm_outputs(&root, &started.run_id, "task-1").unwrap();
     let gate = complete(&root, &started.run_id, "task-1", None, None).unwrap();
     let rejected = reject(&root, &started.run_id, "gate-2", "revise").unwrap();
     let renamed = rename_run(&root, &started.run_id, "updated-feature").unwrap();
@@ -75,7 +75,7 @@ fn rename_rebases_history_gate_feedback_and_current_work_references() {
     assert_eq!(new_gate.execution_id, old_gate.execution_id);
     assert_eq!(new_gate.node_id, old_gate.node_id);
     assert_eq!(renamed.history[1].outcome.as_deref(), Some("rejected"));
-    assert_eq!(status(&root).unwrap(), renamed);
+    assert_eq!(status(&root, &started.run_id).unwrap(), renamed);
 }
 
 #[test]
@@ -101,7 +101,7 @@ fn rename_rebases_every_repeated_parallel_worker_report() {
             .path
             .starts_with(root.join(".unelos/runs/parallel-run")));
     }
-    let packet = next(&root).unwrap();
+    let packet = next(&root, &started.run_id).unwrap();
     let unelos_core::WorkPacket::Parallel(packet) = packet else {
         panic!("parallel packet");
     };
@@ -125,6 +125,7 @@ fn rename_validates_name_id_collision_and_same_name_settlement() {
     }
     fs::create_dir(root.join(".unelos/runs/collision")).unwrap();
     assert!(rename_run(&root, &started.run_id, "collision").is_err());
+    fs::remove_dir(root.join(".unelos/runs/collision")).unwrap();
     let settled = rename_run(&root, &started.run_id, &started.name).unwrap();
     assert!(!settled.naming_pending);
     assert_eq!(settled.run_id, started.run_id);
@@ -187,8 +188,8 @@ fn rename_moves_reports_preserves_id_and_refreshes_packet_paths() {
     );
     assert!(!renamed.naming_pending);
     assert!(!old_directory.exists());
-    assert_eq!(status(&root).unwrap(), renamed);
-    let packet = serde_json::to_value(next(&root).unwrap()).unwrap();
+    assert_eq!(status(&root, &started.run_id).unwrap(), renamed);
+    let packet = serde_json::to_value(next(&root, &started.run_id).unwrap()).unwrap();
     let path = packet["outputs"][0]["path"].as_str().unwrap();
     assert!(std::path::Path::new(path).ends_with(
         std::path::Path::new("fix-save-button")

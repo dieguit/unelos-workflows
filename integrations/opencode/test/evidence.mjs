@@ -6,7 +6,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { CONTEXT_TAG } from '../packet.js';
+// Historical T15 evidence format; independent of the current thin adapter.
+const CONTEXT_TAG = '<unelos-opencode-context>\n';
 
 const root = process.argv[2];
 if (!root) throw new Error('Pass a redacted native evidence directory');

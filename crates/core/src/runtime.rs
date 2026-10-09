@@ -10,14 +10,18 @@ use crate::{
 mod artifacts;
 mod commands;
 mod completion;
+mod execution;
 mod gates;
 mod rename;
+mod resume;
 mod store;
 
 pub use commands::{approve_node, complete_node, reject_node};
 pub use completion::complete;
+pub use execution::{execution_continue, execution_mutate, execution_next, execution_start};
 pub use gates::{approve, reject};
 pub use rename::rename_run;
+pub use resume::{execution_new, execution_resume, execution_runs};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -123,10 +127,10 @@ pub enum RuntimeError {
     },
     #[error("invalid run name {name:?}: expected lowercase ASCII letters/digits separated by hyphens, max 64 characters")]
     InvalidName { name: String },
-    #[error("no active run in {path}")]
-    NoActiveRun { path: Utf8PathBuf },
-    #[error("run {name:?} is already active")]
-    ActiveRun { name: String },
+    #[error("unknown run ID {run_id:?}; select an existing run explicitly")]
+    UnknownRun { run_id: String },
+    #[error("duplicate persisted run ID {run_id:?}")]
+    DuplicateRunId { run_id: String },
     #[error("run {name:?} already exists")]
     Collision { name: String },
     #[error("invalid persisted run state: {0}")]
@@ -222,6 +226,20 @@ fn start_prepared(
     naming_pending: bool,
     store: &store::RunStore,
 ) -> Result<RunState, RuntimeError> {
+    let state = prepare_start_state(project, run_id, name, request, naming_pending)?;
+    store.publish(&state, |run| {
+        artifacts::prepare_work_directories(&state, run)
+    })?;
+    Ok(state)
+}
+
+fn prepare_start_state(
+    project: &LoadedProject,
+    run_id: &str,
+    name: &str,
+    request: &str,
+    naming_pending: bool,
+) -> Result<RunState, RuntimeError> {
     let node_id = &project.workflow.start;
     check_component(node_id, "Node")?;
     let state = RunState {
@@ -238,9 +256,6 @@ fn start_prepared(
     };
     let state = artifacts::prepare_work(project, &state, node_id, None)?;
     crate::build_work_packet(project, artifacts::runtime_input(&state, project)?)?;
-    store.publish(&state, |run| {
-        artifacts::prepare_work_directories(&state, run)
-    })?;
     Ok(state)
 }
 
@@ -253,16 +268,21 @@ pub fn prepare_work(
     artifacts::prepare_work(project, state, node_id, feedback)
 }
 
-pub fn status(project_root: &Utf8Path) -> Result<RunState, RuntimeError> {
-    store::RunStore::open(project_root)?.active()
+pub fn list_runs(project_root: &Utf8Path) -> Result<Vec<RunState>, RuntimeError> {
+    store::RunStore::open(project_root)?.runs()
+}
+
+pub fn status(project_root: &Utf8Path, run_id: &str) -> Result<RunState, RuntimeError> {
+    store::RunStore::open(project_root)?.run(run_id)
 }
 
 pub fn confirm_outputs(
     project_root: &Utf8Path,
+    run_id: &str,
     expected_execution_id: &str,
 ) -> Result<RunState, RuntimeError> {
     let store = store::RunStore::open(project_root)?;
-    let mut state = store.active()?;
+    let mut state = store.run(run_id)?;
     state.expect_execution(expected_execution_id)?;
     let record = match &mut state.current {
         CurrentWork::Task(record) | CurrentWork::Parallel(record) => record,
@@ -287,10 +307,11 @@ pub fn confirm_outputs(
 
 pub fn verify_outputs(
     project_root: &Utf8Path,
+    run_id: &str,
     expected_execution_id: &str,
 ) -> Result<(), RuntimeError> {
     let store = store::RunStore::open(project_root)?;
-    let state = store.active()?;
+    let state = store.run(run_id)?;
     verify_work_outputs(project_root, &state, expected_execution_id)
 }
 
@@ -330,15 +351,23 @@ pub fn verify_work_outputs(
     Ok(())
 }
 
-pub fn next(project_root: &Utf8Path) -> Result<WorkPacket, RuntimeError> {
+pub fn next(project_root: &Utf8Path, run_id: &str) -> Result<WorkPacket, RuntimeError> {
     let store = store::RunStore::open(project_root)?;
-    let state = store.active()?;
+    let state = store.run(run_id)?;
     let project = crate::load_project(project_root, &state.workflow_name)?;
     crate::validate_project(&project)?;
     packet_for_state(&project, &state)
 }
 
 fn packet_for_state(project: &LoadedProject, state: &RunState) -> Result<WorkPacket, RuntimeError> {
+    packet_for_snapshot(project, state, true)
+}
+
+fn packet_for_snapshot(
+    project: &LoadedProject,
+    state: &RunState,
+    require_inputs: bool,
+) -> Result<WorkPacket, RuntimeError> {
     let record = match &state.current {
         CurrentWork::Task(record)
         | CurrentWork::Parallel(record)
@@ -356,7 +385,9 @@ fn packet_for_state(project: &LoadedProject, state: &RunState) -> Result<WorkPac
             return Ok(crate::build_work_packet(project, input)?);
         }
     };
-    artifacts::ensure_inputs_are_files(record)?;
+    if require_inputs {
+        artifacts::ensure_inputs_are_files(record)?;
+    }
     let node = project
         .workflow
         .nodes

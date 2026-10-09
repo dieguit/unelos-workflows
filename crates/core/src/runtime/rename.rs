@@ -22,7 +22,6 @@ enum RenameStage {
     IntentWritten,
     DirectoryMoved,
     StateWritten,
-    PointerWritten,
     BeforeClear,
 }
 
@@ -31,7 +30,7 @@ pub fn rename_run(root: &Utf8Path, run_id: &str, name: &str) -> Result<RunState,
         return Err(RuntimeError::InvalidName { name: name.into() });
     }
     let store = RunStore::open(root)?;
-    let state = store.active()?;
+    let state = store.run(run_id)?;
     if state.run_id != run_id {
         return Err(RuntimeError::StaleRun {
             expected: run_id.into(),
@@ -48,7 +47,7 @@ pub fn rename_run(root: &Utf8Path, run_id: &str, name: &str) -> Result<RunState,
         return Ok(settled);
     }
     rename_with_hook(&store, &state, name, |_| Ok(()))?;
-    store.active()
+    store.run(run_id)
 }
 
 fn rename_with_hook(
@@ -60,7 +59,7 @@ fn rename_with_hook(
     if !valid_run_name(name) {
         return Err(RuntimeError::InvalidName { name: name.into() });
     }
-    let active = store.active()?;
+    let active = store.run(&original.run_id)?;
     if active != *original {
         return Err(RuntimeError::StaleRun {
             expected: original.run_id.clone(),
@@ -114,16 +113,6 @@ pub(super) fn recover(store: &RunStore) -> Result<(), RuntimeError> {
     ensure_directory(&store.root().join(".unelos/runs"))?;
     validate_intent(store, &intent)?;
     let paths = paths(store.root(), &intent.old_name, &intent.new_name);
-    let pointer_path = store.root().join(".unelos/active-run");
-    store::reject_symlink(&pointer_path)?;
-    let pointer = fs::read_to_string(&pointer_path)
-        .map_err(|source| recovery_path_error(&pointer_path, source))?;
-    if pointer != intent.old_name && pointer != intent.new_name {
-        return Err(recovery_error(
-            &pointer_path,
-            "active pointer matches neither rename name",
-        ));
-    }
     let old_exists = exists(&paths.old)?;
     let new_exists = exists(&paths.new)?;
     match (old_exists, new_exists) {
@@ -202,10 +191,6 @@ fn finish(
     })?;
     store::atomic_write(&state_path, &bytes)?;
     hook(RenameStage::StateWritten)?;
-    let pointer = root.join(".unelos/active-run");
-    store::reject_symlink(&pointer)?;
-    store::atomic_write(&pointer, intent.new_name.as_bytes())?;
-    hook(RenameStage::PointerWritten)?;
     hook(RenameStage::BeforeClear)?;
     let journal = root.join(INTENT_FILE);
     fs::remove_file(&journal).map_err(|source| recovery_path_error(&journal, source))
@@ -352,7 +337,6 @@ mod tests {
             RenameStage::IntentWritten,
             RenameStage::DirectoryMoved,
             RenameStage::StateWritten,
-            RenameStage::PointerWritten,
             RenameStage::BeforeClear,
         ] {
             let (_temp, root) = project();
@@ -373,7 +357,7 @@ mod tests {
             });
             assert!(error.is_err());
             drop(store);
-            let recovered = crate::status(&root).unwrap();
+            let recovered = crate::status(&root, &started.run_id).unwrap();
             assert_eq!(recovered.run_id, started.run_id);
             assert_eq!(recovered.name, "recovered");
             assert!(!recovered.naming_pending);
@@ -383,16 +367,13 @@ mod tests {
                 fs::read_to_string(root.join(".unelos/runs/recovered/plan/plan.md")).unwrap(),
                 "preserve"
             );
-            assert_eq!(
-                fs::read_to_string(root.join(".unelos/active-run")).unwrap(),
-                "recovered"
-            );
+            assert!(!root.join(".unelos/active-run").exists());
         }
     }
 
     #[test]
     fn malformed_or_ambiguous_intents_fail_closed() {
-        for mutation in ["json", "version", "name", "both", "pointer", "destination"] {
+        for mutation in ["json", "version", "name", "both", "destination"] {
             let (_temp, root) = project();
             let original = crate::start_workflow(&root, "implement-feature", None).unwrap();
             let intent_path = root.join(INTENT_FILE);
@@ -420,7 +401,6 @@ mod tests {
                     fs::write(&intent_path, serde_json::to_vec(&value).unwrap()).unwrap();
                 }
                 "both" => fs::create_dir(&new).unwrap(),
-                "pointer" => fs::write(root.join(".unelos/active-run"), "some-other-run").unwrap(),
                 "destination" => {
                     fs::rename(&old, &new).unwrap();
                     let mut unrelated = original.clone();
@@ -433,7 +413,10 @@ mod tests {
                 }
                 _ => unreachable!(),
             }
-            assert!(crate::status(&root).is_err(), "accepted {mutation} intent");
+            assert!(
+                crate::status(&root, &original.run_id).is_err(),
+                "accepted {mutation} intent"
+            );
             assert!(intent_path.exists(), "cleared {mutation} intent");
         }
     }
@@ -464,7 +447,7 @@ mod tests {
                 fs::rename(&old, &saved).unwrap();
                 symlink(saved, old).unwrap();
             }
-            assert!(crate::status(&root).is_err());
+            assert!(crate::status(&root, &intent.original.run_id).is_err());
             assert!(intent_path.exists());
         }
     }
@@ -501,7 +484,7 @@ mod tests {
             drop(store);
 
             let intent = fs::read(root.join(INTENT_FILE)).ok();
-            let pointer = fs::read(root.join(".unelos/active-run")).unwrap();
+            let pointer = fs::read(root.join(".unelos/active-run")).ok();
             let old_state = old.join("state.json");
             let new_state = new.join("state.json");
             let old_state_before = old_state.exists().then(|| fs::read(&old_state).unwrap());
@@ -510,9 +493,9 @@ mod tests {
             let old_exists = old.exists();
             let new_exists = new.exists();
 
-            assert!(crate::status(&root).is_err());
+            assert!(crate::status(&root, &original.run_id).is_err());
             assert_eq!(fs::read(root.join(INTENT_FILE)).ok(), intent);
-            assert_eq!(fs::read(root.join(".unelos/active-run")).unwrap(), pointer);
+            assert_eq!(fs::read(root.join(".unelos/active-run")).ok(), pointer);
             assert_eq!(old.exists(), old_exists);
             assert_eq!(new.exists(), new_exists);
             assert_eq!(
@@ -547,14 +530,14 @@ mod tests {
         symlink(&target, old.join("ledger.md")).unwrap();
         let state_path = old.join("state.json");
         let state = fs::read(&state_path).unwrap();
-        let pointer = fs::read(root.join(".unelos/active-run")).unwrap();
+        let pointer = fs::read(root.join(".unelos/active-run")).ok();
 
         assert!(crate::rename_run(&root, &original.run_id, "rejected").is_err());
         assert!(!root.join(INTENT_FILE).exists());
         assert!(old.is_dir());
         assert!(!new.exists());
         assert_eq!(fs::read(&state_path).unwrap(), state);
-        assert_eq!(fs::read(root.join(".unelos/active-run")).unwrap(), pointer);
+        assert_eq!(fs::read(root.join(".unelos/active-run")).ok(), pointer);
         assert_eq!(fs::read(&target).unwrap(), b"external target");
         assert_eq!(fs::read_link(old.join("ledger.md")).unwrap(), target);
     }

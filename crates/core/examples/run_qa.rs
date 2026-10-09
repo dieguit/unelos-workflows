@@ -317,13 +317,17 @@ fn main() {
             let loaded = load_project(Utf8Path::new(project), workflow)?;
             Ok(serde_json::to_value(start(&loaded, name, request)?)?)
         })(),
-        [command, project] if command == "status" => json(status(Utf8Path::new(project))),
-        [command, project] if command == "next" => json(next(Utf8Path::new(project))),
-        [command, project, expected] if command == "confirm" => {
-            json(confirm_outputs(Utf8Path::new(project), expected))
+        [command, project, run_id] if command == "status" => {
+            json(status(Utf8Path::new(project), run_id))
         }
-        [command, project, expected] if command == "verify" => {
-            json(verify_outputs(Utf8Path::new(project), expected))
+        [command, project, run_id] if command == "next" => {
+            json(next(Utf8Path::new(project), run_id))
+        }
+        [command, project, run_id, expected] if command == "confirm" => {
+            json(confirm_outputs(Utf8Path::new(project), run_id, expected))
+        }
+        [command, project, run_id, expected] if command == "verify" => {
+            json(verify_outputs(Utf8Path::new(project), run_id, expected))
         }
         [command, project, run_id, expected, options @ ..] if command == "complete" => {
             match completion_options(options) {
@@ -346,7 +350,9 @@ fn main() {
                 Err(_) => usage(),
             }
         }
-        [command, project] if command == "bindings-demo" => bindings_demo(Utf8Path::new(project)),
+        [command, project, run_id] if command == "bindings-demo" => {
+            bindings_demo(Utf8Path::new(project), run_id)
+        }
         _ => usage(),
     };
 
@@ -367,7 +373,7 @@ fn main() {
 
 fn usage() -> ! {
     eprintln!(
-        "usage:\n  run_qa start PROJECT WORKFLOW NAME REQUEST\n  run_qa status PROJECT\n  run_qa next PROJECT\n  run_qa confirm PROJECT EXECUTION_ID\n  run_qa verify PROJECT EXECUTION_ID\n  run_qa complete PROJECT RUN_ID EXECUTION_ID [--outcome LABEL] [--reason TEXT]\n  run_qa approve PROJECT RUN_ID ACTIVATION_ID\n  run_qa reject PROJECT RUN_ID ACTIVATION_ID --reason TEXT\n  run_qa bindings-demo PROJECT"
+        "usage:\n  run_qa start PROJECT WORKFLOW NAME REQUEST\n  run_qa status PROJECT RUN_ID\n  run_qa next PROJECT RUN_ID\n  run_qa confirm PROJECT RUN_ID EXECUTION_ID\n  run_qa verify PROJECT RUN_ID EXECUTION_ID\n  run_qa complete PROJECT RUN_ID EXECUTION_ID [--outcome LABEL] [--reason TEXT]\n  run_qa approve PROJECT RUN_ID ACTIVATION_ID\n  run_qa reject PROJECT RUN_ID ACTIVATION_ID --reason TEXT\n  run_qa bindings-demo PROJECT RUN_ID"
     );
     process::exit(2)
 }
@@ -405,15 +411,18 @@ fn json<T: Serialize>(
     Ok(serde_json::to_value(result?)?)
 }
 
-fn bindings_demo(root: &Utf8Path) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-    let active = status(root)?;
+fn bindings_demo(
+    root: &Utf8Path,
+    run_id: &str,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let active = status(root, run_id)?;
     let CurrentWork::Task(plan) = &active.current else {
         return Err("bindings-demo requires current plan task work".into());
     };
     if plan.node_id != "plan" || active.workflow_name != "implement-feature" {
         return Err("bindings-demo requires the active implement-feature plan".into());
     }
-    verify_outputs(root, &plan.execution_id)?;
+    verify_outputs(root, run_id, &plan.execution_id)?;
     let state_path = root
         .join(".unelos/runs")
         .join(&active.name)

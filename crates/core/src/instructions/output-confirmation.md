@@ -1,0 +1,1 @@
+Before reporting completion, confirm all declared outputs by invoking `complete NODE`; this is output confirmation, and unchanged reviewed outputs may be confirmed. After an uncertain result inspect status and next, never blindly retry a Node-based mutation. Workers report produced or reviewed outputs to the controller. Workers never edit the ledger or authorize progression.

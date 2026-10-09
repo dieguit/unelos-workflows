@@ -1,0 +1,1 @@
+Dispatch every listed worker; relay questions and resume the same logical work. Wait for all reports, read them, then update aggregate outputs. A worker return or question never transitions the Node. Never complete a blocked or partial parent; report completion through Unelos.

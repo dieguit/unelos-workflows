@@ -26,6 +26,10 @@ import { Button } from "@/components/ui/button"
 executable; `src-tauri` owns the desktop adapter. Neither adapter depends on the
 other. Default Cargo commands build/test core and CLI without desktop dependencies.
 
+Review the shared agent rules in the [instruction catalog](crates/core/src/instructions/README.md).
+Markdown is embedded at build time; paths and identities are supplied separately
+in runtime packets.
+
 ```sh
 cargo run -p unelos-cli -- --help
 cargo run -p unelos-cli -- config show
