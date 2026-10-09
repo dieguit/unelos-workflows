@@ -10,6 +10,10 @@ fn source() -> TempDir {
         &["**/*"],
     )
     .unwrap();
+    // Exercise Windows checkout line endings on every platform.
+    let path = temp.path().join(".unelos/project.yaml");
+    let text = fs::read_to_string(&path).unwrap().replace("\r\n", "\n");
+    fs::write(path, text.replace('\n', "\r\n")).unwrap();
     temp
 }
 
@@ -87,10 +91,13 @@ fn native_models_variants_and_tool_requirements_are_not_permission_grants() {
         let source = source();
         let target = TempDir::new().unwrap();
         let path = source.path().join(".unelos/project.yaml");
-        let text = fs::read_to_string(&path).unwrap().replace(
-            "  t16-engineer:\n",
-            "  t16-engineer:\n    model: provider/vendor/model#high\n    tools: [read-file]\n",
-        );
+        let text = fs::read_to_string(&path)
+            .unwrap()
+            .replace("\r\n", "\n")
+            .replace(
+                "  t16-engineer:\n",
+                "  t16-engineer:\n    model: provider/vendor/model#high\n    tools: [read-file]\n",
+            );
         fs::write(path, text).unwrap();
         let output = install(&target, Some(&source), version);
         assert!(output.status.success(), "{output:?}");
@@ -117,7 +124,7 @@ fn unsupported_requirements_and_source_collisions_are_explicit() {
     let target = TempDir::new().unwrap();
     let source = source();
     let path = source.path().join(".unelos/project.yaml");
-    let original = fs::read_to_string(&path).unwrap();
+    let original = fs::read_to_string(&path).unwrap().replace("\r\n", "\n");
     fs::write(
         &path,
         original.replace(
