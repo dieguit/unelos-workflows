@@ -43,10 +43,7 @@ fn catalog_sources_are_delivered_with_runtime_paths_kept_separate() {
         },
     )
     .unwrap();
-    let package =
-        render_execution_package(Some(work), vec![], Some("Change greeting"), None).unwrap();
-    assert_eq!(package.controller_instructions, controller);
-    let WorkPacket::Task(task) = package.packet.unwrap() else {
+    let WorkPacket::Task(task) = work else {
         panic!("expected Task")
     };
     assert_eq!(
@@ -58,7 +55,29 @@ fn catalog_sources_are_delivered_with_runtime_paths_kept_separate() {
         task.packet.outputs[0].path,
         root.join(".unelos/runs/catalog-check/implement/implementation-report.md")
     );
-    let prompt = package.worker_prompt.unwrap();
-    assert!(prompt.ends_with(result.trim_end()));
-    assert!(prompt.contains(task.packet.outputs[0].path.as_str()));
+    for path in [
+        task.packet.outputs[0].path.clone(),
+        r"C:\project\.unelos\runs\catalog-check\implement\implementation-report.md".into(),
+    ] {
+        let mut task = task.clone();
+        task.packet.outputs[0].path = path.clone();
+        let package = render_execution_package(
+            Some(WorkPacket::Task(task)),
+            vec![],
+            Some("Change greeting"),
+            None,
+        )
+        .unwrap();
+        assert_eq!(package.controller_instructions, controller);
+        let prompt = package.worker_prompt.unwrap();
+        assert!(prompt.ends_with(result.trim_end()));
+        let json = prompt
+            .strip_prefix("Executor context:\n")
+            .unwrap()
+            .split_once("\n\nBrief:")
+            .unwrap()
+            .0;
+        let context: serde_json::Value = serde_json::from_str(json).unwrap();
+        assert_eq!(context["outputs"][0]["path"], path.as_str());
+    }
 }
