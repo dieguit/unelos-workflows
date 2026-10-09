@@ -136,6 +136,12 @@ fn process_probe() {
         return;
     }
 
+    let run_id = std::env::var(if matches!(operation.as_str(), "confirm" | "verify") {
+        "UNELOS_RUNTIME_PROBE_REQUEST"
+    } else {
+        "UNELOS_RUNTIME_PROBE_NAME"
+    })
+    .unwrap();
     let value = match operation.as_str() {
         "start" => {
             let project = unelos_core::load_project(root, "implement-feature").unwrap();
@@ -152,10 +158,11 @@ fn process_probe() {
                 }
             }
         }
-        "status" => serde_json::to_value(unelos_core::status(root).unwrap()).unwrap(),
-        "next" => serde_json::to_value(unelos_core::next(root).unwrap()).unwrap(),
+        "status" => serde_json::to_value(unelos_core::status(root, &run_id).unwrap()).unwrap(),
+        "next" => serde_json::to_value(unelos_core::next(root, &run_id).unwrap()).unwrap(),
         "confirm" => match unelos_core::confirm_outputs(
             root,
+            &run_id,
             &std::env::var("UNELOS_RUNTIME_PROBE_NAME").unwrap(),
         ) {
             Ok(state) => serde_json::to_value(state).unwrap(),
@@ -166,9 +173,10 @@ fn process_probe() {
         },
         "verify" => match unelos_core::verify_outputs(
             root,
+            &run_id,
             &std::env::var("UNELOS_RUNTIME_PROBE_NAME").unwrap(),
         ) {
-            Ok(()) => serde_json::to_value(unelos_core::status(root).unwrap()).unwrap(),
+            Ok(()) => serde_json::to_value(unelos_core::status(root, &run_id).unwrap()).unwrap(),
             Err(error) => {
                 eprintln!("{error}");
                 std::process::exit(1);
@@ -199,14 +207,14 @@ fn separate_processes_recover_the_same_run_and_work_packet() {
     assert!(start.0, "{}{}", start.1, start.2);
     let started = result(&start.1);
 
-    let status = finish_probe(probe(&root, "status", "", ""));
+    let status = finish_probe(probe(&root, "status", "process-run", ""));
     assert!(status.0, "{}{}", status.1, status.2);
     let recovered = result(&status.1);
     assert_eq!(recovered["request"], "A process request.");
     assert_eq!(recovered["runId"], started["runId"]);
     assert_eq!(recovered["current"], started["current"]);
 
-    let next = finish_probe(probe(&root, "next", "", ""));
+    let next = finish_probe(probe(&root, "next", "process-run", ""));
     assert!(next.0, "{}{}", next.1, next.2);
     let packet = result(&next.1);
     assert_eq!(packet["request"], "A process request.");
@@ -216,13 +224,13 @@ fn separate_processes_recover_the_same_run_and_work_packet() {
     assert!(Utf8Path::new(output).ends_with("process-run/plan/plan.md"));
     assert_eq!(recovered["current"]["outputs"][0]["path"], output);
     std::fs::write(output, "unchanged reviewed output").unwrap();
-    let confirmed = finish_probe(probe(&root, "confirm", "task-1", ""));
+    let confirmed = finish_probe(probe(&root, "confirm", "task-1", "process-run"));
     assert!(confirmed.0, "{}{}", confirmed.1, confirmed.2);
     assert_eq!(
         result(&confirmed.1)["current"]["confirmedExecutionId"],
         "task-1"
     );
-    let verified = finish_probe(probe(&root, "verify", "task-1", ""));
+    let verified = finish_probe(probe(&root, "verify", "task-1", "process-run"));
     assert!(verified.0, "{}{}", verified.1, verified.2);
     assert_eq!(
         result(&verified.1)["current"]["confirmedExecutionId"],
@@ -275,7 +283,7 @@ fn confirmation_waits_for_the_project_lock_and_preserves_history() {
     let (mut held, ready) = await_readiness(stdout, rx).unwrap();
     assert_eq!(ready.trim(), format!("{RESULT_PREFIX}ready"));
 
-    let mut confirmation = ChildGuard::new(probe(&root, "confirm", "task-1", ""));
+    let mut confirmation = ChildGuard::new(probe(&root, "confirm", "task-1", "confirm-lock"));
     std::thread::sleep(Duration::from_millis(50));
     assert!(confirmation
         .0
@@ -294,7 +302,7 @@ fn confirmation_waits_for_the_project_lock_and_preserves_history() {
     );
     let confirmation_output = wait_with_timeout(confirmation, Duration::from_secs(2)).unwrap();
     assert!(confirmation_output.status.success());
-    let confirmed = finish_probe(probe(&root, "status", "", ""));
+    let confirmed = finish_probe(probe(&root, "status", "confirm-lock", ""));
     assert!(confirmed.0, "{}{}", confirmed.1, confirmed.2);
     let confirmed = result(&confirmed.1);
     assert_eq!(confirmed["history"], serde_json::json!([]));
@@ -337,32 +345,24 @@ fn readiness_reader_error_drops_and_reaps_child() {
 }
 
 #[test]
-fn concurrent_start_processes_publish_exactly_one_active_run() {
+fn concurrent_start_processes_publish_independent_runs() {
     let (_temp, root) = project_copy();
     let first = ChildGuard::new(probe(&root, "start", "race-one", "Request one"));
     let second = ChildGuard::new(probe(&root, "start", "race-two", "Request two"));
     let first_out = wait_with_timeout(first, Duration::from_secs(10)).unwrap();
     let second_out = wait_with_timeout(second, Duration::from_secs(10)).unwrap();
-    assert_ne!(first_out.status.success(), second_out.status.success());
-
-    let winner = if first_out.status.success() {
-        result(std::str::from_utf8(&first_out.stdout).unwrap())
-    } else {
-        result(std::str::from_utf8(&second_out.stdout).unwrap())
-    };
-    let loser_stderr = if first_out.status.success() {
-        String::from_utf8(second_out.stderr).unwrap()
-    } else {
-        String::from_utf8(first_out.stderr).unwrap()
-    };
-    assert!(loser_stderr.contains("already active"), "{loser_stderr}");
-    let active_name = std::fs::read_to_string(root.join(".unelos/active-run")).unwrap();
-    assert_eq!(winner["name"], active_name);
-    let saved: Value = serde_json::from_slice(
-        &std::fs::read(root.join(format!(".unelos/runs/{active_name}/state.json"))).unwrap(),
-    )
-    .unwrap();
-    assert_eq!(saved, winner);
+    assert!(first_out.status.success());
+    assert!(second_out.status.success());
+    for output in [first_out, second_out] {
+        let run = result(std::str::from_utf8(&output.stdout).unwrap());
+        let name = run["name"].as_str().unwrap();
+        let saved: Value = serde_json::from_slice(
+            &std::fs::read(root.join(format!(".unelos/runs/{name}/state.json"))).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(saved, run);
+    }
+    assert!(!root.join(".unelos/active-run").exists());
 }
 
 #[test]
@@ -375,7 +375,7 @@ fn concurrent_completion_processes_advance_once_and_recover_gate() {
         .unwrap()
         .to_owned();
     std::fs::write(output, "plan").unwrap();
-    let confirmed = finish_probe(probe(&root, "confirm", "task-1", ""));
+    let confirmed = finish_probe(probe(&root, "confirm", "task-1", "completion-race"));
     assert!(confirmed.0, "{}{}", confirmed.1, confirmed.2);
 
     let first = ChildGuard::new(probe(&root, "complete", "completion-race", "task-1"));
@@ -390,12 +390,12 @@ fn concurrent_completion_processes_advance_once_and_recover_gate() {
     };
     assert!(loser.contains("stale execution"), "{loser}");
 
-    let status = finish_probe(probe(&root, "status", "", ""));
+    let status = finish_probe(probe(&root, "status", "completion-race", ""));
     assert!(status.0, "{}{}", status.1, status.2);
     let recovered = result(&status.1);
     assert_eq!(recovered["history"].as_array().unwrap().len(), 1);
     assert_eq!(recovered["current"]["kind"], "human-gate");
-    let packet = finish_probe(probe(&root, "next", "", ""));
+    let packet = finish_probe(probe(&root, "next", "completion-race", ""));
     assert!(packet.0, "{}{}", packet.1, packet.2);
     assert_eq!(result(&packet.1)["kind"], "human-gate");
 }

@@ -5,7 +5,7 @@ use serde::{
 use std::collections::BTreeMap;
 use std::fmt;
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectDefinitions {
     #[serde(default, rename = "taskDefinitions", deserialize_with = "strict_map")]
@@ -14,7 +14,7 @@ pub struct ProjectDefinitions {
     pub agents: BTreeMap<String, AgentDefinition>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TaskDefinition {
     #[serde(deserialize_with = "strict_string")]
@@ -27,7 +27,7 @@ pub struct TaskDefinition {
     pub outcomes: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentDefinition {
     #[serde(deserialize_with = "strict_string")]

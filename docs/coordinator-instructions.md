@@ -1,67 +1,53 @@
-# Unelos coordinator instructions
+# Unelos controller instructions
 
-The raw CLI does not install or inject these instructions. The optional
-[OpenCode package](../integrations/opencode/README.md) supplies explicit
-`/unelos`, `/unelos start`, `/unelos start WORKFLOW`, and `/unelos off`.
-Activate only the current main session. When idle, offer discovered Workflow
-choices plus **Continue without Unelos** (`/unelos off`) and wait for selection.
-Recover and report running/waiting state without authorizing execution or
-progression; wait for explicit authorization to resume Task work, or an explicit
-decision for the current gate. Report finished rather than silently starting
-again. `/unelos start` may offer new choices after finished. Ordinary sessions
-and children do not inherit controller bootstrap. See
-[native verification limits](opencode-delivery-verification.md).
+Authoritative shared instructions: [instruction catalog](../crates/core/src/instructions/README.md)
+and [core controller](../crates/core/src/instructions/controller.md).
+The [OpenCode adapter](../integrations/opencode/README.md) delivers those instructions
+and core-generated execution packages through native tools on V1/V2.
 
-For conversational requests, run `unelos start` to discover choices. Offer
-suitable choices and **Continue without Unelos**; wait for the user's selection.
-For the latter, do not use Unelos progression commands. Start the selected
-Workflow with `unelos start WORKFLOW --name DESCRIPTIVE_NAME` after agreeing on
-the goal. No CLI interview exists.
+- `/unelos` always begins fresh in the current main session. Offer available workflows
+  and Continue without Unelos; wait for selection. `/unelos resume` lists unfinished
+  runs; selection injects context and immediately authorizes ordinary Tasks until
+  missing essential context, a human gate or finish. Resume never approves a gate.
+- Bind the returned stable run ID only to this session. `/unelos off` affects only
+  this session. Independent runs do not isolate edits to shared source files.
+- Save the agreed goal/constraints in a nonempty `## Brief` in the controller-owned
+  ledger before delegation. Preserve existing reports in place.
+- Use the returned package, not repeated `next` reads. Forward its exact
+  `workerPrompt` to `nativeAgent`. Implementer and reviewer are separate native
+  workers. Selected Skill bodies are already resolved; missing project-required
+  resources block applicable work.
+- Inspect reports and real verification before `unelos_complete`. Core validates
+  framed FINISHED/NEEDS_CONTEXT/BLOCKED results, expected identity, files and outcomes
+  under the runtime lock. Native worker return alone is not success.
+- For every automated Task, main or delegated, complete an inspected valid FINISHED
+  result through `unelos_complete` and continue from its returned package. Never
+  hand completion to the user or stop at a success summary. Respect blockers,
+  human gates and the user's latest stop/scope constraints.
+- Only a returned `status: finished` confirms the run is done. Explicitly announce
+  "Task done; Unelos run finished", with a brief result and remaining verification
+  limitations; an accepted verification gap is not a passed check.
+- Relay worker questions; `unelos_continue` prepares the same-Task prompt. Continue
+  the same V1 `task_id` / V2 `sessionID` when available. A new-session resume may
+  recover in a new designated worker after reading existing reports, without changing
+  the Task ID or replaying edits. Save consequential answers in reports.
+- Present gate artifacts and obtain an explicit decision bound to the presented
+  activation before `unelos_approve` or `unelos_reject`. Task answers are not approval.
+- Mutations return the resulting package. After `mutation_uncertain`, read state;
+  never automatically retry. Read `next` for selection/recovery/reconciliation or
+  after explicit rename, which changes artifact paths.
+- `unelos_rename` requires expected run ID. Rename before worker dispatch or after
+  all workers using old paths finish; otherwise defer.
 
-## Running work
+Option A intentionally does not intercept dispatch or prove exact forwarding.
+Native agent configuration supplies model/variant settings; unauthored models
+inherit. Controller adherence remains required. Ordinary sessions do no automatic
+Unelos reads. No shell-called JS helper, worker database or per-request polling.
 
-- Bring relevant conversation context into the current work. Ask for missing
-  information according to the Task instructions and persist answers in reports.
-  Empty request text is not permission to invent requirements.
-- CLI start persists empty request text. The controller supplies conversation
-  context and records the agreed goal/constraints under `## Brief` in the supplied
-  run ledger before Task work (create that file if absent at initial start).
-  Record required downstream answers in reports; Definitions and Skills load
-  from current authoring files, not snapshots. Persisted progression alone does
-  not preserve unsaved conversation context.
-- Fetch `unelos next` before execution or recovery. Treat persisted state as the
-  progression authority. Honor selected Skills, placement, and configuration;
-  surface harness capabilities that are unsupported.
-- Recover by reading the ledger brief and applicable reports after fresh `next`.
-  Missing/unclear brief means ask, not invent. Ledger prose never authorizes
-  destinations or gates. Do not automatically redispatch, replay report writes,
-  rename or advance on recovery; wait for authorization to resume Task work.
-- Supplied selected Skill bodies are already loaded. Never re-resolve ambient
-  names. Worker context is code-prepared with the relevant brief separately;
-  exclude controller ledger metadata/duties. Production worker dispatch is T16.
-- Read existing outputs and update them in place, preserving useful content.
-  Only the coordinator writes ledger progress, decisions received, and artifact
-  change notes. Workers do not edit ledgers or authorize progression.
-- `complete NODE` explicitly confirms existing declared output files for current
-  work and advances after validation. Unchanged reviewed outputs are allowed;
-  there is no automatic hash/mtime freshness check or report-quality validation.
-  After an uncertain mutation result, inspect `status` and `next`; Node-only
-  mutations cannot identify a delayed callback to a later visit to the same
-  Node, so never blindly retry.
-- Present gate materials and obtain explicit human consent. A user's answer
-  during a Task is not gate approval. Use `approve NODE`, or
-  `reject NODE --reason 'actionable feedback'`.
+The raw CLI supports `execution new|runs|start|resume|next|complete|approve|reject|continue
+--json`; resume and run-specific reads/mutations require `--run RUN_ID`.
+Mutation controls are typed JSON stdin. Legacy Node-only commands also require
+explicit selectors, but do not supply the guarded native execution contract.
 
-## Naming and paths
-
-Check `unelos status` for `namingPending`. Once enough context is known, choose a
-descriptive, safe request-based name once and run
-`unelos rename NAME --run RUN_ID` using the summary's run ID. Fetch a fresh
-`unelos next` afterward. Do not automatically rename during recovery or later
-clarification. Rename before dispatching workers, or after all workers holding
-old paths finish; otherwise defer it. A rename relocates paths, so previously
-delivered paths become stale. Re-read artifacts at paths in the fresh packet.
-
-When no active run exists, `status` reports idle and `next` errors. Starting
-without a Workflow lists choices; it does not create a run. No request-file,
-separate confirmation command, execution ID, or completion reason is used.
+See [thin-adapter verification](opencode-thin-adapter-verification.md) for current
+evidence and limitations; older T15/T16 reports are historical.

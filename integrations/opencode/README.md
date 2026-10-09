@@ -1,108 +1,87 @@
-# Unelos OpenCode delivery
+# Unelos native OpenCode tools
 
-Opt-in native plugin for V1 ≥1.18.29 and V2. See
-[`docs/opencode-delivery-verification.md`](../../docs/opencode-delivery-verification.md)
-for tested versions and remaining limits. No automatic workflow runner.
+Thin adapter for OpenCode V1 ≥1.18.29 and V2. Shared instructions, execution
+prompts, result validation and guarded progression live in Rust core. The model
+dispatches configured native workers; the plugin does not intercept subagents.
 
-## Install
+## Install integration
 
-Build the CLI (`cargo build --locked -p unelos-cli`) and put `target/debug/unelos`
-on PATH, or supply its absolute path as `binary`. Node stdlib only; no runtime
-dependencies. From this directory run `npm pack`, then extract the archive into
-a dedicated installation directory outside `.opencode/plugins` (to prevent
-automatic discovery of supporting modules). Keep all packaged files together.
+Build `cargo build --locked -p unelos-cli`. Run `npm pack` in this directory and
+extract into a dedicated directory outside `.opencode/plugins`. Keep packaged
+files together. Node stdlib transport; V1 uses its harness-installed native SDK
+schema helper. V2 does not import that helper.
 
-Merge into project `opencode.json(c)` for project installation, or
-`~/.config/opencode/opencode.json(c)` for global installation. Preserve existing
-settings/plugins. Do not install a second plugin/command with the same name.
+Merge into existing project configuration without replacing unrelated settings:
 
 V2:
 ```jsonc
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugins": [{"package":"file:///absolute/path/to/package",
-    "options":{"binary":"/absolute/path/to/unelos"}}]
-}
+{"plugins":[{"package":"/absolute/package","options":{"binary":"/absolute/unelos"}}]}
 ```
 
 V1:
 ```jsonc
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugin": [["file:///absolute/path/to/package/index.js",
-    {"binary":"/absolute/path/to/unelos"}]]
-}
+{"plugin":[["/absolute/package/index.js",{"binary":"/absolute/unelos"}]]}
 ```
-V1 also needs the packaged `commands/unelos.md` copied to
-`.opencode/commands/unelos.md` (project) or
-`~/.config/opencode/commands/unelos.md` (global). Check for an existing file first;
-never overwrite it. V2 registers its command natively, with no Markdown copy.
-Default `binary` is `unelos`; it is executed directly, never interpreted by a shell.
-Restart/reload your native project's plugins after configuration changes.
 
-Project Task/Agent definitions and prompts are in `.unelos/project.yaml`
-(`taskDefinitions`, `agents`); `.unelos/workflows/*.yaml` references them.
-No native OpenCode Agent configs are generated. The integration delivers their
-resolved instructions/settings through the selected packet.
+Copy `commands/unelos.md` to project `.opencode/commands/unelos.md` for V1.
+V1 normally resolves `@opencode-ai/plugin/tool` from the native configuration's
+installed modules. For isolated extracted archives, set `v1ToolModule` to the
+absolute harness-installed `@opencode-ai/plugin/dist/tool.js`. Missing native SDK
+fails explicitly; no custom schema shim or automatic/global installation.
 
-## Use
+## Install Workflow and native agents
 
-- `/unelos`: activate this controller; offer Workflow choices if idle, recover
-  and report existing state if running/waiting, report finished if finished.
-- `/unelos start`: offer choices, including after a finished run.
-- `/unelos start WORKFLOW`: explicitly select a Workflow; an existing unfinished
-  run is recovered and reported, never replaced.
-- `/unelos off`: Continue without Unelos; clear only this session's activation.
-  The run and unrelated native metadata stay unchanged.
+```sh
+unelos --project /absolute/project install page-change \
+  --source /absolute/unelos/examples/opencode-execution --opencode v2 --json
+```
 
-Workflow choices are delivered as a numbered list, with Continue without Unelos
-last. Reply with a number or Workflow name; the controller maps the reply to the
-displayed choices and asks if ambiguous. The bootstrap includes a compact CLI
-reference, so routine operations should not need repeated help discovery.
+Use `--opencode v1` for V1. This imports referenced authoring/Skills and generates
+`.opencode/agents/unelos-<agent-id>.md`. Differing authored source collisions stop;
+generated native files overwrite on reinstall, including manual edits. Customize
+Unelos definitions, then regenerate without `--source`:
 
-Supply your goal in ordinary conversation. Controller starts with a descriptive
-name and records the agreed goal/constraints under `## Brief` in the supplied
-`ledger.md`. CLI request text remains unchanged. On recovery read fresh `next`,
-then ledger/reports; missing brief means ask, not invent. Only the controller
-writes the ledger; decisions needed downstream belong in declared reports.
-Native activation persists across restart. Fresh sessions require `/unelos`.
-Existing-run commands do not authorize execution or progression: after recovery,
-explicitly ask to resume Task work, or give an explicit decision for the current
-human gate. Latest user constraints remain in force. This is wording, not a
-permission sandbox; earlier V1 recovery failures still require manual QA.
-Moved sessions require explicit reactivation in the new project. Children never
-inherit controller bootstrap.
+```sh
+unelos --project /absolute/project install page-change --opencode v2 --json
+```
 
-## Delivery and limits
+Unrelated native agents/configuration and existing run state remain untouched.
+No model is written when unauthored: native subagents inherit the parent model.
+Required tools are not permission grants/allowlists. Unsupported declared MCP
+requirements fail explicitly; third-party Skills/MCP/credentials are not installed.
 
-Exact selected Task/Agent instructions, ordered Skill bodies/directories,
-identities and artifact paths are delivered before main work. Skills are already
-loaded; do not resolve ambient names again. Read referenced resources using native
-tools, respecting permission prompts. Existing output files are updated in place.
-Only the owned current block is replaced; historical tool results remain.
+## Run
 
-Configured main models are applied at native prompt admission and verified at
-request time. A model change during a tool loop can require a fresh prompt; never
-rewrite global defaults. No configured model means preserve native selection.
-Authored variants require an actual native variant inventory; V1 may lack one.
+```sh
+opencode --standalone /absolute/project
+```
 
-Tools are **required availability**, not an allowlist. `read-file` maps to `read`;
-`run-command` maps to V1 `bash` / V2 `shell`. V2 uses effective request tools.
-V1 nonempty required-tool lists fail closed (`effective_tools_unverified`), since
-effective inspection is unverified. Resource permission prompts are never bypassed.
-All nonempty MCP requirements currently block (`unsupported_mcp`). Failures do not
-advance core state or inject a cached packet. V1 textless recovery requires an
-ordinary continuation message.
+Enter `/unelos`, select a Workflow and describe the change: it always starts fresh.
+`/unelos resume` lists unfinished runs; selecting one injects its persisted context
+and immediately continues ordinary work. Pending gates still need explicit decisions.
+`/unelos off` disables only this session. Each session binds its own stable run ID;
+independent runs do not isolate edits to shared source files.
 
-T15 provides deterministic worker preparation through `unelos-opencode/packet`:
-`executorPacket(packet, workerKey?)`, `executorText(packet, brief, workerKey?)`,
-and `requireConfiguration(packet, evidence)`. Workers exclude controller metadata.
-The native consumer must set/verify that child's model and requirements using its
-own request evidence, not the parent's inventory. Production dispatch, worker
-continuation/question relay and completion coordination are T16, not this plugin.
-Do not reconstruct/paraphrase worker packets manually.
+Native tools: `unelos_next`, `unelos_start`, `unelos_resume`, `unelos_complete`, `unelos_approve`,
+`unelos_reject`, `unelos_continue`, `unelos_status`, `unelos_inspect`, `unelos_rename`.
+Each calls CLI once. Completion/decisions check full expected identity inside the
+core runtime lock and return the resulting package. No shell-called JS helper,
+status-then-next loop, worker tracking or per-model-request polling.
 
-CLI mutations remain Node-only: packet IDs do not add stale-callback protection.
-Never blindly retry mutations or infer gate consent from ledger/worker results.
+The package supplies `workerPrompt` unchanged and a mapped `nativeAgent`.
+V1 dispatches `task(subagent_type, prompt)` and continues `task_id`; V2 uses
+`subagent(agent, prompt)` and `sessionID`. Controller inspects reports/results,
+relays questions and completes ordinary work. Native return alone is not success.
+Core validates result frames; gate decisions still require real human intent.
+`mutation_uncertain` requires explicit run-list/state reconciliation, never retrying
+start automatically. CLI run-specific commands require `--run RUN_ID`.
 
-Run package tests: `npm test`.
+This is option A: native configuration applies settings, but the adapter does not
+prove that the controller selected the right agent or forwarded the exact prompt.
+Core guards progression; this is not a security sandbox. Only explicitly activated
+main sessions can use controller tools; ordinary sessions produce no automatic reads.
+
+Historical evidence: [T15](../../docs/opencode-delivery-verification.md),
+[T16](../../docs/opencode-execution-verification.md). Those reports describe earlier
+architecture, not current acceptance. The thin-adapter verification report records
+installed results separately; the user's interactive frontend run remains distinct.

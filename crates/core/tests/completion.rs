@@ -61,7 +61,7 @@ fn completion_requires_confirmation_and_enters_the_waiting_gate() {
     };
     fs::write(&plan.outputs[0].path, "plan").unwrap();
     assert!(complete(&root, &state.run_id, &plan.execution_id, None, None).is_err());
-    confirm_outputs(&root, &plan.execution_id).unwrap();
+    confirm_outputs(&root, "completion-run", &plan.execution_id).unwrap();
 
     let completed = complete(&root, &state.run_id, &plan.execution_id, None, None).unwrap();
 
@@ -71,9 +71,9 @@ fn completion_requires_confirmation_and_enters_the_waiting_gate() {
         outputs(&completed.history[0].work)[0].path,
         plan.outputs[0].path
     );
-    let packet = serde_json::to_value(next(&root).unwrap()).unwrap();
+    let packet = serde_json::to_value(next(&root, "completion-run").unwrap()).unwrap();
     assert_eq!(packet["feedback"]["outcome"], serde_json::Value::Null);
-    assert_eq!(status(&root).unwrap(), completed);
+    assert_eq!(status(&root, "completion-run").unwrap(), completed);
 }
 
 fn confirm_current(root: &Utf8Path, state: &unelos_core::RunState, contents: &str) {
@@ -84,7 +84,7 @@ fn confirm_current(root: &Utf8Path, state: &unelos_core::RunState, contents: &st
     for output in &record.outputs {
         fs::write(&output.path, contents).unwrap();
     }
-    confirm_outputs(root, &record.execution_id).unwrap();
+    confirm_outputs(root, &state.run_id, &record.execution_id).unwrap();
 }
 
 fn execution(state: &unelos_core::RunState) -> &unelos_core::ExecutionRecord {
@@ -163,9 +163,9 @@ fn completion_routes_a_correction_loop_with_fresh_ids_and_feedback() {
             .collect::<Vec<_>>(),
         ["task-1", "task-2", "task-3", "task-4", "task-5"]
     );
-    assert_eq!(status(&root).unwrap(), state);
-    assert_eq!(status(&root).unwrap(), state);
-    let finished = serde_json::to_value(next(&root).unwrap()).unwrap();
+    assert_eq!(status(&root, "completion-loop").unwrap(), state);
+    assert_eq!(status(&root, "completion-loop").unwrap(), state);
+    let finished = serde_json::to_value(next(&root, "completion-loop").unwrap()).unwrap();
     assert_eq!(finished["kind"], "finished");
     assert_eq!(
         start(&project, "completion-after", "Another request")
@@ -261,8 +261,12 @@ fn finished_and_reentered_runs_reject_duplicate_or_old_run_completion() {
 
     let later = start(&project, "later-completion", "Fresh request").unwrap();
     let error = complete(&root, &state.run_id, "task-1", None, None).unwrap_err();
-    assert!(error.to_string().contains(&later.run_id));
-    assert_eq!(later, status(&root).unwrap());
+    assert!(matches!(
+        error,
+        unelos_core::RuntimeError::StaleExecution { current: None, .. }
+    ));
+    assert_eq!(status(&root, &state.run_id).unwrap(), finished);
+    assert_eq!(later, status(&root, "later-completion").unwrap());
 }
 
 #[test]
@@ -275,7 +279,7 @@ fn compatible_live_next_edit_is_used_and_unconfirmed_or_missing_outputs_fail() {
     };
     fs::write(&plan.outputs[0].path, "plan").unwrap();
     assert!(complete(&root, &state.run_id, "task-1", None, None).is_err());
-    confirm_outputs(&root, "task-1").unwrap();
+    confirm_outputs(&root, "live-next", "task-1").unwrap();
     fs::write(
         root.join(".unelos/workflows/implement-feature.yaml"),
         replace_fixture_text(
@@ -390,11 +394,11 @@ fn parallel_completion_requires_only_confirmed_parent_aggregate() {
     let report = record.worker_reports[0].report.path.clone();
     let state_path = root.join(".unelos/runs/parallel-completion/state.json");
     let before = fs::read(&state_path).unwrap();
-    assert!(confirm_outputs(&root, "task-1").is_err());
+    assert!(confirm_outputs(&root, "parallel-completion", "task-1").is_err());
     assert_eq!(fs::read(&state_path).unwrap(), before);
     fs::write(&record.outputs[0].path, "aggregate").unwrap();
     assert!(!report.exists());
-    confirm_outputs(&root, "task-1").unwrap();
+    confirm_outputs(&root, "parallel-completion", "task-1").unwrap();
     assert!(complete(&root, &state.run_id, "task-1", None, None)
         .unwrap()
         .is_finished());

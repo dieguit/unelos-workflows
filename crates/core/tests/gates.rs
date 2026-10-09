@@ -30,7 +30,7 @@ fn waiting(root: &Utf8Path, name: &str) -> RunState {
     let project = load_project(root, "implement-feature").unwrap();
     let state = start(&project, name, "Request").unwrap();
     fs::write(&record(&state).outputs[0].path, "plan").unwrap();
-    confirm_outputs(root, "task-1").unwrap();
+    confirm_outputs(root, name, "task-1").unwrap();
     complete(root, name, "task-1", None, None).unwrap()
 }
 
@@ -46,11 +46,7 @@ fn replace_fixture_text(text: &str, from: &str, to: &str) -> String {
 
 fn assert_unchanged(root: &Utf8Path, name: &str, before: &[u8], state: &RunState) {
     assert_eq!(fs::read(state_path(root, name)).unwrap(), before);
-    assert_eq!(status(root).unwrap(), *state);
-    assert_eq!(
-        fs::read(root.join(".unelos/active-run")).unwrap(),
-        name.as_bytes()
-    );
+    assert_eq!(status(root, &state.run_id).unwrap(), *state);
 }
 
 #[test]
@@ -58,7 +54,10 @@ fn rejection_persists_feedback_and_approval_resumes_loop_with_fresh_ids() {
     let (_temp, root) = project_copy();
     let waiting = waiting(&root, "gate-loop");
     let material = record(&waiting).inputs.clone();
-    assert_eq!(next(&root).unwrap(), next(&root).unwrap());
+    assert_eq!(
+        next(&root, "gate-loop").unwrap(),
+        next(&root, "gate-loop").unwrap()
+    );
 
     let revised = reject(
         &root,
@@ -78,16 +77,16 @@ fn rejection_persists_feedback_and_approval_resumes_loop_with_fresh_ids() {
         Some("Explain migration and rollback.")
     );
     assert_eq!(feedback.artifacts, material);
-    assert_eq!(status(&root).unwrap(), revised);
+    assert_eq!(status(&root, "gate-loop").unwrap(), revised);
     assert_eq!(revised.history[1].work, waiting.current);
     assert_eq!(revised.history[1].outcome.as_deref(), Some("rejected"));
     assert_eq!(revised.history[1].reason, feedback.reason);
-    assert!(next(&root).is_ok());
+    assert!(next(&root, "gate-loop").is_ok());
 
     let path = record(&revised).outputs[0].path.clone();
     assert!(complete(&root, "gate-loop", "task-3", None, None).is_err());
     fs::write(path, "revised plan").unwrap();
-    confirm_outputs(&root, "task-3").unwrap();
+    confirm_outputs(&root, "gate-loop", "task-3").unwrap();
     let gate = complete(&root, "gate-loop", "task-3", None, None).unwrap();
     assert_eq!(record(&gate).execution_id, "gate-4");
 
@@ -107,8 +106,11 @@ fn rejection_persists_feedback_and_approval_resumes_loop_with_fresh_ids() {
     assert_eq!(approval.artifacts, record(&gate).inputs);
     assert_eq!(approved.history[3].outcome.as_deref(), Some("approved"));
     assert_eq!(approved.history[3].reason, None);
-    assert_eq!(status(&root).unwrap(), approved);
-    assert_eq!(next(&root).unwrap(), next(&root).unwrap());
+    assert_eq!(status(&root, "gate-loop").unwrap(), approved);
+    assert_eq!(
+        next(&root, "gate-loop").unwrap(),
+        next(&root, "gate-loop").unwrap()
+    );
 }
 
 #[test]
@@ -119,7 +121,12 @@ fn invalid_reasons_and_wrong_work_kinds_do_not_mutate_saved_state() {
         let path = state_path(&root, "bad-reason");
         let before = fs::read(&path).unwrap();
         assert!(reject(&root, "bad-reason", "gate-2", reason).is_err());
-        assert_unchanged(&root, "bad-reason", &before, &status(&root).unwrap());
+        assert_unchanged(
+            &root,
+            "bad-reason",
+            &before,
+            &status(&root, "bad-reason").unwrap(),
+        );
     }
 
     let (_temp, root) = project_copy();
@@ -128,7 +135,12 @@ fn invalid_reasons_and_wrong_work_kinds_do_not_mutate_saved_state() {
     let before = fs::read(state_path(&root, "not-gate")).unwrap();
     assert!(approve(&root, "not-gate", "task-1").is_err());
     assert!(reject(&root, "not-gate", "task-1", "reason").is_err());
-    assert_unchanged(&root, "not-gate", &before, &status(&root).unwrap());
+    assert_unchanged(
+        &root,
+        "not-gate",
+        &before,
+        &status(&root, "not-gate").unwrap(),
+    );
 
     let (_temp, root) = project_copy();
     fs::write(
@@ -141,7 +153,12 @@ fn invalid_reasons_and_wrong_work_kinds_do_not_mutate_saved_state() {
     let before = fs::read(state_path(&root, "not-gate-parallel")).unwrap();
     assert!(approve(&root, "not-gate-parallel", "task-1").is_err());
     assert!(reject(&root, "not-gate-parallel", "task-1", "reason").is_err());
-    assert_unchanged(&root, "not-gate-parallel", &before, &status(&root).unwrap());
+    assert_unchanged(
+        &root,
+        "not-gate-parallel",
+        &before,
+        &status(&root, "not-gate-parallel").unwrap(),
+    );
 }
 
 #[test]
@@ -194,7 +211,10 @@ fn live_successor_and_gate_definition_are_validated_before_decision() {
     fs::remove_file(root.join(".unelos/skills/verification/SKILL.md")).unwrap();
     assert!(approve(&root, "missing-skill-gate", "gate-2").is_err());
     assert_eq!(fs::read(&path).unwrap(), before);
-    assert_eq!(record(&status(&root).unwrap()).execution_id, "gate-2");
+    assert_eq!(
+        record(&status(&root, "missing-skill-gate").unwrap()).execution_id,
+        "gate-2"
+    );
 
     let (_temp, root) = project_copy();
     waiting(&root, "changed-gate");
@@ -246,8 +266,8 @@ fn gate_feedback_validation_matches_presented_artifacts_and_rejects_tampering() 
     let mut saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
     saved["current"]["feedback"]["artifacts"] = serde_json::json!([]);
     fs::write(&path, serde_json::to_vec(&saved).unwrap()).unwrap();
-    assert!(status(&root).is_err());
-    assert!(next(&root).is_err());
+    assert!(status(&root, "feedback-validation").is_err());
+    assert!(next(&root, "feedback-validation").is_err());
     assert_ne!(gate, rejected);
 
     #[cfg(unix)]
@@ -274,8 +294,8 @@ fn gate_feedback_validation_matches_presented_artifacts_and_rejects_tampering() 
         saved["history"][1]["work"]["inputs"] = artifacts.clone();
         saved["current"]["feedback"]["artifacts"] = artifacts;
         fs::write(&path, serde_json::to_vec(&saved).unwrap()).unwrap();
-        assert!(status(&root).is_err());
-        assert!(next(&root).is_err());
+        assert!(status(&root, "unsafe-gate-feedback").is_err());
+        assert!(next(&root, "unsafe-gate-feedback").is_err());
     }
 }
 
@@ -319,7 +339,10 @@ fn decision_prepares_only_declared_successor_and_preserves_blocked_output_path()
     .unwrap();
     let done = approve(&root, "live-approved-edge", "gate-2").unwrap();
     assert!(done.is_finished());
-    assert_eq!(next(&root).unwrap(), next(&root).unwrap());
+    assert_eq!(
+        next(&root, "live-approved-edge").unwrap(),
+        next(&root, "live-approved-edge").unwrap()
+    );
 
     let (_temp, root) = project_copy();
     waiting(&root, "blocked-successor");
@@ -343,7 +366,7 @@ fn decisions_support_gate_to_gate_and_gate_to_parallel_routes() {
     let project = load_project(&root, "implement-feature").unwrap();
     let state = start(&project, "gate-chain", "Request").unwrap();
     fs::write(&record(&state).outputs[0].path, "plan").unwrap();
-    confirm_outputs(&root, "task-1").unwrap();
+    confirm_outputs(&root, "gate-chain", "task-1").unwrap();
     let first = complete(&root, "gate-chain", "task-1", None, None).unwrap();
     let second = approve(&root, "gate-chain", "gate-2").unwrap();
     assert_eq!(record(&second).node_id, "gate-two");
@@ -351,7 +374,7 @@ fn decisions_support_gate_to_gate_and_gate_to_parallel_routes() {
     let done = reject(&root, "gate-chain", "gate-3", "stop").unwrap();
     assert!(done.is_finished());
     assert_eq!(record(&first).node_id, "gate-one");
-    assert_eq!(status(&root).unwrap(), done);
+    assert_eq!(status(&root, "gate-chain").unwrap(), done);
 
     let (_temp, root) = project_copy();
     fs::write(
@@ -362,12 +385,12 @@ fn decisions_support_gate_to_gate_and_gate_to_parallel_routes() {
     let project = load_project(&root, "implement-feature").unwrap();
     let state = start(&project, "gate-parallel", "Request").unwrap();
     fs::write(&record(&state).outputs[0].path, "plan").unwrap();
-    confirm_outputs(&root, "task-1").unwrap();
+    confirm_outputs(&root, "gate-parallel", "task-1").unwrap();
     complete(&root, "gate-parallel", "task-1", None, None).unwrap();
     let parallel = approve(&root, "gate-parallel", "gate-2").unwrap();
     assert!(matches!(parallel.current, CurrentWork::Parallel(_)));
     assert_eq!(record(&parallel).execution_id, "task-3");
-    assert!(next(&root).is_ok());
+    assert!(next(&root, "gate-parallel").is_ok());
 }
 
 #[test]
@@ -382,7 +405,7 @@ fn feedback_includes_multiple_producer_artifacts_in_declared_order() {
     let mut state = start(&project, "multi-input-gate", "Request").unwrap();
     for id in ["task-1", "task-2"] {
         fs::write(&record(&state).outputs[0].path, id).unwrap();
-        confirm_outputs(&root, id).unwrap();
+        confirm_outputs(&root, "multi-input-gate", id).unwrap();
         state = complete(&root, "multi-input-gate", id, None, None).unwrap();
     }
     let presented = record(&state).inputs.clone();
@@ -430,18 +453,18 @@ fn ordinary_task_feedback_rejects_artifacts_outside_its_source_node() {
     let project = load_project(&root, "implement-feature").unwrap();
     let plan = start(&project, "task-feedback-ownership", "Request").unwrap();
     fs::write(&record(&plan).outputs[0].path, "plan").unwrap();
-    confirm_outputs(&root, "task-1").unwrap();
+    confirm_outputs(&root, "task-feedback-ownership", "task-1").unwrap();
     complete(&root, "task-feedback-ownership", "task-1", None, None).unwrap();
     approve(&root, "task-feedback-ownership", "gate-2").unwrap();
 
-    let implement = status(&root).unwrap();
+    let implement = status(&root, "task-feedback-ownership").unwrap();
     fs::write(&record(&implement).outputs[0].path, "implementation").unwrap();
-    confirm_outputs(&root, "task-3").unwrap();
+    confirm_outputs(&root, "task-feedback-ownership", "task-3").unwrap();
     complete(&root, "task-feedback-ownership", "task-3", None, None).unwrap();
 
-    let review = status(&root).unwrap();
+    let review = status(&root, "task-feedback-ownership").unwrap();
     fs::write(&record(&review).outputs[0].path, "changes requested").unwrap();
-    confirm_outputs(&root, "task-4").unwrap();
+    confirm_outputs(&root, "task-feedback-ownership", "task-4").unwrap();
     let feedback_state = complete(
         &root,
         "task-feedback-ownership",
@@ -466,5 +489,5 @@ fn ordinary_task_feedback_rejects_artifacts_outside_its_source_node() {
     let mut saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
     saved["current"]["feedback"]["artifacts"][0]["path"] = plan_path.to_string().into();
     fs::write(path, serde_json::to_vec(&saved).unwrap()).unwrap();
-    assert!(status(&root).is_err());
+    assert!(status(&root, "task-feedback-ownership").is_err());
 }

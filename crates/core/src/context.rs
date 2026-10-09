@@ -147,19 +147,21 @@ pub(crate) fn resolve_task_context(
     let skills = resolve_skills(&project.project_root, &ids)?;
 
     Ok(TaskContext {
-            kind: "task",
-            node_id: node_id.to_owned(),
-            task_definition: task_id.to_owned(),
-            agent: agent_id.to_owned(),
-            execution,
-            task_instructions: task.instructions.clone(),
-            agent_instructions: agent.instructions.clone(),
-            skills,
-            model: agent.model.clone(),
-            mcps: agent.mcps.clone(),
-            tools: agent.tools.clone(),
-            outcomes: task.outcomes.clone(),
-            completion_instructions: "Read any existing declared outputs and update them in place, preserving relevant content. Produce every declared output before completing this current Task; report the changes to the controller. Do not edit the run ledger.".into(),
+        kind: "task",
+        node_id: node_id.to_owned(),
+        task_definition: task_id.to_owned(),
+        agent: agent_id.to_owned(),
+        execution,
+        task_instructions: task.instructions.clone(),
+        agent_instructions: agent.instructions.clone(),
+        skills,
+        model: agent.model.clone(),
+        mcps: agent.mcps.clone(),
+        tools: agent.tools.clone(),
+        outcomes: task.outcomes.clone(),
+        completion_instructions: include_str!("instructions/task-outputs.md")
+            .trim_end()
+            .into(),
     })
 }
 

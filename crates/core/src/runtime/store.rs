@@ -43,55 +43,85 @@ impl RunStore {
         super::rename::recover(self)
     }
 
-    pub(super) fn active(&self) -> Result<RunState, RuntimeError> {
-        let runtime = self.root.join(".unelos");
-        ensure_directory(&runtime)?;
-        let pointer_path = runtime.join("active-run");
-        reject_symlink(&pointer_path)?;
-        let pointer = match fs::read_to_string(&pointer_path) {
-            Ok(pointer) => pointer,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                return Err(RuntimeError::NoActiveRun { path: pointer_path });
-            }
-            Err(source) => return Err(path_error(&pointer_path, source)),
+    pub(super) fn runs(&self) -> Result<Vec<RunState>, RuntimeError> {
+        let directory = self.root.join(".unelos/runs");
+        reject_symlink(&directory)?;
+        let entries = match fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(vec![]),
+            Err(source) => return Err(path_error(&directory, source)),
         };
-        let name = pointer.as_str();
-        if !valid_run_name(name) {
-            return Err(RuntimeError::InvalidName { name: name.into() });
+        let mut runs = Vec::new();
+        let mut ids = std::collections::BTreeSet::new();
+        for entry in entries {
+            let entry = entry.map_err(|source| path_error(&directory, source))?;
+            let path = Utf8PathBuf::from_path_buf(entry.path())
+                .map_err(|_| RuntimeError::InvalidState("run path is not UTF-8".into()))?;
+            reject_symlink(&path)?;
+            if !entry
+                .file_type()
+                .map_err(|source| path_error(&path, source))?
+                .is_dir()
+            {
+                continue;
+            }
+            let name = path.file_name().unwrap();
+            if !valid_run_name(name) {
+                return Err(RuntimeError::InvalidName { name: name.into() });
+            }
+            reject_symlink(&path.join("ledger.md"))?;
+            let state_path = path.join("state.json");
+            reject_symlink(&state_path)?;
+            if !fs::metadata(&state_path)
+                .map_err(|source| path_error(&state_path, source))?
+                .is_file()
+            {
+                return Err(RuntimeError::InvalidState(format!(
+                    "state is not a regular file: {state_path}"
+                )));
+            }
+            let bytes = fs::read(&state_path).map_err(|source| path_error(&state_path, source))?;
+            let state: RunState =
+                serde_json::from_slice(&bytes).map_err(|source| RuntimeError::Json {
+                    path: state_path,
+                    source,
+                })?;
+            validate_state(&state)?;
+            validate_artifacts(&state, &path)?;
+            if state.name != name {
+                return Err(RuntimeError::InvalidState(format!(
+                    "run directory {name:?} does not match state name {:?}",
+                    state.name
+                )));
+            }
+            if !ids.insert(state.run_id.clone()) {
+                return Err(RuntimeError::DuplicateRunId {
+                    run_id: state.run_id,
+                });
+            }
+            runs.push(state);
         }
-        let runs_path = runtime.join("runs");
-        check_directory(&runs_path)?;
-        let run_path = runs_path.join(name);
-        reject_symlink(&run_path)?;
-        reject_symlink(&run_path.join("ledger.md"))?;
-        let state_path = run_path.join("state.json");
-        reject_symlink(&state_path)?;
-        let bytes = fs::read(&state_path).map_err(|source| path_error(&state_path, source))?;
-        let state: RunState =
-            serde_json::from_slice(&bytes).map_err(|source| RuntimeError::Json {
-                path: state_path,
-                source,
-            })?;
-        validate_state(&state)?;
-        validate_artifacts(&state, &run_path)?;
-        if state.name != name {
-            return Err(RuntimeError::InvalidState(format!(
-                "active pointer {name:?} does not match state name {:?}",
-                state.name
-            )));
+        runs.sort_by(|a, b| a.run_id.cmp(&b.run_id));
+        Ok(runs)
+    }
+
+    pub(super) fn run(&self, run_id: &str) -> Result<RunState, RuntimeError> {
+        if !valid_run_name(run_id) {
+            return Err(RuntimeError::InvalidName {
+                name: run_id.into(),
+            });
         }
-        Ok(state)
+        // ponytail: linear validated scan; add an ID index only if run counts make lookup costly.
+        self.runs()?
+            .into_iter()
+            .find(|state| state.run_id == run_id)
+            .ok_or_else(|| RuntimeError::UnknownRun {
+                run_id: run_id.into(),
+            })
     }
 
     pub(super) fn ensure_start_available(&self, name: Option<&str>) -> Result<(), RuntimeError> {
-        match self.active() {
-            Ok(state) if !state.is_finished() => {
-                return Err(RuntimeError::ActiveRun { name: state.name })
-            }
-            Ok(_) => {}
-            Err(RuntimeError::NoActiveRun { .. }) => {}
-            Err(error) => return Err(error),
-        }
+        self.runs()?;
         if let Some(name) = name {
             let run_dir = self.root.join(".unelos/runs").join(name);
             if fs::symlink_metadata(&run_dir).is_ok() {
@@ -128,49 +158,12 @@ impl RunStore {
 
         let runs = runtime.join("runs");
         ensure_directory(&runs)?;
-        let mut saved_id_max = 0;
-        for entry in fs::read_dir(&runs).map_err(|source| path_error(&runs, source))? {
-            let entry = entry.map_err(|source| path_error(&runs, source))?;
-            let path = Utf8PathBuf::from_path_buf(entry.path()).map_err(|_| {
-                path_error(
-                    &runs,
-                    io::Error::new(io::ErrorKind::InvalidData, "run path is not UTF-8"),
-                )
-            })?;
-            let kind = entry
-                .file_type()
-                .map_err(|source| path_error(&path, source))?;
-            if kind.is_symlink() {
-                return Err(path_error(
-                    &path,
-                    io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "symlinked runtime path is not allowed",
-                    ),
-                ));
-            }
-            if !kind.is_dir() {
-                continue;
-            }
-            let state_path = path.join("state.json");
-            reject_symlink(&state_path)?;
-            let saved = match fs::read(&state_path) {
-                Ok(bytes) => Some(serde_json::from_slice::<RunState>(&bytes).map_err(
-                    |source| RuntimeError::Json {
-                        path: state_path.clone(),
-                        source,
-                    },
-                )?),
-                Err(error) if error.kind() == io::ErrorKind::NotFound => None,
-                Err(source) => return Err(path_error(&state_path, source)),
-            };
-            if let Some(saved) = saved {
-                validate_state(&saved)?;
-                if let Some(id) = numeric_run_id(&saved.run_id) {
-                    saved_id_max = saved_id_max.max(id);
-                }
-            }
-        }
+        let saved_id_max = self
+            .runs()?
+            .iter()
+            .filter_map(|saved| numeric_run_id(&saved.run_id))
+            .max()
+            .unwrap_or(0);
         sequence = sequence.max(saved_id_max);
 
         loop {
@@ -209,10 +202,10 @@ impl RunStore {
         state: &RunState,
         write: impl Fn(&Utf8Path, &[u8]) -> Result<(), RuntimeError>,
     ) -> Result<(), RuntimeError> {
-        let active = self.active()?;
+        let active = self.run(&state.run_id)?;
         if state.name != active.name || state.run_id != active.run_id {
             return Err(RuntimeError::InvalidState(
-                "run update does not match active run identity".into(),
+                "run update does not match selected run identity".into(),
             ));
         }
         validate_state(state)?;
@@ -257,6 +250,15 @@ impl RunStore {
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(source) => return Err(path_error(&run_dir, source)),
         }
+        if self
+            .runs()?
+            .iter()
+            .any(|saved| saved.run_id == state.run_id)
+        {
+            return Err(RuntimeError::DuplicateRunId {
+                run_id: state.run_id.clone(),
+            });
+        }
         fs::create_dir(&run_dir).map_err(|source| {
             if source.kind() == io::ErrorKind::AlreadyExists {
                 RuntimeError::Collision {
@@ -272,8 +274,7 @@ impl RunStore {
             path: state_path.clone(),
             source,
         })?;
-        write(&state_path, &bytes)?;
-        write(&runtime.join("active-run"), state.name.as_bytes())
+        write(&state_path, &bytes)
     }
 }
 
@@ -510,19 +511,6 @@ pub(super) fn ensure_runtime_directory(path: &Utf8Path) -> Result<(), RuntimeErr
     ensure_directory(path)
 }
 
-fn check_directory(path: &Utf8Path) -> Result<(), RuntimeError> {
-    reject_symlink(path)?;
-    let metadata = fs::metadata(path).map_err(|source| path_error(path, source))?;
-    if metadata.is_dir() {
-        Ok(())
-    } else {
-        Err(path_error(
-            path,
-            io::Error::new(io::ErrorKind::NotADirectory, "not a directory"),
-        ))
-    }
-}
-
 pub(super) fn atomic_write(target: &Utf8Path, bytes: &[u8]) -> Result<(), RuntimeError> {
     atomic_write_with(target, |file| file.write_all(bytes))
 }
@@ -596,7 +584,7 @@ mod tests {
         let store = RunStore::open(&root).unwrap();
         let state = state("roundtrip");
         store.publish(&state, |_| Ok(())).unwrap();
-        assert_eq!(store.active().unwrap(), state);
+        assert_eq!(store.run("roundtrip").unwrap(), state);
     }
 
     #[test]
@@ -604,36 +592,40 @@ mod tests {
         let (_temp, root) = root();
         let store = RunStore::open(&root).unwrap();
         assert!(matches!(
-            store.active(),
-            Err(RuntimeError::NoActiveRun { .. })
+            store.run("missing"),
+            Err(RuntimeError::UnknownRun { .. })
         ));
         assert!(!root.join(".unelos/runs").exists());
         assert!(!root.join(".unelos/active-run").exists());
     }
 
     #[test]
-    fn active_rejects_unsafe_pointer_missing_state_corrupt_json_and_mismatch() {
+    fn lookup_ignores_pointer_and_rejects_missing_state_corrupt_json_and_mismatch() {
         let (_temp, root) = root();
         let store = RunStore::open(&root).unwrap();
         let runtime = root.join(".unelos");
         fs::write(runtime.join("active-run"), "../outside").unwrap();
-        assert!(matches!(
-            store.active(),
-            Err(RuntimeError::InvalidName { .. })
-        ));
+        assert!(store.runs().unwrap().is_empty());
         fs::write(runtime.join("active-run"), "missing").unwrap();
-        assert!(store.active().is_err());
+        assert!(store.run("missing").is_err());
         let run = runtime.join("runs/malformed");
         fs::create_dir_all(&run).unwrap();
+        assert!(store.runs().is_err());
         fs::write(run.join("state.json"), "{").unwrap();
         fs::write(runtime.join("active-run"), "malformed").unwrap();
-        assert!(matches!(store.active(), Err(RuntimeError::Json { .. })));
+        assert!(matches!(
+            store.run("malformed"),
+            Err(RuntimeError::Json { .. })
+        ));
         fs::write(
             run.join("state.json"),
             serde_json::to_vec(&state("different")).unwrap(),
         )
         .unwrap();
-        assert!(matches!(store.active(), Err(RuntimeError::InvalidState(_))));
+        assert!(matches!(
+            store.run("malformed"),
+            Err(RuntimeError::InvalidState(_))
+        ));
     }
 
     #[test]
@@ -641,41 +633,41 @@ mod tests {
         let (_temp, root) = root();
         let store = RunStore::open(&root).unwrap();
         store.publish(&state("first"), |_| Ok(())).unwrap();
-        let pointer = fs::read(root.join(".unelos/active-run")).unwrap();
+        let before = fs::read(root.join(".unelos/runs/first/state.json")).unwrap();
         assert!(matches!(
             store.publish(&state("first"), |_| Ok(())),
             Err(RuntimeError::Collision { .. })
         ));
-        assert_eq!(fs::read(root.join(".unelos/active-run")).unwrap(), pointer);
+        assert_eq!(
+            fs::read(root.join(".unelos/runs/first/state.json")).unwrap(),
+            before
+        );
     }
 
     #[test]
-    fn pointer_write_failure_keeps_previous_active_run() {
+    fn publication_state_write_failure_preserves_prior_run_bytes() {
         let (_temp, root) = root();
         let store = RunStore::open(&root).unwrap();
         store.publish(&state("prior"), |_| Ok(())).unwrap();
-        let pointer = fs::read(root.join(".unelos/active-run")).unwrap();
+        let prior = fs::read(root.join(".unelos/runs/prior/state.json")).unwrap();
         let result = store.publish_with(
             &state("next"),
             |_| Ok(()),
             |path, bytes| {
-                if path.file_name() == Some("active-run") {
-                    return Err(path_error(
-                        path,
-                        io::Error::other("injected pointer failure"),
-                    ));
+                if path.file_name() == Some("state.json") {
+                    return Err(path_error(path, io::Error::other("injected state failure")));
                 }
                 atomic_write(path, bytes)
             },
         );
         assert!(result.is_err());
-        assert_eq!(fs::read(root.join(".unelos/active-run")).unwrap(), pointer);
-        assert_eq!(store.active().unwrap(), state("prior"));
-        let unpublished = root.join(".unelos/runs/next/state.json");
         assert_eq!(
-            serde_json::from_slice::<RunState>(&fs::read(unpublished).unwrap()).unwrap(),
-            state("next")
+            fs::read(root.join(".unelos/runs/prior/state.json")).unwrap(),
+            prior
         );
+        let unpublished = root.join(".unelos/runs/next/state.json");
+        assert!(!unpublished.exists());
+        assert!(!root.join(".unelos/active-run").exists());
     }
 
     #[test]
@@ -686,7 +678,6 @@ mod tests {
         store.publish(&original, |_| Ok(())).unwrap();
         let state_path = root.join(".unelos/runs/update-run/state.json");
         let before = fs::read(&state_path).unwrap();
-        let pointer = fs::read(root.join(".unelos/active-run")).unwrap();
         let mut changed = original.clone();
         changed.request = "changed".into();
         let error = store.update_with(&changed, |path, _| {
@@ -697,8 +688,8 @@ mod tests {
         });
         assert!(error.is_err());
         assert_eq!(fs::read(&state_path).unwrap(), before);
-        assert_eq!(fs::read(root.join(".unelos/active-run")).unwrap(), pointer);
-        assert_eq!(store.active().unwrap(), original);
+        assert!(!root.join(".unelos/active-run").exists());
+        assert_eq!(store.run(&original.run_id).unwrap(), original);
     }
 
     #[test]
@@ -716,10 +707,9 @@ mod tests {
         };
         fs::write(&record.outputs[0].path, "plan").unwrap();
         let store = RunStore::open(&project_root).unwrap();
-        let active = store.active().unwrap();
+        let active = store.run("atomic-completion").unwrap();
         let before =
             fs::read(project_root.join(".unelos/runs/atomic-completion/state.json")).unwrap();
-        let pointer = fs::read(project_root.join(".unelos/active-run")).unwrap();
         let project = crate::load_project(&project_root, "implement-feature").unwrap();
         let mut confirmed = active.clone();
         if let CurrentWork::Task(record) | CurrentWork::Parallel(record) = &mut confirmed.current {
@@ -742,11 +732,8 @@ mod tests {
             fs::read(project_root.join(".unelos/runs/atomic-completion/state.json")).unwrap(),
             before
         );
-        assert_eq!(
-            fs::read(project_root.join(".unelos/active-run")).unwrap(),
-            pointer
-        );
-        assert_eq!(store.active().unwrap(), active);
+        assert!(!project_root.join(".unelos/active-run").exists());
+        assert_eq!(store.run("atomic-completion").unwrap(), active);
         assert_eq!(
             fs::read(project_root.join(".unelos/runs/atomic-completion/state.json")).unwrap(),
             before
@@ -768,14 +755,13 @@ mod tests {
                 _ => unreachable!(),
             };
             fs::write(&plan.outputs[0].path, "plan").unwrap();
-            crate::confirm_outputs(&project_root, "task-1").unwrap();
+            crate::confirm_outputs(&project_root, "atomic-gate", "task-1").unwrap();
             crate::complete(&project_root, "atomic-gate", "task-1", None, None).unwrap();
 
             let store = RunStore::open(&project_root).unwrap();
-            let active = store.active().unwrap();
+            let active = store.run("atomic-gate").unwrap();
             let state_path = project_root.join(".unelos/runs/atomic-gate/state.json");
             let before = fs::read(&state_path).unwrap();
-            let pointer = fs::read(project_root.join(".unelos/active-run")).unwrap();
             let project = crate::load_project(&project_root, "implement-feature").unwrap();
             let candidate =
                 super::super::gates::prepare_decision(&project, &active, "gate-2", outcome, reason)
@@ -788,11 +774,8 @@ mod tests {
             });
             assert!(error.is_err());
             assert_eq!(fs::read(state_path).unwrap(), before);
-            assert_eq!(
-                fs::read(project_root.join(".unelos/active-run")).unwrap(),
-                pointer
-            );
-            assert_eq!(store.active().unwrap(), active);
+            assert!(!project_root.join(".unelos/active-run").exists());
+            assert_eq!(store.run("atomic-gate").unwrap(), active);
         }
     }
 
@@ -841,7 +824,10 @@ mod tests {
         });
         fs::write(run.join("state.json"), serde_json::to_vec(&saved).unwrap()).unwrap();
         fs::write(runtime.join("active-run"), "bad-state").unwrap();
-        assert!(matches!(store.active(), Err(RuntimeError::InvalidState(_))));
+        assert!(matches!(
+            store.run("bad-state"),
+            Err(RuntimeError::InvalidState(_))
+        ));
         saved.current = CurrentWork::Task(crate::ExecutionRecord {
             execution_id: "task-1".into(),
             ..match saved.current {
@@ -851,7 +837,10 @@ mod tests {
         });
         saved.next_execution_sequence = 1;
         fs::write(run.join("state.json"), serde_json::to_vec(&saved).unwrap()).unwrap();
-        assert!(matches!(store.active(), Err(RuntimeError::InvalidState(_))));
+        assert!(matches!(
+            store.run("bad-state"),
+            Err(RuntimeError::InvalidState(_))
+        ));
     }
 
     #[cfg(unix)]
@@ -865,7 +854,7 @@ mod tests {
         let backup = root.join("backup");
         fs::rename(&run, &backup).unwrap();
         symlink(&backup, &run).unwrap();
-        assert!(store.active().is_err());
+        assert!(store.run("linked").is_err());
     }
 
     #[test]

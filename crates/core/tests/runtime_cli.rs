@@ -20,7 +20,7 @@ fn project_copy() -> (TempDir, Utf8PathBuf) {
 fn progression_bytes(root: &Utf8Path, name: &str) -> (Vec<u8>, Vec<u8>) {
     (
         fs::read(root.join(".unelos/runs").join(name).join("state.json")).unwrap(),
-        fs::read(root.join(".unelos/active-run")).unwrap(),
+        fs::read(root.join(".unelos/runs").join(name).join("state.json")).unwrap(),
     )
 }
 
@@ -46,8 +46,11 @@ fn unnamed_start_persists_pending_name_and_empty_request() {
     assert!(state.run_id.starts_with("r-"));
     assert!(state.naming_pending);
     assert!(state.request.is_empty());
-    assert_eq!(status(&root).unwrap(), state);
-    assert_eq!(next(&root).unwrap(), next(&root).unwrap());
+    assert_eq!(status(&root, &state.run_id).unwrap(), state);
+    assert_eq!(
+        next(&root, &state.run_id).unwrap(),
+        next(&root, &state.run_id).unwrap()
+    );
 }
 
 #[test]
@@ -57,7 +60,7 @@ fn explicit_start_separates_id_and_name() {
     assert_eq!(state.name, "add-search");
     assert_ne!(state.run_id, state.name);
     assert!(!state.naming_pending);
-    assert_eq!(status(&root).unwrap(), state);
+    assert_eq!(status(&root, &state.run_id).unwrap(), state);
 }
 
 #[test]
@@ -69,7 +72,7 @@ fn legacy_state_without_naming_metadata_is_already_named() {
     let mut value: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
     value.as_object_mut().unwrap().remove("namingPending");
     fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
-    let saved = status(&root).unwrap();
+    let saved = status(&root, "legacy").unwrap();
     assert!(!saved.naming_pending);
     assert_eq!(saved.request, "Keep request");
 }
@@ -117,17 +120,14 @@ fn starts_after_finish_allocate_distinct_ids() {
 }
 
 #[test]
-fn collisions_and_second_unfinished_start_leave_published_bytes_unchanged() {
+fn collisions_and_second_unfinished_start_preserve_the_first_run() {
     let (_temp, root) = project_copy();
     let state = start_workflow(&root, "implement-feature", Some("first")).unwrap();
-    let pointer_path = root.join(".unelos/active-run");
     let state_path = root.join(".unelos/runs/first/state.json");
-    let pointer = fs::read(&pointer_path).unwrap();
     let saved = fs::read(&state_path).unwrap();
-    assert!(start_workflow(&root, "implement-feature", Some("second")).is_err());
-    assert_eq!(fs::read(pointer_path).unwrap(), pointer);
+    assert!(start_workflow(&root, "implement-feature", Some("second")).is_ok());
     assert_eq!(fs::read(state_path).unwrap(), saved);
-    assert_eq!(status(&root).unwrap(), state);
+    assert_eq!(status(&root, &state.run_id).unwrap(), state);
 
     let (_temp, root) = project_copy();
     fs::create_dir_all(root.join(".unelos/runs/taken")).unwrap();
@@ -154,10 +154,23 @@ fn allocation_skips_legacy_generated_id_and_corrupt_counter_does_not_publish() {
     let generated = start_workflow(&root, "finished", None).unwrap();
     assert_ne!(generated.run_id, "r-000001");
 
-    let pointer = fs::read(root.join(".unelos/active-run")).unwrap();
+    let before = fs::read(
+        root.join(".unelos/runs")
+            .join(&generated.name)
+            .join("state.json"),
+    )
+    .unwrap();
     fs::write(root.join(".unelos/run-sequence"), "not-a-number").unwrap();
     assert!(start_workflow(&root, "finished", Some("third")).is_err());
-    assert_eq!(fs::read(root.join(".unelos/active-run")).unwrap(), pointer);
+    assert_eq!(
+        fs::read(
+            root.join(".unelos/runs")
+                .join(&generated.name)
+                .join("state.json")
+        )
+        .unwrap(),
+        before
+    );
     assert!(!root.join(".unelos/runs/third").exists());
 }
 
@@ -169,7 +182,7 @@ fn node_completion_confirms_outputs_and_waits_for_gate() {
         panic!("task");
     };
     fs::write(&record.outputs[0].path, "plan").unwrap();
-    let gate = complete_node(&root, "plan", None).unwrap();
+    let gate = complete_node(&root, &started.run_id, "plan", None).unwrap();
     assert!(matches!(gate.current, CurrentWork::HumanGate(_)));
     assert_eq!(gate.history.len(), 1);
 }
@@ -183,15 +196,15 @@ fn rejected_completion_does_not_persist_output_confirmation() {
     };
     fs::write(&record.outputs[0].path, "plan").unwrap();
     let before = progression_bytes(&root, &started.name);
-    assert!(complete_node(&root, "plan", Some("approved")).is_err());
+    assert!(complete_node(&root, &started.run_id, "plan", Some("approved")).is_err());
     assert_progression_unchanged(&root, &started.name, &before);
     assert!(matches!(
-        complete_node(&root, "implement", None),
+        complete_node(&root, &started.run_id, "implement", None),
         Err(unelos_core::RuntimeError::WrongNode { expected, current })
             if expected == "implement" && current == "plan"
     ));
     assert_progression_unchanged(&root, &started.name, &before);
-    assert_eq!(status(&root).unwrap(), started);
+    assert_eq!(status(&root, &started.run_id).unwrap(), started);
 }
 
 #[test]
@@ -208,7 +221,7 @@ fn node_completion_accepts_parallel_work() {
     };
     fs::write(&record.outputs[0].path, "summary").unwrap();
     fs::write(&record.worker_reports[0].report.path, "worker result").unwrap();
-    let finished = complete_node(&root, "parallel", None).unwrap();
+    let finished = complete_node(&root, &started.run_id, "parallel", None).unwrap();
     assert!(finished.is_finished());
     assert_eq!(finished.history.len(), 1);
 }
@@ -223,35 +236,35 @@ fn node_operations_follow_feedback_loop_and_reject_invalid_mutations_atomically(
     };
     let plan_path = plan.outputs[0].path.clone();
     let before = progression_bytes(&root, "task");
-    assert!(complete_node(&root, "implement", None).is_err());
+    assert!(complete_node(&root, &state.run_id, "implement", None).is_err());
     assert_progression_unchanged(&root, "task", &before);
-    assert!(complete_node(&root, "plan", None).is_err());
+    assert!(complete_node(&root, &state.run_id, "plan", None).is_err());
     assert_progression_unchanged(&root, "task", &before);
     fs::create_dir_all(&plan_path).unwrap();
-    assert!(complete_node(&root, "plan", None).is_err());
+    assert!(complete_node(&root, &state.run_id, "plan", None).is_err());
     assert_progression_unchanged(&root, "task", &before);
     fs::remove_dir(&plan_path).unwrap();
 
     fs::write(&plan_path, "plan").unwrap();
-    state = complete_node(&root, "plan", None).unwrap();
+    state = complete_node(&root, &state.run_id, "plan", None).unwrap();
     let gate_before = progression_bytes(&root, "task");
     assert!(matches!(state.current, CurrentWork::HumanGate(_)));
-    assert!(complete_node(&root, "approve-plan", None).is_err());
-    assert_eq!(status(&root).unwrap(), state);
+    assert!(complete_node(&root, &state.run_id, "approve-plan", None).is_err());
+    assert_eq!(status(&root, &state.run_id).unwrap(), state);
     assert_progression_unchanged(&root, "task", &gate_before);
     fs::remove_file(&plan_path).unwrap();
-    assert!(approve_node(&root, "approve-plan").is_err());
-    assert_eq!(status(&root).unwrap(), state);
+    assert!(approve_node(&root, &state.run_id, "approve-plan").is_err());
+    assert_eq!(status(&root, &state.run_id).unwrap(), state);
     assert_progression_unchanged(&root, "task", &gate_before);
     fs::write(&plan_path, "plan").unwrap();
     for reason in ["  ", "\u{2003}"] {
-        assert!(reject_node(&root, "approve-plan", reason).is_err());
-        assert_eq!(status(&root).unwrap(), state);
+        assert!(reject_node(&root, &state.run_id, "approve-plan", reason).is_err());
+        assert_eq!(status(&root, &state.run_id).unwrap(), state);
         assert_progression_unchanged(&root, "task", &gate_before);
     }
-    assert!(approve_node(&root, "plan").is_err());
+    assert!(approve_node(&root, &state.run_id, "plan").is_err());
     assert_progression_unchanged(&root, "task", &gate_before);
-    state = reject_node(&root, "approve-plan", "  revise plan  ").unwrap();
+    state = reject_node(&root, &state.run_id, "approve-plan", "  revise plan  ").unwrap();
     assert_eq!(
         state.history.last().unwrap().reason.as_deref(),
         Some("revise plan")
@@ -265,45 +278,45 @@ fn node_operations_follow_feedback_loop_and_reject_invalid_mutations_atomically(
         Some("revise plan")
     );
     fs::write(&plan_path, "revised plan").unwrap();
-    complete_node(&root, "plan", None).unwrap();
-    state = approve_node(&root, "approve-plan").unwrap();
+    complete_node(&root, &state.run_id, "plan", None).unwrap();
+    state = approve_node(&root, &state.run_id, "approve-plan").unwrap();
     let CurrentWork::Task(implement) = &state.current else {
         panic!("implementation")
     };
     let report_path = implement.outputs[0].path.clone();
     fs::write(&report_path, "implementation").unwrap();
-    state = complete_node(&root, "implement", None).unwrap();
+    state = complete_node(&root, &state.run_id, "implement", None).unwrap();
     let CurrentWork::Task(review) = &state.current else {
         panic!("review")
     };
     let review_path = review.outputs[0].path.clone();
     let missing_output_before = progression_bytes(&root, "task");
-    assert!(complete_node(&root, "review", None).is_err());
+    assert!(complete_node(&root, &state.run_id, "review", None).is_err());
     assert_progression_unchanged(&root, "task", &missing_output_before);
     fs::write(&review_path, "review").unwrap();
     let invalid_outcome_before = progression_bytes(&root, "task");
-    assert!(complete_node(&root, "review", None).is_err());
+    assert!(complete_node(&root, &state.run_id, "review", None).is_err());
     assert_progression_unchanged(&root, "task", &invalid_outcome_before);
-    assert!(complete_node(&root, "review", Some("unknown")).is_err());
+    assert!(complete_node(&root, &state.run_id, "review", Some("unknown")).is_err());
     assert_progression_unchanged(&root, "task", &invalid_outcome_before);
-    assert_eq!(status(&root).unwrap(), state);
-    state = complete_node(&root, "review", Some("changes_requested")).unwrap();
+    assert_eq!(status(&root, &state.run_id).unwrap(), state);
+    state = complete_node(&root, &state.run_id, "review", Some("changes_requested")).unwrap();
     let CurrentWork::Task(implement) = &state.current else {
         panic!("implementation retry")
     };
     assert_eq!(implement.outputs[0].path, report_path);
-    assert_eq!(status(&root).unwrap(), state);
+    assert_eq!(status(&root, &state.run_id).unwrap(), state);
     fs::write(&report_path, "revised implementation").unwrap();
-    state = complete_node(&root, "implement", None).unwrap();
+    state = complete_node(&root, &state.run_id, "implement", None).unwrap();
     let CurrentWork::Task(review) = &state.current else {
         panic!("review retry")
     };
     assert_eq!(review.outputs[0].path, review_path);
-    state = complete_node(&root, "review", Some("approved")).unwrap();
+    state = complete_node(&root, &state.run_id, "review", Some("approved")).unwrap();
     assert!(state.is_finished());
     assert_eq!(state.history.len(), 8);
     assert_eq!(fs::read_to_string(review_path).unwrap(), "review");
     let saved = progression_bytes(&root, "task");
-    assert!(complete_node(&root, "review", Some("approved")).is_err());
+    assert!(complete_node(&root, &state.run_id, "review", Some("approved")).is_err());
     assert_progression_unchanged(&root, "task", &saved);
 }

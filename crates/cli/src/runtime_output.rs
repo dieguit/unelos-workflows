@@ -34,6 +34,9 @@ pub(crate) fn status(root: &Utf8Path, state: &RunState) -> Result<Value, io::Err
 }
 
 pub(crate) fn readable(value: &Value) -> String {
+    if value.get("entryMode").is_some() {
+        return readable_packet(value);
+    }
     if let Some(workflows) = value["workflows"].as_array() {
         return if workflows.is_empty() {
             "No Workflows found.".into()
@@ -49,7 +52,7 @@ pub(crate) fn readable(value: &Value) -> String {
         };
     }
     if value["status"] == "idle" {
-        return "No active run.".into();
+        return "No selected run.".into();
     }
     let mut text = format!(
         "{}: {} ({})\nWorkflow: {}\nDirectory: {}\nCurrent: {} ({})",

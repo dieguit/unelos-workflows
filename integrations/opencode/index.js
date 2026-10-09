@@ -1,202 +1,175 @@
-import { readFile, realpath } from 'node:fs/promises';
-import { cliJson, readCurrent } from './cli.js';
-import { CONTEXT_TAG, controllerText, workflowChoices, validatePacket,
-  validateModel, requireConfiguration } from './packet.js';
+import { spawn } from 'node:child_process';
+import { realpath } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 
-const OWNER = 'unelos.opencode';
-const owned = part => part.type === 'text' && part.text.startsWith(CONTEXT_TAG);
-const error = (code, message) => Object.assign(new Error(message), { code });
+const OWNER='unelos.opencode';
+const fail=(code,message)=>Object.assign(new Error(message),{code});
+const object=(properties={},required=[])=>({type:'object',properties,required,additionalProperties:false});
+const string={type:'string'};
+const identity=object({kind:{type:'string',enum:['task','human-gate']},runId:string,nodeId:string,taskId:string,activationId:string},['kind','runId','nodeId']);
+const descriptions={next:'Read the selected Unelos execution package',start:'Start a fresh Unelos workflow and bind this session',resume:'Bind the explicitly selected unfinished run and immediately continue using core resume context',complete:'Complete the expected Unelos Task after inspection',approve:'Record explicit approval of the expected human gate',reject:'Reject the expected human gate with actionable feedback',continue:'Prepare a same-Task worker continuation',status:'Read selected Unelos status',inspect:'Inspect a Unelos workflow or Node',rename:'Name the selected Unelos run'};
+
+export const toolSchemas={
+  next:object(),start:object({workflow:string,name:string},['workflow']),resume:object({runId:string},['runId']),
+  complete:object({expected:identity,resultText:string,outcome:string},['expected','resultText']),
+  approve:object({expected:identity},['expected']),reject:object({expected:identity,reason:string},['expected','reason']),
+  continue:object({expected:identity,answer:string,progress:{type:'array',items:string}},['expected','progress']),
+  status:object(),inspect:object({workflow:string,node:string},['workflow']),rename:object({name:string,runId:string},['name','runId']),
+};
+
+export function callCli(binary,project,argv,input,signal) {
+  const mutation=argv[0]==='rename'||argv[0]==='execution'&&['start','complete','approve','reject'].includes(argv[1]);
+  const target=argv.includes('--run')?argv[argv.indexOf('--run')+1]:null;
+  const guidance=target?`Reconcile with execution next --run ${target}; never blindly retry`:'List unfinished runs and explicitly reconcile; never blindly retry';
+  return new Promise((resolve,reject)=>{
+    const child=spawn(binary,['--project',project,...argv],{signal,timeout:10000,killSignal:'SIGKILL',stdio:['pipe','pipe','pipe']});
+    let stdout='',stderr='',size=0;
+    const uncertain=()=>fail(mutation?'mutation_uncertain':'cli_failed',mutation?`Mutation response unavailable; ${guidance}`:'Unelos CLI failed');
+    for(const [stream,append] of [[child.stdout,s=>stdout+=s],[child.stderr,s=>stderr+=s]]) {
+      stream.setEncoding('utf8');stream.on('data',s=>{
+        size+=Buffer.byteLength(s);if(size>16*1024*1024){child.kill('SIGKILL');reject(uncertain());}else append(s);
+      });
+    }
+    child.once('error',error=>reject(error.name==='AbortError'
+      ? fail(mutation?'mutation_uncertain':'cli_cancelled',mutation?`Mutation interrupted; ${guidance}`:'CLI operation cancelled') : uncertain()));
+    child.stdin.on('error',()=>{}); // Process exit/close determines the operation's result.
+    child.once('close',code=>{
+      if(code!==0){
+        for(const line of stderr.trim().split('\n').reverse()) {
+          try {const error=JSON.parse(line)?.error;
+            if(typeof error?.code==='string'&&typeof error.message==='string'){reject(fail(error.code,error.message));return;}
+          }catch{}
+        }
+        reject(uncertain());return;
+      }
+      try {const value=JSON.parse(stdout);
+        if(!value||typeof value!=='object'||Array.isArray(value))throw new Error();resolve(value);
+      }catch{reject(fail(mutation?'mutation_uncertain':'invalid_cli_json',mutation?`Mutation response malformed; ${guidance}`:'Unelos returned invalid JSON'));}
+    });
+    child.stdin.end(input===undefined?undefined:JSON.stringify(input));
+  });
+}
 
 function binaryOption(options) {
-  const binary = options?.binary ?? 'unelos';
-  if (typeof binary !== 'string' || !binary.trim() || binary.includes('\0')) {
-    throw error('invalid_binary', 'Unelos binary must be one executable path or PATH name, not a shell command');
-  }
+  const binary=options?.binary??'unelos';
+  if(typeof binary!=='string'||!binary.trim()||binary.includes('\0'))throw fail('invalid_binary','Specify one CLI executable');
   return binary;
 }
 
-function checkSession(session, sessionID) {
-  if (!session || session.id !== sessionID) throw error('session_lookup_failed', 'Unelos native session lookup failed');
-  return session;
+function mapping(version) {
+  return 'Native Unelos tools: '+Object.keys(toolSchemas).map(name=>'unelos_'+name).join(', ')+'.\n'
+    +(version==='v1'?'Native worker: task(subagent_type=nativeAgent, prompt=workerPrompt, task_id for continuation).'
+      :'Native worker: subagent(agent=nativeAgent, prompt=workerPrompt, sessionID for continuation).');
 }
 
-async function activeProject(session, directory) {
-  if (session.parentID != null) return null;
-  const active = session.metadata?.[OWNER];
-  if (active === undefined) return null;
-  if (!active || typeof active.project !== 'string' || typeof active.enabled !== 'boolean') {
-    throw error('invalid_activation', 'Invalid Unelos activation metadata');
+function nativePackage(value,version) {
+  return {...value,...(value.workerPrompt&&value.packet?.agent?{nativeAgent:'unelos-'+value.packet.agent}:{}),harnessInstructions:mapping(version)};
+}
+
+function bridge(binary,version,get,update,directory) {
+  const changes=new Map(); // Only serialize metadata check/write; CLI work never holds this queue.
+  function change(id,fn) {
+    const next=(changes.get(id)??Promise.resolve()).catch(()=>{}).then(fn);
+    changes.set(id,next);
+    return next.finally(()=>{if(changes.get(id)===next)changes.delete(id);});
   }
-  if (!active.enabled) return null;
-  const project = await realpath(directory);
-  if (active.project !== project) throw error('project_changed', 'Unelos project changed; reactivate explicitly');
-  return project;
-}
-
-function argumentsFor(text) {
-  const words = text.trim().split(/\s+/).filter(Boolean);
-  if ((words[0] === 'off' && words.length === 1) || !words.length
-    || (words[0] === 'start' && words.length <= 2)) return words;
-  throw error('invalid_command', 'Usage: /unelos [start [WORKFLOW] | off]');
-}
-
-async function commandGuidance(binary, project, words) {
-  if (words[0] === 'off') return 'Continue without Unelos. Do not issue Unelos progression commands in this session.';
-  const current = await readCurrent(binary, project);
-  if (['running', 'waiting'].includes(current.status.status)) {
-    return `Existing run: ${JSON.stringify(current.status.runId)}. Recover current state and report it: read fresh next, then the ledger brief and existing reports. This command does not authorize Task work or progression. Honor the user's latest instructions; do not dispatch workers, write reports/ledger, complete, decide a gate, start another run, or rename during recovery. Wait for explicit authorization to resume Task work; a human gate still requires the user's explicit decision for that gate.`;
+  async function session(id) {
+    const value=await get(id);if(value?.id!==id)throw fail('session_lookup_failed','Native session unavailable');
+    if(value.parentID!=null)throw fail('child_controller','Workers cannot operate the Unelos controller');
+    return value;
   }
-  if (words[1]) return `Workflow explicitly selected: ${JSON.stringify(words[1])}. Obtain the agreed goal, supply a descriptive name at start, and write the ledger brief before work. Core validates the Workflow.`;
-  if (current.status.status === 'finished' && !words.length) {
-    return 'The current run is finished. Report that result; do not start another run.';
+  async function project(id) {
+    const value=await session(id);const active=value.metadata?.[OWNER];
+    if(!active?.enabled)throw fail('controller_inactive','Activate /unelos in the main session first');
+    const path=await realpath(directory(value));
+    if(active.project!==path)throw fail('project_changed','Project changed; reactivate /unelos');
+    return {path,active,value};
   }
-  const workflows = current.workflows ?? (await cliJson(binary, project, 'start')).workflows;
-  return workflowChoices(workflows);
-}
-
-function metadataFor(session, project, off) {
-  if (session.parentID != null) throw error('child_controller', 'A child session cannot activate an Unelos controller');
-  const metadata = { ...session.metadata };
-  if (off) delete metadata[OWNER];
-  else metadata[OWNER] = { project, enabled: true };
-  return metadata;
-}
-
-// Static reference checks do not mistake parent tools/model for a delegated executor's.
-async function referenceChecks(packet, version, models) {
-  if (!packet) return;
-  validatePacket(packet);
-  const tasks = packet.kind === 'parallel' ? packet.workers : packet.kind === 'task' ? [packet] : [];
-  for (const task of tasks) {
-    if (task.mcps.length) throw error('unsupported_mcp',
-      `Unelos (${version}): unsupported MCP requirements: ${task.mcps.join(', ')}`);
-    if (task.model !== null) validateModel(task.model, await models(), version);
-    if (version === 'v1' && task.tools.length) throw error('effective_tools_unverified',
-      `Unelos (v1): cannot establish effective required tools: ${task.tools.join(', ')} (unverified)`);
+  async function current(id,active) {
+    const state=await project(id);
+    if(state.active.entryId!==active.entryId)throw fail('entry_superseded','Entry superseded; explicitly select a run again');
+    return state.value;
   }
+  return {
+    async command(id,text) {
+      const words=text.trim().split(/\s+/).filter(Boolean);
+      if(words.length&&!(words.length===1&&['off','resume'].includes(words[0])))throw fail('invalid_command','Usage: /unelos [resume | off]');
+      const entry=await change(id,async()=>{
+        const value=await session(id);const path=await realpath(directory(value));const metadata={...value.metadata};
+        if(words[0]==='off'){delete metadata[OWNER];await update(id,metadata);return null;}
+        const active={project:path,enabled:true,mode:words[0]==='resume'?'resume':'new',entryId:randomUUID()};
+        await update(id,{...metadata,[OWNER]:active});return {path,active};
+      });
+      if(!entry)return 'Unelos disabled for this session.';
+      const {path,active}=entry;
+      const result=nativePackage(await callCli(binary,path,['execution',active.mode==='new'?'new':'runs','--json']),version);
+      await current(id,active);
+      return JSON.stringify({...result,requestedAction:text});
+    },
+    async execute(name,input,context) {
+      const {path,active}=await project(context.sessionID);let argv,control;
+      const entry=['start','resume'].includes(name);
+      if(entry){
+        if(active.runId||active.mode!==(name==='start'?'new':'resume'))throw fail('invalid_entry','Use /unelos for a fresh start or /unelos resume to select an existing run');
+      }else if(name!=='inspect'){
+        if(!active.runId)throw fail('run_unbound','Start or explicitly resume a run first');
+        if(input.expected&&input.expected.runId!==active.runId||name==='rename'&&input.runId!==active.runId)throw fail('stale_execution','Input identity does not match this session\'s selected run');
+      }
+      switch(name){
+        case 'next':argv=['execution','next','--run',active.runId];break;
+        case 'start':argv=['execution','start',input.workflow,...(input.name?['--name',input.name]:[])];break;
+        case 'resume':argv=['execution','resume','--run',input.runId];break;
+        case 'complete':case 'approve':case 'reject':
+          argv=['execution',name,'--run',active.runId];control={expected:input.expected,resultText:input.resultText??null,outcome:input.outcome??null,reason:input.reason??null};break;
+        case 'continue':argv=['execution','continue','--run',active.runId];control={expected:input.expected,answer:input.answer??null,progress:input.progress};break;
+        case 'status':argv=['status','--run',active.runId];break;
+        case 'inspect':argv=['inspect',input.workflow,...(input.node?['--node',input.node]:[])];break;
+        case 'rename':argv=['rename',input.name,'--run',active.runId];break;
+        default:throw fail('invalid_tool','Unknown Unelos tool');
+      }
+      const result=await callCli(binary,path,[...argv,'--json'],control,context.signal??context.abort);
+      if(entry){
+        try{
+          if(typeof result.runId!=='string'||!result.runId.trim()||name==='resume'&&result.runId!==input.runId)throw fail('invalid_cli_json','CLI returned no valid selected run ID');
+          await change(context.sessionID,async()=>{
+            const value=await current(context.sessionID,active);
+            if(value.metadata[OWNER].runId)throw fail('entry_superseded','Entry already bound; select a run again');
+            await update(context.sessionID,{...value.metadata,[OWNER]:{...active,runId:result.runId}});
+          });
+        }catch(error){
+          if(name==='start')throw fail('mutation_uncertain',`Run ${result.runId??'(unknown)'} may have been created but binding failed; explicitly reconcile with /unelos resume; never retry start`);
+          if(['controller_inactive','project_changed','entry_superseded'].includes(error.code))throw fail('entry_superseded','Resume entry superseded; select a run again');
+          throw error;
+        }
+      }
+      return nativePackage(result,version);
+    },
+  };
 }
 
 export default {
-  id: OWNER,
+  id:OWNER,
   async setup(ctx) {
-    const binary = binaryOption(ctx.options);
-    const bootstrap = await readFile(new URL('./bootstrap.md', import.meta.url), 'utf8');
-    const models = async project => {
-      const result = await ctx.model.list({ location: { directory: project } });
-      if (!Array.isArray(result.data)) throw error('model_catalogue_unavailable',
-        'Unelos (v2): native model catalogue unavailable');
-      return result.data.map(item => ({ providerID: item.providerID, id: item.id, enabled: item.enabled,
-        variants: Array.isArray(item.variants) ? item.variants.map(variant => variant.id) : [] }));
-    };
-    const get = async sessionID => checkSession(await ctx.session.get({ sessionID }), sessionID);
-    await ctx.command.transform(editor => editor.add({
-      name: 'unelos', description: 'Select or continue an explicitly activated Unelos workflow',
-      execute: async ({ sessionID, prompt, delivery }) => {
-        const words = argumentsFor(prompt.text);
-        const session = await get(sessionID);
-        if (session.parentID != null) throw error('child_controller', 'A child session cannot activate an Unelos controller');
-        const project = await realpath(session.location.directory);
-        const text = await commandGuidance(binary, project, words);
-        await ctx.session.update({ sessionID, metadata: metadataFor(session, project, words[0] === 'off') });
-        await ctx.session.prompt({ ...prompt, sessionID, delivery, text: text + '\n\n' + prompt.text });
-      },
-    }));
-    await ctx.session.hook('prompt', async event => {
-      const session = await get(event.sessionID);
-      const project = await activeProject(session, session.location.directory);
-      if (!project) return;
-      const current = await readCurrent(binary, project);
-      await referenceChecks(current.packet, 'v2', () => models(project));
-      if (current.packet?.kind !== 'task' || current.packet.execution !== 'main') return;
-      const model = validateModel(current.packet.model, current.packet.model ? await models(project) : [], 'v2');
-      if (model) await ctx.session.switchModel({ sessionID: event.sessionID, model });
+    const native=bridge(binaryOption(ctx.options),'v2',id=>ctx.session.get({sessionID:id}),
+      (id,metadata)=>ctx.session.update({sessionID:id,metadata}),s=>s.location.directory);
+    await ctx.tool.transform(editor=>{
+      for(const [name,input] of Object.entries(toolSchemas))editor.add({name:'unelos_'+name,description:descriptions[name],input,
+        execute:async(args,context)=>({content:JSON.stringify(await native.execute(name,args,context))})});
     });
-    await ctx.session.hook('context', async event => {
-      event.system = event.system.filter(part => !owned(part));
-      const session = await get(event.sessionID);
-      const project = await activeProject(session, session.location.directory);
-      if (!project) return;
-      const current = await readCurrent(binary, project);
-      await referenceChecks(current.packet, 'v2', () => models(project));
-      if (current.packet?.kind === 'task' && current.packet.execution === 'main') {
-        requireConfiguration(current.packet, { version: 'v2',
-          models: current.packet.model ? await models(project) : [],
-          effectiveModel: event.model, toolIds: new Set(Object.keys(event.tools)) });
-      }
-      event.system.push({ type: 'text', text: controllerText(current, { binary, project, bootstrap, version: 'v2' }) });
-    });
+    await ctx.command.transform(editor=>editor.add({name:'unelos',description:'Activate the Unelos controller',
+      execute:async({sessionID,prompt,delivery})=>ctx.session.prompt({...prompt,sessionID,delivery,text:await native.command(sessionID,prompt.text)})}));
   },
-  async server({ client }, options) {
-    const binary = binaryOption(options);
-    const bootstrap = await readFile(new URL('./bootstrap.md', import.meta.url), 'utf8');
-    const get = async sessionID => {
-      const result = await client.session.get({ path: { id: sessionID } });
-      if (result.error || result.response?.ok === false) throw error('session_lookup_failed', 'Unelos native session lookup failed');
-      return checkSession(result.data, sessionID);
-    };
-    const models = async project => {
-      const result = await client.config.providers({ query: { directory: project } });
-      if (result.error || result.response?.ok === false || !Array.isArray(result.data?.providers)) {
-        throw error('model_catalogue_unavailable', 'Unelos (v1): native model catalogue unavailable');
-      }
-      return result.data.providers.flatMap(provider => Object.values(provider.models).map(item => ({
-        providerID: provider.id, id: item.id, enabled: true,
-        variants: item.variants && typeof item.variants === 'object' ? Object.keys(item.variants) : [],
-      })));
-    };
-    const currentFor = async sessionID => {
-      const session = await get(sessionID);
-      const project = await activeProject(session, session.directory);
-      if (!project) return null;
-      const current = await readCurrent(binary, project);
-      await referenceChecks(current.packet, 'v1', () => models(project));
-      return { project, current };
-    };
-    return {
-      'command.execute.before': async (input, output) => {
-        if (input.command !== 'unelos') return;
-        const words = argumentsFor(input.arguments);
-        const session = await get(input.sessionID);
-        if (session.parentID != null) throw error('child_controller', 'A child session cannot activate an Unelos controller');
-        const project = await realpath(session.directory);
-        const text = await commandGuidance(binary, project, words);
-        const result = await client.session.update({ path: { id: input.sessionID }, body: {
-          metadata: metadataFor(session, project, words[0] === 'off'),
-        } });
-        if (result.error || result.response?.ok === false) throw error('activation_failed', 'Unelos activation could not be persisted');
-        const part = output.parts.find(part => part.type === 'text');
-        if (!part) throw error('delivery_text_missing', 'Unelos command requires native text');
-        part.text = text;
-      },
-      'chat.message': async (input, output) => {
-        const state = await currentFor(input.sessionID);
-        const packet = state?.current.packet;
-        if (packet?.kind !== 'task' || packet.execution !== 'main') return;
-        const model = validateModel(packet.model, packet.model ? await models(state.project) : [], 'v1');
-        if (model) output.message.model = { providerID: model.providerID, modelID: model.id,
-          ...(model.variant ? { variant: model.variant } : {}) };
-      },
-      'chat.params': async input => {
-        const state = await currentFor(input.sessionID);
-        const packet = state?.current.packet;
-        if (packet?.kind !== 'task' || packet.execution !== 'main') return;
-        requireConfiguration(packet, { version: 'v1', models: packet.model ? await models(state.project) : [],
-          effectiveModel: { providerID: input.model.providerID, id: input.model.id,
-            ...(input.message.model?.variant ? { variant: input.message.model.variant } : {}) }, toolIds: null });
-      },
-      'experimental.chat.messages.transform': async (_input, output) => {
-        for (const message of output.messages) message.parts = message.parts.filter(part => !owned(part));
-        const user = output.messages.find(message => message.info.role === 'user');
-        if (!user) return;
-        const state = await currentFor(user.info.sessionID);
-        if (!state) return;
-        const target = output.messages.find(message => message.info.role === 'user'
-          && message.parts.some(part => part.type === 'text' && part.text.trim()));
-        if (!target) throw error('delivery_text_missing', 'Unelos (v1): delivery needs ordinary user text after compaction');
-        const template = target.parts.find(part => part.type === 'text');
-        target.parts.unshift({ ...template, text: controllerText(state.current,
-          { binary, project: state.project, bootstrap, version: 'v1' }) });
-      },
-    };
+  async server({client},options) {
+    const get=async id=>{const result=await client.session.get({path:{id}});if(result.error)throw fail('session_lookup_failed','Native session unavailable');return result.data;};
+    const native=bridge(binaryOption(options),'v1',get,async(id,metadata)=>{
+      const result=await client.session.update({path:{id},body:{metadata}});if(result.error)throw fail('activation_failed','Native activation failed');
+    },s=>s.directory);
+    const {registerV1}=await import('./v1.js');
+    return {tool:await registerV1(options,descriptions,native.execute),
+      'command.execute.before':async(input,output)=>{
+        if(input.command!=='unelos')return;
+        const part=output.parts.find(p=>p.type==='text');if(!part)throw fail('delivery_text_missing','Command needs text');
+        part.text=await native.command(input.sessionID,input.arguments);
+      }};
   },
 };

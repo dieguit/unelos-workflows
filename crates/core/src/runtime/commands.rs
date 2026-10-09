@@ -5,10 +5,11 @@ use camino::Utf8Path;
 
 pub fn complete_node(
     root: &Utf8Path,
+    run_id: &str,
     node: &str,
     outcome: Option<&str>,
 ) -> Result<RunState, RuntimeError> {
-    let (store, project, state) = open_current(root, node)?;
+    let (store, project, state) = open_current(root, run_id, node)?;
     let mut confirmed = state.clone();
     let execution_id = match &mut confirmed.current {
         CurrentWork::Task(record) | CurrentWork::Parallel(record) => {
@@ -26,27 +27,33 @@ pub fn complete_node(
     commit(&store, &project, &state, candidate)
 }
 
-pub fn approve_node(root: &Utf8Path, node: &str) -> Result<RunState, RuntimeError> {
-    decide_node(root, node, "approved", None)
+pub fn approve_node(root: &Utf8Path, run_id: &str, node: &str) -> Result<RunState, RuntimeError> {
+    decide_node(root, run_id, node, "approved", None)
 }
 
-pub fn reject_node(root: &Utf8Path, node: &str, reason: &str) -> Result<RunState, RuntimeError> {
+pub fn reject_node(
+    root: &Utf8Path,
+    run_id: &str,
+    node: &str,
+    reason: &str,
+) -> Result<RunState, RuntimeError> {
     let reason = reason.trim();
     if reason.is_empty() {
         return Err(RuntimeError::InvalidState(
             "rejection reason must not be empty".into(),
         ));
     }
-    decide_node(root, node, "rejected", Some(reason))
+    decide_node(root, run_id, node, "rejected", Some(reason))
 }
 
 fn decide_node(
     root: &Utf8Path,
+    run_id: &str,
     node: &str,
     outcome: &str,
     reason: Option<&str>,
 ) -> Result<RunState, RuntimeError> {
-    let (store, project, state) = open_current(root, node)?;
+    let (store, project, state) = open_current(root, run_id, node)?;
     let activation = match &state.current {
         CurrentWork::HumanGate(record) => record.execution_id.clone(),
         _ => {
@@ -61,10 +68,11 @@ fn decide_node(
 
 fn open_current(
     root: &Utf8Path,
+    run_id: &str,
     node: &str,
 ) -> Result<(store::RunStore, LoadedProject, RunState), RuntimeError> {
     let store = store::RunStore::open(root)?;
-    let state = store.active()?;
+    let state = store.run(run_id)?;
     let current_node = match &state.current {
         CurrentWork::Task(record)
         | CurrentWork::Parallel(record)

@@ -70,9 +70,9 @@ fn starts_and_recovers_a_live_task_packet() {
     let (_temp, root) = project_copy();
     let project = load_project(&root, "implement-feature").unwrap();
     let state = start(&project, "change-button-color", "Change the button color.").unwrap();
-    assert_eq!(state, status(&root).unwrap());
-    let a = serde_json::to_value(next(&root).unwrap()).unwrap();
-    let b = serde_json::to_value(next(&root).unwrap()).unwrap();
+    assert_eq!(state, status(&root, "change-button-color").unwrap());
+    let a = serde_json::to_value(next(&root, "change-button-color").unwrap()).unwrap();
+    let b = serde_json::to_value(next(&root, "change-button-color").unwrap()).unwrap();
     assert_eq!(a, b);
     assert_eq!(a["taskId"], "task-1");
     assert_eq!(a["request"], "Change the button color.");
@@ -81,7 +81,7 @@ fn starts_and_recovers_a_live_task_packet() {
     assert!(!root
         .join(".unelos/runs/change-button-color/plan/plan.md")
         .exists());
-    assert!(start(&project, "another-run", "Another request").is_err());
+    assert!(start(&project, "another-run", "Another request").is_ok());
 }
 
 #[test]
@@ -118,12 +118,12 @@ fn live_task_and_skill_edits_change_packet_without_changing_saved_state() {
         "changed skill live",
     )
     .unwrap();
-    let packet = serde_json::to_value(next(&root).unwrap()).unwrap();
+    let packet = serde_json::to_value(next(&root, "live-edit").unwrap()).unwrap();
     assert_eq!(packet["taskInstructions"], "Changed task live.");
     assert_eq!(packet["agentInstructions"], "Changed agent live.");
     assert!(packet.to_string().contains("changed skill live"));
     assert_eq!(fs::read(state_path).unwrap(), bytes);
-    assert_eq!(status(&root).unwrap(), state);
+    assert_eq!(status(&root, "live-edit").unwrap(), state);
 }
 
 #[test]
@@ -145,9 +145,9 @@ fn incompatible_live_edits_error_without_rewriting_state_or_paths() {
     let state_path = root.join(".unelos/runs/incompatible/state.json");
     let saved = fs::read(&state_path).unwrap();
     fs::remove_file(root.join(".unelos/skills/verification/SKILL.md")).unwrap();
-    assert!(next(&root).is_err());
+    assert!(next(&root, "incompatible").is_err());
     assert_eq!(fs::read(&state_path).unwrap(), saved);
-    assert_eq!(status(&root).unwrap().request, "request");
+    assert_eq!(status(&root, "incompatible").unwrap().request, "request");
 }
 
 #[test]
@@ -172,9 +172,9 @@ fn removed_or_changed_current_task_definition_errors_without_mutating_state() {
         let path = root.join(".unelos/runs/changed-live/state.json");
         let saved = fs::read(&path).unwrap();
         fs::write(root.join(".unelos/workflows/implement-feature.yaml"), edit).unwrap();
-        assert!(next(&root).is_err());
+        assert!(next(&root, "changed-live").is_err());
         assert_eq!(fs::read(path).unwrap(), saved);
-        assert_eq!(status(&root).unwrap().request, "request");
+        assert_eq!(status(&root, "changed-live").unwrap().request, "request");
     }
 }
 
@@ -194,7 +194,7 @@ fn starts_input_free_gate_and_finished_nodes_and_allows_new_run_after_end() {
         if expected == "finished" {
             assert!(state.is_finished());
             assert_eq!(
-                serde_json::to_value(next(&root).unwrap()).unwrap()["kind"],
+                serde_json::to_value(next(&root, "variant").unwrap()).unwrap()["kind"],
                 "finished"
             );
             assert!(start(&project, "after-end", "again").unwrap().is_finished());
@@ -243,7 +243,7 @@ fn parallel_workers_get_stable_distinct_report_paths() {
         state.current,
         unelos_core::CurrentWork::Parallel(_)
     ));
-    let packet = serde_json::to_value(next(&root).unwrap()).unwrap();
+    let packet = serde_json::to_value(next(&root, "parallel-run").unwrap()).unwrap();
     assert_eq!(packet["workers"][0]["key"], "worker-1");
     assert_eq!(packet["workers"][1]["key"], "worker-2");
     assert!(
@@ -257,7 +257,10 @@ fn parallel_workers_get_stable_distinct_report_paths() {
     assert!(root
         .join(".unelos/runs/parallel-run/parallel/planner-worker-1")
         .is_dir());
-    assert_eq!(serde_json::to_value(next(&root).unwrap()).unwrap(), packet);
+    assert_eq!(
+        serde_json::to_value(next(&root, "parallel-run").unwrap()).unwrap(),
+        packet
+    );
 }
 
 #[test]
@@ -292,9 +295,9 @@ fn added_parallel_worker_does_not_reallocate_saved_work() {
         ),
     )
     .unwrap();
-    assert!(next(&root).is_err());
+    assert!(next(&root, "worker-edit").is_err());
     assert_eq!(fs::read(path).unwrap(), saved);
-    assert_eq!(status(&root).unwrap().request, "request");
+    assert_eq!(status(&root, "worker-edit").unwrap().request, "request");
 }
 
 #[test]
@@ -303,7 +306,7 @@ fn status_does_not_need_valid_live_definitions() {
     let project = load_project(&root, "implement-feature").unwrap();
     let state = start(&project, "change-color", "request").unwrap();
     fs::write(root.join(".unelos/project.yaml"), "invalid: [").unwrap();
-    assert_eq!(status(&root).unwrap(), state);
+    assert_eq!(status(&root, "change-color").unwrap(), state);
 }
 
 #[test]
@@ -318,8 +321,8 @@ fn rejects_saved_external_output_before_returning_a_packet() {
     fs::write(&state_path, serde_json::to_vec(&state).unwrap()).unwrap();
     let tampered = fs::read(&state_path).unwrap();
 
-    assert!(next(&root).is_err());
-    assert!(status(&root).is_err());
+    assert!(next(&root, "tampered").is_err());
+    assert!(status(&root, "tampered").is_err());
     assert_eq!(fs::read(state_path).unwrap(), tampered);
 }
 
@@ -342,8 +345,8 @@ fn rejects_literal_backslash_symlinked_output_without_mutating_state() {
     fs::write(&state_path, serde_json::to_vec(&state).unwrap()).unwrap();
     let tampered = fs::read(&state_path).unwrap();
 
-    assert!(status(&root).is_err());
-    assert!(next(&root).is_err());
+    assert!(status(&root, "backslash").is_err());
+    assert!(next(&root, "backslash").is_err());
     assert_eq!(fs::read(&state_path).unwrap(), tampered);
     assert_eq!(fs::read(outside).unwrap(), b"outside");
 
@@ -353,8 +356,8 @@ fn rejects_literal_backslash_symlinked_output_without_mutating_state() {
         .into();
     fs::write(&state_path, serde_json::to_vec(&state).unwrap()).unwrap();
     let traversed = fs::read(&state_path).unwrap();
-    assert!(status(&root).is_err());
-    assert!(next(&root).is_err());
+    assert!(status(&root, "backslash").is_err());
+    assert!(next(&root, "backslash").is_err());
     assert_eq!(fs::read(state_path).unwrap(), traversed);
 }
 
@@ -376,7 +379,7 @@ fn rejects_saved_external_worker_report_before_returning_a_packet() {
     fs::write(&state_path, serde_json::to_vec(&state).unwrap()).unwrap();
     let tampered = fs::read(&state_path).unwrap();
 
-    assert!(next(&root).is_err());
+    assert!(next(&root, "tampered-worker").is_err());
     assert_eq!(fs::read(state_path).unwrap(), tampered);
 }
 
@@ -400,7 +403,7 @@ fn validates_saved_feedback_and_history_paths_but_allows_producer_inputs() {
         "reason":null, "artifacts":[{"name":"result.md","path":root.join(".unelos/runs/saved-history/producer/result.md").to_string()}]
     });
     fs::write(&state_path, serde_json::to_vec(&valid).unwrap()).unwrap();
-    assert!(status(&root).is_ok());
+    assert!(status(&root, "saved-history").is_ok());
 
     for path in ["feedback", "history"] {
         let mut invalid = original.clone();
@@ -416,7 +419,10 @@ fn validates_saved_feedback_and_history_paths_but_allows_producer_inputs() {
                 serde_json::json!([{"work":completed,"outcome":null,"reason":null}]);
         }
         fs::write(&state_path, serde_json::to_vec(&invalid).unwrap()).unwrap();
-        assert!(status(&root).is_err(), "accepted external {path} path");
+        assert!(
+            status(&root, "saved-history").is_err(),
+            "accepted external {path} path"
+        );
     }
 }
 
@@ -425,7 +431,7 @@ fn validates_saved_feedback_and_history_paths_but_allows_producer_inputs() {
 fn rejects_symlinked_pointer_state_artifact_and_ledger_paths() {
     use std::os::unix::fs::symlink;
 
-    for linked in ["pointer", "state", "artifact", "ledger"] {
+    for linked in ["state", "artifact", "ledger"] {
         let (_temp, root) = project_copy();
         let project = load_project(&root, "implement-feature").unwrap();
         start(&project, "linked", "request").unwrap();
@@ -447,7 +453,10 @@ fn rejects_symlinked_pointer_state_artifact_and_ledger_paths() {
             "ledger" => symlink(root.join("outside-ledger"), run.join("ledger.md")).unwrap(),
             _ => unreachable!(),
         }
-        assert!(status(&root).is_err(), "accepted symlinked {linked}");
+        assert!(
+            status(&root, "linked").is_err(),
+            "accepted symlinked {linked}"
+        );
     }
 }
 
