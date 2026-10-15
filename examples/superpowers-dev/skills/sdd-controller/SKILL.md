@@ -63,14 +63,19 @@ implementation.
 
 ## Handle the implementation report
 
-`implementation-report.md` carries one of four statuses:
+An implementer returns one of four statuses. NEEDS_CONTEXT and BLOCKED never complete `implement-task`: you handle them while it is still current, and `advance` never sees them. `advance` only reads reports with DONE or DONE_WITH_CONCERNS.
+
+During `implement-task`:
+
+- **NEEDS_CONTEXT:** the implementer lacked information. Answer from `spec.md`, `plan.md` or the code when possible; otherwise relay the question to the user. Then continue the same worker through Unelos continuation. Never advance the task.
+- **BLOCKED:** assess the blocker. Context problem → supply context. Task too large → rule a smaller scope. Plan itself wrong → rule on the correction. Record the ruling in the run ledger, never complete the task, and re-dispatch with the context or ruling. At the next `advance`, copy the ruling into `progress.md` (under `## Carry forward`) so it survives.
+
+**Never** ignore an escalation or send the same work back unchanged. If the implementer said it's stuck, something needs to change.
+
+At `advance`:
 
 - **DONE:** proceed on the review verdict.
 - **DONE_WITH_CONCERNS:** read the concerns. If they are about correctness or scope, treat them as open findings (`fix`). If they are observations (e.g., "this file is getting large"), note them and proceed.
-- **NEEDS_CONTEXT:** the implementer lacked information. Supply it (or rule on the ambiguity) under `## Carry forward` in `progress.md` and choose `fix` so the next round carries it.
-- **BLOCKED:** assess the blocker. Context problem → supply context. Task too large → rule a smaller scope. Plan itself wrong → rule on the correction and record it. In every case carry the ruling forward and choose `fix`.
-
-**Never** ignore an escalation or send the same work back unchanged. If the implementer said it's stuck, something needs to change.
 
 ## Reading the review
 
