@@ -1,24 +1,2 @@
-taskDefinitions:
-  create-plan:
-    instructions: Write a plan for the supplied request to its output path.
-    skills: [planning]
-  implement-plan:
-    instructions: Implement the supplied plan and report verification.
-    skills: [verification]
-  review-implementation:
-    instructions: Inspect actual changes against the plan and report findings.
-    skills: [code-review, verification]
-    outcomes: [approved, changes_requested]
-agents:
-  planner:
-    instructions: Follow project constraints when planning.
-    skills: []
-  engineer:
-    instructions: Follow existing project conventions.
-    skills: [rust]
-    model: example-provider/example-model
-    mcps: [github]
-    tools: [read-file, run-command]
-  reviewer:
-    instructions: Inspect requirements and actual changes independently.
-    skills: [rust]
+# Project settings will live here.
+{}

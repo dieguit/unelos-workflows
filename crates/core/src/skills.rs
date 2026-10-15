@@ -49,6 +49,13 @@ pub fn resolve_skills(
         path: project_root.to_owned(),
         source,
     })?;
+    resolve_authoring_skills(&project_root.join(".unelos"), ordered_ids)
+}
+
+pub(crate) fn resolve_authoring_skills(
+    authoring_root: &Utf8Path,
+    ordered_ids: &[impl AsRef<str>],
+) -> Result<Vec<ResolvedSkill>, SkillResolveError> {
     let mut seen = HashSet::new();
     let mut skills = Vec::new();
     for id in ordered_ids {
@@ -59,8 +66,17 @@ pub fn resolve_skills(
         if !seen.insert(id) {
             continue;
         }
-        let directory = project_root.join(".unelos/skills").join(id);
+        let directory = authoring_root.join("skills").join(id);
         let path = directory.join("SKILL.md");
+        crate::check_install_path(
+            authoring_root,
+            &Utf8PathBuf::from("skills").join(id).join("SKILL.md"),
+        )
+        .map_err(|error| SkillResolveError::Read {
+            id: id.into(),
+            path: path.clone(),
+            source: io::Error::new(io::ErrorKind::InvalidInput, error),
+        })?;
         let content = fs::read_to_string(&path).map_err(|source| {
             if source.kind() == io::ErrorKind::NotFound {
                 SkillResolveError::Missing {

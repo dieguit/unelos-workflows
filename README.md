@@ -30,6 +30,47 @@ Review the shared agent rules in the [instruction catalog](crates/core/src/instr
 Markdown is embedded at build time; paths and identities are supplied separately
 in runtime packets.
 
+### Initialize a project
+
+With `unelos` installed on your machine:
+
+```sh
+cd /path/to/project
+unelos init --opencode v2
+unelos install my-workflow
+```
+
+`init` creates missing `.unelos/project.yaml`, `workflows/`, `tasks/`, `agents/`, and `skills/`, bundles
+the plugin at `.unelos/opencode/unelos`, and registers it in project OpenCode
+configuration. No npm, network access, or source checkout is needed. It points to
+the current CLI executable; rerun after moving the CLI or deleting managed assets.
+V2 is the first-init default; `--opencode v1` selects V1.
+
+Author reusable tasks in `.unelos/tasks/<id>/task.yaml`, agents in
+`.unelos/agents/<id>/agent.yaml`, and workflows in `.unelos/workflows/<name>.yaml`.
+Folder names are definition IDs. `project.yaml` is an empty settings mapping for now.
+Workflow steps and parallel workers choose exactly one of `task: <id>` or an inline
+`taskDefinition`. Tasks/agents choose exactly one of `instructions` or
+`instructionsFile`; file paths resolve relative to the containing YAML and stay
+inside the authoring root. Agent/task folders can include templates and resources.
+
+`install` validates/imports authoring and generates
+required `.opencode/agents/unelos-*.md`, inferring the version recorded by `init`.
+To import a workflow package or another project, add `--source /path/to/workflow-source`.
+Packages have `workflows/`, `agents/`, and any required `tasks/`/`skills/` directly
+at their root; installation copies selected authoring under the project's `.unelos`.
+See the sole [plan/execute/review example](examples/simple-plan-execute-review/README.md).
+Explicit `install --opencode v1|v2` overrides generation only. Without initialization
+or an explicit version, `install` remains core-only.
+
+Reruns preserve authoring, unrelated configuration, and runs. Generated agents
+overwrite manual edits; customize authored definitions instead. If multiple
+project config files exist, initialization stops rather than guessing. Open a
+fresh OpenCode session after initialization, then enter `/unelos` once a workflow
+is installed. Third-party skills, MCP servers, and credentials remain separate.
+Deleting `.unelos` loses authored customizations and run reports; `init` cannot
+recover them. See [integration instructions](integrations/opencode/README.md).
+
 ```sh
 cargo run -p unelos-cli -- --help
 cargo run -p unelos-cli -- config show
@@ -128,7 +169,7 @@ cannot use a single-successor transition.
 
 There is no standalone validation-only CLI command: `inspect` validates the
 selected Workflow before printing its normalized graph and reports authoring
-diagnostics. See the [manual inspection walkthrough](examples/manual-project/README.md)
+diagnostics. See the [workflow walkthrough](examples/simple-plan-execute-review/README.md)
 for the example and safe QA steps. Core validation terminal QA:
 
 ```sh

@@ -1,0 +1,68 @@
+name: simple-plan-execute-review
+description: Clarify requirements, approve a plan, implement, and independently review changes.
+start: interview
+nodes:
+  interview:
+    taskDefinition:
+      instructions: |
+        Ask what needs to be done if the request is not already clear. Interview the user until
+        shared understanding: scope, desired behavior, constraints and acceptance
+        checks. Reflect requirements for correction and obtain confirmation of shared
+        understanding. Write the agreed requirements
+        to the bound output, including explicitly deferred decisions. Do not assume
+        requirements from empty request text or approve the later plan gate.
+    agent: simple-controller
+    execution: main
+    outputs: [requirements.md]
+    next: plan
+  plan:
+    taskDefinition:
+      instructions: |
+        Read requirements, project instructions, relevant code, feedback and
+        existing plan. Plan the smallest requested change, exact affected files,
+        verification and project-specific prerequisites. Preserve useful sections
+        when revising after rejection. Write the bound plan; do not implement it.
+    agent: simple-controller
+    execution: main
+    inputs: [requirements.md]
+    outputs: [plan.md]
+    next: approve-plan
+  approve-plan:
+    type: human-gate
+    inputs: [requirements.md, plan.md]
+    next:
+      approved: implement
+      rejected: plan
+  implement:
+    taskDefinition:
+      instructions: |
+        Read requirements, approved plan, project instructions, review feedback and existing
+        report. Implement only the planned change. Ask for essential missing context
+        instead of guessing; report question, dependency and progress. Verify actual
+        changes and write the bound implementation report with changed paths, evidence
+        and downstream decisions. Preserve useful sections on corrections. Never
+        edit the ledger or issue Unelos progression commands.
+    agent: simple-implementer
+    execution: subagent
+    inputs: [requirements.md, plan.md]
+    outputs: [implementation-report.md]
+    next: review
+  review:
+    taskDefinition:
+      instructions: |
+        Independently read requirements, plan, implementation report, project rules,
+        actual diff and existing review. Run required review tools/checks. Write
+        concrete findings and evidence to the bound review report. Return passed
+        only when requested behavior and verification hold; otherwise return
+        changes_requested with actionable corrections. Do not fabricate findings,
+        fix implementation yourself, edit the ledger or advance Unelos.
+      outcomes: [passed, changes_requested]
+    agent: simple-reviewer
+    execution: subagent
+    inputs: [requirements.md, plan.md, implementation-report.md]
+    outputs: [review.md]
+    next:
+      passed: finish
+      changes_requested: implement
+  finish:
+    type: end

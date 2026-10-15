@@ -3,7 +3,8 @@ use clap::ValueEnum;
 use serde_json::{json, Value};
 use unelos_core::{write_install_file, AgentExport, InstallError};
 
-#[derive(Debug, Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Version {
     V1,
     V2,

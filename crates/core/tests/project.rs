@@ -1,9 +1,9 @@
-use assert_fs::TempDir;
+use assert_fs::{fixture::PathCopy, TempDir};
 use camino::{Utf8Path, Utf8PathBuf};
 use std::{fs, process::Command};
 use unelos_core::{
-    load_project, parse_project_definitions, parse_workflow_definition, LoadedProject,
-    NodeDefinition, ProjectLoadError, Transition,
+    load_project, parse_workflow_definition, LoadedProject, NodeDefinition, ProjectLoadError,
+    Transition,
 };
 
 const PROJECT: &str = include_str!("fixtures/project/.unelos/project.yaml");
@@ -22,8 +22,12 @@ fn assert_fixture(loaded: &LoadedProject, root: &Utf8Path) {
     );
     assert!(loaded.project_root.is_absolute());
     assert_eq!(
-        loaded.definitions,
-        parse_project_definitions("fixture", PROJECT).unwrap()
+        loaded.definitions.task_definitions["create-plan"].instructions,
+        "Write a plan for the supplied request to its output path."
+    );
+    assert_eq!(
+        loaded.definitions.agents["engineer"].model.as_deref(),
+        Some("example-provider/example-model")
     );
     assert_eq!(
         loaded.workflow,
@@ -34,6 +38,10 @@ fn assert_fixture(loaded: &LoadedProject, root: &Utf8Path) {
 fn temporary_project() -> (TempDir, Utf8PathBuf) {
     let temp = TempDir::new().unwrap();
     let root = Utf8PathBuf::from_path_buf(temp.path().join("prøject with spaces")).unwrap();
+    fs::create_dir_all(&root).unwrap();
+    assert_fs::fixture::ChildPath::new(root.as_std_path())
+        .copy_from(fixture_root(), &["**/*"])
+        .unwrap();
     fs::create_dir_all(root.join(".unelos/workflows")).unwrap();
     fs::write(root.join(".unelos/project.yaml"), PROJECT).unwrap();
     fs::write(

@@ -33,8 +33,9 @@ fn fixture_text_edits_work_with_crlf() {
     let workflow = normalize_fixture_text(
         &fs::read_to_string(fixtures.join("workflows/implement-feature.yaml")).unwrap(),
     );
-    let project =
-        normalize_fixture_text(&fs::read_to_string(fixtures.join("project.yaml")).unwrap());
+    let project = normalize_fixture_text(
+        &fs::read_to_string(fixtures.join("agents/engineer/agent.yaml")).unwrap(),
+    );
 
     for (workflow, project) in [
         (workflow.clone(), project.clone()),
@@ -54,14 +55,14 @@ fn fixture_text_edits_work_with_crlf() {
         let project = normalize_fixture_text(&project);
         let project = replace_fixture_text(
             &project,
-            "agents:\n",
-            "agents:\n  \"../escape\":\n    instructions: unsafe\n",
+            "Follow existing project conventions.",
+            "Changed agent instructions.",
         );
 
         assert!(workflow.contains("    inputs: []\n"));
         assert!(!workflow.contains("inputs: [plan.md]"));
         assert!(!workflow.contains("  plan:\n"));
-        assert!(project.contains("  \"../escape\":\n    instructions: unsafe\n"));
+        assert!(project.contains("Changed agent instructions."));
     }
 }
 
@@ -103,16 +104,21 @@ fn live_task_and_skill_edits_change_packet_without_changing_saved_state() {
     let state_path = root.join(".unelos/runs/live-edit/state.json");
     let bytes = fs::read(&state_path).unwrap();
     let definitions = replace_fixture_text(
-        &read_fixture_text(root.join(".unelos/project.yaml")),
+        &read_fixture_text(root.join(".unelos/tasks/implement-plan/task.yaml")),
         "Implement the supplied plan and report verification.",
         "Changed task live.",
     );
+    fs::write(
+        root.join(".unelos/tasks/implement-plan/task.yaml"),
+        definitions,
+    )
+    .unwrap();
     let definitions = replace_fixture_text(
-        &definitions,
+        &read_fixture_text(root.join(".unelos/agents/engineer/agent.yaml")),
         "Follow existing project conventions.",
         "Changed agent live.",
     );
-    fs::write(root.join(".unelos/project.yaml"), definitions).unwrap();
+    fs::write(root.join(".unelos/agents/engineer/agent.yaml"), definitions).unwrap();
     fs::write(
         root.join(".unelos/skills/verification/SKILL.md"),
         "changed skill live",
@@ -497,20 +503,11 @@ fn rejects_existing_run_path_and_unsafe_runtime_components_without_publication()
     ] {
         let (_temp, root) = project_copy();
         fs::write(root.join(".unelos/workflows/implement-feature.yaml"), workflow).unwrap();
+        let mut project = load_project(&root, "implement-feature").unwrap();
         if expected == "unsafe-agent" {
-            let project_path = root.join(".unelos/project.yaml");
-            let project_yaml = read_fixture_text(&project_path);
-            fs::write(
-                project_path,
-                replace_fixture_text(
-                    &project_yaml,
-                    "agents:\n",
-                    "agents:\n  \"../escape\":\n    instructions: unsafe\n",
-                ),
-            )
-            .unwrap();
+            // Exercise runtime's guard independently of folder-ID validation.
+            project.definitions.agents.insert("../escape".into(), project.definitions.agents["planner"].clone());
         }
-        let project = load_project(&root, "implement-feature").unwrap();
         let error = start(&project, expected, "request").unwrap_err();
         assert!(error.to_string().contains(if expected == "unsafe-node" {
             "unsafe Node"

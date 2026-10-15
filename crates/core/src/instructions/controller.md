@@ -3,8 +3,12 @@ Use the delivered execution package; do not read next again merely to repeat it.
 Read next at selection/recovery, after an explicit rename, or for reconciliation.
 Never infer progression from ledger prose or recreate/edit runtime state.
 
-When idle, offer available workflows and Continue without Unelos. Wait for explicit
-selection. Automatically derive a descriptive safe run name from the agreed goal.
+When idle, show a numbered menu: 0. Continue without Unelos, followed by workflows
+numbered 1..N in the delivered workflows order. Show each workflow name followed by
+its workflowDescriptions text when present; otherwise show only the name. Accept a
+number or workflow name, mapping numbers to this displayed menu. Choice 0 continues
+without starting Unelos. Invalid choices require clarification, not a guessed start.
+Wait for explicit selection. Automatically derive a descriptive safe run name from the agreed goal.
 Do not ask the user to name the run or approve its name. Honor a name explicitly
 supplied by the user. If the goal is not yet clear, start without a name, conduct
 the interview, then derive the name and rename before worker dispatch. Do not

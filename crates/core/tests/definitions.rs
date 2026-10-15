@@ -1,15 +1,95 @@
 use unelos_core::{
-    parse_project_definitions, parse_workflow_definition, Execution, NodeDefinition, Transition,
+    parse_agent_definition, parse_task_definition, parse_workflow_definition, Execution,
+    NodeDefinition, Transition,
 };
 
 #[test]
-fn project_preserves_authored_values_and_defaults() {
-    let project = parse_project_definitions(
-        ".unelos/project.yaml",
-        include_str!("fixtures/definitions/project.yaml"),
+fn workflow_description_is_optional_and_strict() {
+    let yaml = "name: demo\nstart: end\nnodes: {end: {type: end}}\n";
+    for value in ["42", "true", "[]", "{}"] {
+        assert!(
+            parse_workflow_definition("demo.yaml", &format!("{yaml}description: {value}\n"))
+                .is_err()
+        );
+    }
+    assert!(parse_workflow_definition(
+        "demo.yaml",
+        &format!("{yaml}description: First\ndescription: Second\n")
     )
-    .unwrap();
-    let task = &project.task_definitions["implement-plan"];
+    .is_err());
+    assert!(parse_workflow_definition(
+        "demo.yaml",
+        &format!("{yaml}description: A short workflow\n")
+    )
+    .is_ok());
+}
+
+#[test]
+fn inline_task_is_inferred_and_conflicts_are_rejected() {
+    let yaml = "name: demo\nstart: work\nnodes:\n  work:\n    taskDefinition: {instructions: Work}\n    agent: worker\n    next: end\n  end: {type: end}\n";
+    let workflow = parse_workflow_definition("demo.yaml", yaml).unwrap();
+    let value = serde_json::to_value(&workflow.nodes["work"]).unwrap();
+    assert_eq!(value["taskDefinition"]["instructions"], "Work");
+    for invalid in [
+        yaml.replace("    agent: worker", "    task: shared\n    agent: worker"),
+        yaml.replace("    taskDefinition: {instructions: Work}\n", ""),
+        yaml.replace("{instructions: Work}", "null"),
+    ] {
+        assert!(parse_workflow_definition("demo.yaml", &invalid).is_err());
+    }
+    let parallel = "name: demo\nstart: work\nnodes:\n  work:\n    type: parallel\n    tasks: [{taskDefinition: {instructions: Work}, agent: worker}]\n    next: end\n  end: {type: end}\n";
+    assert!(parse_workflow_definition("demo.yaml", parallel).is_ok());
+    assert!(parse_workflow_definition(
+        "demo.yaml",
+        &parallel.replace("taskDefinition:", "task: shared, taskDefinition:")
+    )
+    .is_err());
+}
+
+#[test]
+fn instruction_file_forms_are_exclusive_strict_and_roundtrip() {
+    for yaml in [
+        "{}",
+        "instructions: null",
+        "instructions: 42",
+        "instructionsFile: null",
+        "instructionsFile: 42",
+        "instructions: text\ninstructionsFile: text.md",
+        "instructionsFile: ''",
+    ] {
+        assert!(
+            serde_yaml_ng::from_str::<unelos_core::TaskDefinition>(yaml).is_err(),
+            "{yaml}"
+        );
+        assert!(
+            serde_yaml_ng::from_str::<unelos_core::AgentDefinition>(yaml).is_err(),
+            "{yaml}"
+        );
+    }
+    let task: unelos_core::TaskDefinition =
+        serde_yaml_ng::from_str("instructionsFile: instructions.md").unwrap();
+    let wire = serde_json::to_value(task).unwrap();
+    assert_eq!(wire["instructionsFile"], "instructions.md");
+    assert!(wire.get("instructions").is_none());
+    let agent: unelos_core::AgentDefinition =
+        serde_yaml_ng::from_str("instructionsFile: instructions.md").unwrap();
+    assert!(serde_json::to_value(agent)
+        .unwrap()
+        .get("instructions")
+        .is_none());
+    for yaml in [
+        "instructions: a\ninstructions: b",
+        "instructionsFile: a\ninstructionsFile: b",
+    ] {
+        assert!(serde_yaml_ng::from_str::<unelos_core::TaskDefinition>(yaml).is_err());
+        assert!(serde_yaml_ng::from_str::<unelos_core::AgentDefinition>(yaml).is_err());
+    }
+}
+
+#[test]
+fn definitions_preserve_authored_values_and_defaults() {
+    let task =
+        parse_task_definition("task.yaml", include_str!("fixtures/definitions/task.yaml")).unwrap();
     assert_eq!(
         task.description.as_deref(),
         Some("Implement the supplied plan.")
@@ -17,70 +97,51 @@ fn project_preserves_authored_values_and_defaults() {
     assert_eq!(task.instructions, "Read the plan.\nVerify the changes.\n");
     assert_eq!(task.skills, ["planning", "verification"]);
     assert_eq!(task.outcomes, ["approved", "changes_requested"]);
-    let agent = &project.agents["engineer"];
+    let agent = parse_agent_definition(
+        "agent.yaml",
+        include_str!("fixtures/definitions/agent.yaml"),
+    )
+    .unwrap();
     assert_eq!(agent.instructions, "Follow project conventions.");
     assert_eq!(agent.skills, ["rust", "verification"]);
     assert_eq!(agent.model.as_deref(), Some("vendor/model#variant"));
     assert_eq!(agent.mcps, ["github", "local"]);
     assert_eq!(agent.tools, ["read", "shell"]);
-    let task = &project.task_definitions["minimal"];
+    let task = parse_task_definition("task.yaml", "instructions: Work.").unwrap();
     assert!(task.description.is_none());
     assert!(task.skills.is_empty() && task.outcomes.is_empty());
-    let agent = &project.agents["minimal"];
+    let agent = parse_agent_definition("agent.yaml", "instructions: Work.").unwrap();
     assert!(agent.model.is_none());
     assert!(agent.skills.is_empty() && agent.mcps.is_empty() && agent.tools.is_empty());
-    let empty = parse_project_definitions("empty", "{}").unwrap();
-    assert!(empty.task_definitions.is_empty() && empty.agents.is_empty());
 }
 
 #[test]
-fn project_rejects_malformed_or_discarded_configuration() {
-    for (yaml, detail) in [
-        ("taskDefinitons: {}", "taskDefinitons"),
-        (
-            "taskDefinitions: {x: {instructions: work, skilss: []}}",
-            "skilss",
-        ),
-        ("agents: {x: {instructions: work, tool: []}}", "tool"),
-        ("taskDefinitions: {x: {skills: []}}", "instructions"),
-        ("agents: {x: {skills: []}}", "instructions"),
-        ("agents: {x: {instructions: work, skills: null}}", ""),
-        ("agents: {x: {instructions: work, mcps: github}}", ""),
-        ("agents: {x: {instructions: work, tools: [12]}}", ""),
-        ("agents: {x: {instructions: work, model: false}}", ""),
-        ("taskDefinitions: {x: {instructions: null}}", ""),
-        ("taskDefinitions: {x: {instructions: 42}}", ""),
-        ("agents: null", ""),
-        ("agents: {}\nagents: {}", ""),
-        (
-            "agents: {x: {instructions: first}, x: {instructions: second}}",
-            "",
-        ),
-        ("{}\n---\nagents: {}", ""),
-        ("agents: [", ""),
+fn definitions_reject_malformed_or_discarded_configuration() {
+    for (agent, yaml, detail) in [
+        (false, "instructions: work\nskilss: []", "skilss"),
+        (true, "instructions: work\ntool: []", "tool"),
+        (false, "skills: []", "instructions"),
+        (true, "skills: []", "instructions"),
+        (true, "instructions: work\nskills: null", ""),
+        (true, "instructions: work\nmcps: github", ""),
+        (true, "instructions: work\ntools: [12]", ""),
+        (true, "instructions: work\nmodel: false", ""),
+        (false, "instructions: null", ""),
+        (false, "instructions: 42", ""),
+        (true, "null", ""),
+        (true, "instructions: first\ninstructions: second", ""),
+        (false, "instructions: first\ninstructions: second", ""),
+        (true, "instructions: work\n---\ninstructions: other", ""),
+        (true, "instructions: [", ""),
     ] {
-        let error = match parse_project_definitions("broken-project.yaml", yaml) {
-            Ok(_) => panic!("accepted invalid YAML: {yaml}"),
-            Err(error) => error,
+        let error = if agent {
+            parse_agent_definition("broken-definition.yaml", yaml).unwrap_err()
+        } else {
+            parse_task_definition("broken-definition.yaml", yaml).unwrap_err()
         };
         let rendered = error.to_string();
-        assert!(rendered.contains("broken-project.yaml"), "{rendered}");
+        assert!(rendered.contains("broken-definition.yaml"), "{rendered}");
         assert!(rendered.contains(detail), "{rendered}");
-    }
-}
-
-#[test]
-fn project_rejects_non_string_definition_ids() {
-    for yaml in [
-        "taskDefinitions: {12: {instructions: Work}}",
-        "taskDefinitions: {true: {instructions: Work}}",
-        "agents: {12: {instructions: Work}}",
-        "agents: {true: {instructions: Work}}",
-    ] {
-        assert!(
-            parse_project_definitions("broken-project.yaml", yaml).is_err(),
-            "accepted non-string definition ID: {yaml}"
-        );
     }
 }
 
@@ -97,7 +158,7 @@ fn workflow_parses_all_node_kinds_and_transition_forms() {
     let NodeDefinition::Task(plan) = &workflow.nodes["plan"] else {
         panic!("task expected")
     };
-    assert_eq!(plan.task, "create-plan");
+    assert_eq!(plan.task, "create-plan".into());
     assert_eq!(plan.agent, "planner");
     assert_eq!(plan.execution, Execution::Main);
     assert!(plan.inputs.is_empty());
@@ -120,9 +181,9 @@ fn workflow_parses_all_node_kinds_and_transition_forms() {
     };
     assert_eq!(parallel.inputs, ["implementation-report.md"]);
     assert_eq!(parallel.outputs, ["checks.md"]);
-    assert_eq!(parallel.tasks[0].task, "check-api");
+    assert_eq!(parallel.tasks[0].task, "check-api".into());
     assert_eq!(parallel.tasks[0].agent, "backend");
-    assert_eq!(parallel.tasks[1].task, "check-ui");
+    assert_eq!(parallel.tasks[1].task, "check-ui".into());
     assert_eq!(parallel.tasks[1].agent, "frontend");
     assert_eq!(parallel.next, Transition::Single("review".into()));
     let NodeDefinition::Task(review) = &workflow.nodes["review"] else {

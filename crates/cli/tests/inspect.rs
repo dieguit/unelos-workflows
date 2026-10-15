@@ -39,19 +39,34 @@ fn inspect_normalizes_the_existing_fixture() {
 }
 
 #[test]
-fn inspect_shipped_example_matches_the_original_fixture() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let example = root.join("examples/manual-project");
+fn inspect_shipped_example_after_flat_install() {
+    let temp = assert_fs::TempDir::new().unwrap();
+    let example =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/simple-plan-execute-review");
+    command()
+        .arg("--project")
+        .arg(temp.path())
+        .args(["install", "simple-plan-execute-review", "--source"])
+        .arg(example)
+        .assert()
+        .success();
     let output = command()
         .arg("--project")
-        .arg(example)
-        .args(["inspect", "implement-feature", "--json"])
+        .arg(temp.path())
+        .args([
+            "inspect",
+            "simple-plan-execute-review",
+            "--node",
+            "implement",
+            "--json",
+        ])
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
     let actual: Value = serde_json::from_slice(&output.stdout).unwrap();
-    let expected: Value = serde_json::from_slice(&inspect(&fixture(), true).stdout).unwrap();
-    assert_eq!(actual, expected);
+    assert_eq!(actual["taskDefinition"], "nodes.implement.taskDefinition");
+    assert_eq!(actual["agent"], "simple-implementer");
+    assert_eq!(actual["outputs"], json!(["implementation-report.md"]));
 }
 
 #[test]
@@ -115,6 +130,7 @@ fn inspect_supports_default_project_and_reports_invalid_project() {
         let temp = assert_fs::TempDir::new().unwrap();
         let root = temp.path().join("invalid");
         fs::create_dir_all(root.join(".unelos/workflows")).unwrap();
+        copy_tree(&fixture(), &root);
         fs::write(root.join(".unelos/project.yaml"), project_yaml()).unwrap();
         fs::write(
             root.join(".unelos/workflows/implement-feature.yaml"),
@@ -274,7 +290,7 @@ fn inspect_node_reads_only_selected_skills_in_order_and_reports_missing_skill() 
     let temp = assert_fs::TempDir::new().unwrap();
     let root = temp.path();
     copy_tree(&fixture(), root);
-    let project_path = root.join(".unelos/project.yaml");
+    let project_path = root.join(".unelos/agents/engineer/agent.yaml");
     let project = fs::read_to_string(&project_path)
         .unwrap()
         .replace("\r\n", "\n");
@@ -389,7 +405,7 @@ fn inspect_node_resolves_all_node_kinds_and_reports_unknown_nodes() {
 
 #[test]
 fn inspect_research_parallel_is_isolated_repeatable_and_read_only() {
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/manual-project");
+    let source = fixture();
     let temp = assert_fs::TempDir::new().unwrap();
     let root = temp.path().join("project with spaces");
     fs::create_dir_all(&root).unwrap();

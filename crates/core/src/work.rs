@@ -398,41 +398,23 @@ pub fn inspect_node(
                 .tasks
                 .iter()
                 .enumerate()
-                .map(|(index, worker)| {
-                    for (field, exists) in [
-                        (
-                            "task",
-                            project
-                                .definitions
-                                .task_definitions
-                                .contains_key(&worker.task),
-                        ),
-                        (
-                            "agent",
-                            project.definitions.agents.contains_key(&worker.agent),
-                        ),
-                    ] {
-                        if !exists {
-                            return Err(diagnostic(
+                .map(
+                    |(index, worker)| -> Result<WorkerInspection, ContextError> {
+                        Ok(WorkerInspection {
+                            key: format!("worker-{}", index + 1),
+                            context: resolve_task_context(
                                 project,
-                                format!("nodes.{node_id}.tasks[{index}].{field}"),
-                                format!("referenced {} is missing", field.to_ascii_uppercase()),
-                            ));
-                        }
-                    }
-                    Ok(WorkerInspection {
-                        key: format!("worker-{}", index + 1),
-                        context: resolve_task_context(
-                            project,
-                            node_id,
-                            &worker.task,
-                            &worker.agent,
-                            Execution::Subagent,
-                        )?,
-                        inputs: parallel.inputs.clone(),
-                        outputs: vec!["result.md".into()],
-                    })
-                })
+                                node_id,
+                                &format!("nodes.{node_id}.tasks[{index}]"),
+                                &worker.task,
+                                &worker.agent,
+                                Execution::Subagent,
+                            )?,
+                            inputs: parallel.inputs.clone(),
+                            outputs: vec!["result.md".into()],
+                        })
+                    },
+                )
                 .collect::<Result<_, _>>()?;
             Ok(NodeInspection::Parallel(ParallelInspection {
                 kind: "parallel",

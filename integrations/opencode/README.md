@@ -6,49 +6,72 @@ dispatches configured native workers; the plugin does not intercept subagents.
 
 ## Install integration
 
-Build `cargo build --locked -p unelos-cli`. Run `npm pack` in this directory and
-extract into a dedicated directory outside `.opencode/plugins`. Keep packaged
-files together. Node stdlib transport; V1 uses its harness-installed native SDK
-schema helper. V2 does not import that helper.
+Install the Unelos CLI on your machine, then run inside an existing project:
 
-Merge into existing project configuration without replacing unrelated settings:
-
-V2:
-```jsonc
-{"plugins":[{"package":"/absolute/package","options":{"binary":"/absolute/unelos"}}]}
+```sh
+unelos init --opencode v2
 ```
 
-V1:
-```jsonc
-{"plugin":[["/absolute/package/index.js",{"binary":"/absolute/unelos"}]]}
-```
+This creates missing authoring scaffold, writes the bundled plugin into
+`.unelos/opencode/unelos`, and updates the existing project OpenCode JSON/JSONC
+configuration without replacing unrelated settings or comments. With no config it
+creates `opencode.json`; multiple local config files require manual resolution.
+No npm, source checkout or network is required at initialization time.
 
-Copy `commands/unelos.md` to project `.opencode/commands/unelos.md` for V1.
+The plugin points to the absolute running CLI executable. Rerun `unelos init` to
+repair missing managed assets or refresh that path after moving the CLI. Reruns
+preserve authored workflows/skills/definitions, unrelated agents and run reports.
+Legacy local `thin-plugin`/`plugin` registrations migrate to `unelos`; their old
+directories are not deleted. Init does not install a sample workflow.
+
+Use `unelos init --opencode v1` for V1; it also installs the slash command.
+Without a flag, first init defaults to V2 and reruns retain the recorded version.
+Version switches remove only an unchanged generated V1 command, never an edited
+one. A differing command blocks V1 installation rather than being overwritten.
 V1 normally resolves `@opencode-ai/plugin/tool` from the native configuration's
-installed modules. For isolated extracted archives, set `v1ToolModule` to the
+installed modules. For isolated installs, set `v1ToolModule` to the
 absolute harness-installed `@opencode-ai/plugin/dist/tool.js`. Missing native SDK
 fails explicitly; no custom schema shim or automatic/global installation.
 
 ## Install Workflow and native agents
 
 ```sh
-unelos --project /absolute/project install page-change \
-  --source /absolute/unelos/examples/opencode-execution --opencode v2 --json
+unelos --project /absolute/project install simple-plan-execute-review \
+  --source /absolute/unelos/examples/simple-plan-execute-review --json
 ```
 
-Use `--opencode v1` for V1. This imports referenced authoring/Skills and generates
+After init, `install` infers the recorded OpenCode version. This imports referenced authoring/Skills and generates
 `.opencode/agents/unelos-<agent-id>.md`. Differing authored source collisions stop;
 generated native files overwrite on reinstall, including manual edits. Customize
 Unelos definitions, then regenerate without `--source`:
 
+Source packages contain `workflows/`, `agents/`, and required `tasks/`/`skills/`
+directly, without a `.unelos` wrapper. Installed definitions live in
+`.unelos/agents/<id>/agent.yaml` and `.unelos/tasks/<id>/task.yaml`; workflow-local
+tasks use inline `taskDefinition`. Markdown `instructionsFile` paths are relative
+to their YAML file. Agent/task resource folders are copied; destination settings
+and package README files are not imported.
+
 ```sh
-unelos --project /absolute/project install page-change --opencode v2 --json
+unelos --project /absolute/project install simple-plan-execute-review --json
 ```
 
 Unrelated native agents/configuration and existing run state remain untouched.
 No model is written when unauthored: native subagents inherit the parent model.
 Required tools are not permission grants/allowlists. Unsupported declared MCP
 requirements fail explicitly; third-party Skills/MCP/credentials are not installed.
+An explicit `install --opencode v1|v2` overrides agent generation without changing
+the recorded integration. Without metadata or a flag, install remains core-only.
+Missing recorded integration assets block install with guidance to rerun init.
+Deleting `.unelos` destroys custom authoring and run history; init only recreates
+scaffold and integration, not that data.
+
+### Developer packaging
+
+Build `cargo build --locked -p unelos-cli` (or install from the checkout with
+`cargo install --locked --path crates/cli`). The CLI embeds integration runtime
+files at build time. `npm pack` here is optional for distributing the plugin
+separately; keep extracted package files together outside `.opencode/plugins`.
 
 ## Run
 

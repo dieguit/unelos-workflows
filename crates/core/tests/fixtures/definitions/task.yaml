@@ -1,0 +1,6 @@
+description: Implement the supplied plan.
+instructions: |
+  Read the plan.
+  Verify the changes.
+skills: [planning, verification]
+outcomes: [approved, changes_requested]

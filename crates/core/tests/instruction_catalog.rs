@@ -1,6 +1,6 @@
 use std::{fs, path::Path};
 
-use assert_fs::{fixture::PathCopy, TempDir};
+use assert_fs::TempDir;
 use camino::Utf8Path;
 use unelos_core::*;
 
@@ -11,13 +11,17 @@ fn catalog_sources_are_delivered_with_runtime_paths_kept_separate() {
     let outputs = fs::read_to_string(source.join("task-outputs.md")).unwrap();
     let result = fs::read_to_string(source.join("worker-result.md")).unwrap();
     let temp = TempDir::new().unwrap();
-    temp.copy_from(
-        Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/opencode-execution"),
-        &["**/*"],
+    let root = Utf8Path::from_path(temp.path()).unwrap();
+    install_workflow(
+        root,
+        Some(
+            &Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples/simple-plan-execute-review"),
+        ),
+        "simple-plan-execute-review",
     )
     .unwrap();
-    let root = Utf8Path::from_path(temp.path()).unwrap();
-    let mut project = load_project(root, "page-change").unwrap();
+    let mut project = load_project(root, "simple-plan-execute-review").unwrap();
     project.workflow.start = "implement".into();
     let NodeDefinition::Task(node) = project.workflow.nodes.get_mut("implement").unwrap() else {
         panic!("expected Task")

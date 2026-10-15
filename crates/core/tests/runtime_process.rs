@@ -14,7 +14,7 @@ fn project_copy() -> (TempDir, camino::Utf8PathBuf) {
     let temp = TempDir::new().unwrap();
     let root = Utf8Path::from_path(temp.path()).unwrap().to_owned();
     temp.copy_from(
-        Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/manual-project"),
+        Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/project"),
         &["**/*"],
     )
     .unwrap();

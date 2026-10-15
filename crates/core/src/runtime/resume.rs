@@ -14,12 +14,14 @@ use std::{
 const MAX_RESUME_CONTEXT_BYTES: usize = 8 * 1024 * 1024;
 
 pub fn execution_new(root: &Utf8Path) -> Result<ExecutionPackage, ExecutionError> {
-    let mut package = render_execution_package(
-        None,
-        crate::list_workflows(root).map_err(RuntimeError::from)?,
-        None,
-        None,
-    )?;
+    let descriptions =
+        crate::project::list_workflow_descriptions(root).map_err(RuntimeError::from)?;
+    let mut package =
+        render_execution_package(None, descriptions.keys().cloned().collect(), None, None)?;
+    package.workflow_descriptions = descriptions
+        .into_iter()
+        .filter_map(|(name, description)| description.map(|text| (name, text)))
+        .collect();
     package.entry_mode = Some(ExecutionEntry::New);
     Ok(package)
 }

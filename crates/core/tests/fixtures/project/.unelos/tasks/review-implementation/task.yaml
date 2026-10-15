@@ -1,0 +1,3 @@
+instructions: Inspect actual changes against the plan and report findings.
+skills: [code-review, verification]
+outcomes: [approved, changes_requested]

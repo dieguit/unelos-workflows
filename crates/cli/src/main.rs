@@ -13,6 +13,7 @@ use unelos_core::{
     SettingsError,
 };
 
+mod init;
 mod opencode;
 mod runtime_output;
 
@@ -37,6 +38,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Initialize the project and install its bundled OpenCode integration.
+    Init {
+        #[arg(long, value_enum)]
+        opencode: Option<opencode::Version>,
+    },
     /// Install a Workflow and optionally generate native OpenCode agents.
     Install {
         workflow: String,
@@ -254,12 +260,21 @@ fn run(cli: &Cli) -> Result<(), Error> {
         subscriber.try_init().map_err(Error::Logging)?;
     }
     match &cli.command {
+        Command::Init { opencode } => {
+            let value = init::initialize(&cli.project, *opencode)?;
+            emit(
+                &value,
+                cli.json,
+                "Initialized Unelos. Open a fresh OpenCode session.".into(),
+            )?;
+        }
         Command::Install {
             workflow,
             source,
             opencode,
         } => {
-            if opencode.is_some() {
+            let selected = init::install_version(&cli.project, *opencode)?;
+            if selected.is_some() {
                 let agents = unelos_core::export_workflow_agents(
                     source.as_deref().unwrap_or(&cli.project),
                     workflow,
@@ -268,8 +283,8 @@ fn run(cli: &Cli) -> Result<(), Error> {
             }
             let installed =
                 unelos_core::install_workflow(&cli.project, source.as_deref(), workflow)?;
-            let native_agents = match opencode {
-                Some(version) => opencode::write_agents(&cli.project, *version, &installed.agents)?,
+            let native_agents = match selected {
+                Some(version) => opencode::write_agents(&cli.project, version, &installed.agents)?,
                 None => Vec::new(),
             };
             let value = serde_json::json!({"workflow":installed.workflow,"agents":installed.agents,"nativeAgents":native_agents});

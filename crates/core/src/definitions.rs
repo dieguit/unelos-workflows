@@ -5,41 +5,189 @@ use serde::{
 use std::collections::BTreeMap;
 use std::fmt;
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectDefinitions {
-    #[serde(default, rename = "taskDefinitions", deserialize_with = "strict_map")]
     pub task_definitions: BTreeMap<String, TaskDefinition>,
-    #[serde(default, deserialize_with = "strict_map")]
     pub agents: BTreeMap<String, AgentDefinition>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "TaskWire", into = "TaskWire")]
 pub struct TaskDefinition {
-    #[serde(deserialize_with = "strict_string")]
     pub instructions: String,
-    #[serde(default, deserialize_with = "strict_option_string")]
+    pub instructions_file: Option<String>,
     pub description: Option<String>,
-    #[serde(default, deserialize_with = "strict_strings")]
     pub skills: Vec<String>,
-    #[serde(default, deserialize_with = "strict_strings")]
     pub outcomes: Vec<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct TaskWire {
+    #[serde(
+        default,
+        deserialize_with = "present_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    instructions: Option<String>,
+    #[serde(
+        default,
+        rename = "instructionsFile",
+        deserialize_with = "present_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    instructions_file: Option<String>,
+    #[serde(default, deserialize_with = "strict_option_string")]
+    description: Option<String>,
+    #[serde(default, deserialize_with = "strict_strings")]
+    skills: Vec<String>,
+    #[serde(default, deserialize_with = "strict_strings")]
+    outcomes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(try_from = "AgentWire", into = "AgentWire")]
+pub struct AgentDefinition {
+    pub instructions: String,
+    pub instructions_file: Option<String>,
+    pub skills: Vec<String>,
+    pub mcps: Vec<String>,
+    pub tools: Vec<String>,
+    pub model: Option<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct AgentWire {
+    #[serde(
+        default,
+        deserialize_with = "present_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    instructions: Option<String>,
+    #[serde(
+        default,
+        rename = "instructionsFile",
+        deserialize_with = "present_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    instructions_file: Option<String>,
+    #[serde(default, deserialize_with = "strict_strings")]
+    skills: Vec<String>,
+    #[serde(default, deserialize_with = "strict_strings")]
+    mcps: Vec<String>,
+    #[serde(default, deserialize_with = "strict_strings")]
+    tools: Vec<String>,
+    #[serde(default, deserialize_with = "strict_option_string")]
+    model: Option<String>,
+}
+
+fn instruction_source(
+    instructions: Option<String>,
+    file: &Option<String>,
+) -> Result<String, String> {
+    match (instructions, file) {
+        (Some(text), None) => Ok(text),
+        (None, Some(path)) if !path.is_empty() => Ok(String::new()),
+        _ => Err("expected exactly one of instructions and nonempty instructionsFile".into()),
+    }
+}
+
+impl TryFrom<TaskWire> for TaskDefinition {
+    type Error = String;
+    fn try_from(raw: TaskWire) -> Result<Self, Self::Error> {
+        Ok(Self {
+            instructions: instruction_source(raw.instructions, &raw.instructions_file)?,
+            instructions_file: raw.instructions_file,
+            description: raw.description,
+            skills: raw.skills,
+            outcomes: raw.outcomes,
+        })
+    }
+}
+
+impl From<TaskDefinition> for TaskWire {
+    fn from(task: TaskDefinition) -> Self {
+        Self {
+            instructions: task
+                .instructions_file
+                .is_none()
+                .then_some(task.instructions),
+            instructions_file: task.instructions_file,
+            description: task.description,
+            skills: task.skills,
+            outcomes: task.outcomes,
+        }
+    }
+}
+
+impl TryFrom<AgentWire> for AgentDefinition {
+    type Error = String;
+    fn try_from(raw: AgentWire) -> Result<Self, Self::Error> {
+        Ok(Self {
+            instructions: instruction_source(raw.instructions, &raw.instructions_file)?,
+            instructions_file: raw.instructions_file,
+            skills: raw.skills,
+            mcps: raw.mcps,
+            tools: raw.tools,
+            model: raw.model,
+        })
+    }
+}
+
+impl From<AgentDefinition> for AgentWire {
+    fn from(agent: AgentDefinition) -> Self {
+        Self {
+            instructions: agent
+                .instructions_file
+                .is_none()
+                .then_some(agent.instructions),
+            instructions_file: agent.instructions_file,
+            skills: agent.skills,
+            mcps: agent.mcps,
+            tools: agent.tools,
+            model: agent.model,
+        }
+    }
+}
+
+fn present_string<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<String>, D::Error> {
+    strict_string(deserializer).map(Some)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct AgentDefinition {
-    #[serde(deserialize_with = "strict_string")]
-    pub instructions: String,
-    #[serde(default, deserialize_with = "strict_strings")]
-    pub skills: Vec<String>,
-    #[serde(default, deserialize_with = "strict_strings")]
-    pub mcps: Vec<String>,
-    #[serde(default, deserialize_with = "strict_strings")]
-    pub tools: Vec<String>,
-    #[serde(default, deserialize_with = "strict_option_string")]
-    pub model: Option<String>,
+pub struct ProjectSettings {}
+
+pub fn parse_project_settings(
+    source: &str,
+    yaml: &str,
+) -> Result<ProjectSettings, DefinitionParseError> {
+    parse(source, yaml).map_err(|mut error| {
+        let message = error.diagnostic.to_string();
+        if message.contains("unknown field `taskDefinitions`")
+            || message.contains("unknown field `agents`")
+        {
+            error.diagnostic = <serde_yaml_ng::Error as serde::de::Error>::custom(format!(
+                "{message}; definitions belong in tasks/<id>/task.yaml and agents/<id>/agent.yaml"
+            ));
+        }
+        error
+    })
+}
+
+pub fn parse_task_definition(
+    source: &str,
+    yaml: &str,
+) -> Result<TaskDefinition, DefinitionParseError> {
+    parse(source, yaml)
+}
+
+pub fn parse_agent_definition(
+    source: &str,
+    yaml: &str,
+) -> Result<AgentDefinition, DefinitionParseError> {
+    parse(source, yaml)
 }
 
 fn strict_string<'de, D: Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
@@ -186,14 +334,6 @@ fn parse<T: DeserializeOwned>(context: &str, yaml: &str) -> Result<T, Definition
     })
 }
 
-/// Parse authoring text without reading files or resolving references.
-pub fn parse_project_definitions(
-    source: &str,
-    yaml: &str,
-) -> Result<ProjectDefinitions, DefinitionParseError> {
-    parse(source, yaml)
-}
-
 /// A Workflow's author-authored name, entry node, and nodes keyed by identity.
 /// Map keys are the node IDs; parsing does not load files, resolve agent
 /// references, or validate graph edges.
@@ -202,6 +342,8 @@ pub fn parse_project_definitions(
 pub struct WorkflowDefinition {
     #[serde(deserialize_with = "strict_string")]
     pub name: String,
+    #[serde(default, deserialize_with = "strict_option_string")]
+    pub description: Option<String>,
     #[serde(deserialize_with = "strict_string")]
     pub start: String,
     #[serde(deserialize_with = "strict_map")]
@@ -274,30 +416,115 @@ impl<'de> Deserialize<'de> for Transition {
 }
 
 /// A task node; artifact names and agent references remain opaque strings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum TaskSelection {
+    #[serde(rename = "task")]
+    Named(String),
+    #[serde(rename = "taskDefinition")]
+    Inline(TaskDefinition),
+}
+
+impl From<String> for TaskSelection {
+    fn from(id: String) -> Self {
+        Self::Named(id)
+    }
+}
+
+impl From<&str> for TaskSelection {
+    fn from(id: &str) -> Self {
+        Self::Named(id.into())
+    }
+}
+
+fn select_task(
+    task: Option<String>,
+    inline: Option<TaskDefinition>,
+) -> Result<TaskSelection, String> {
+    match (task, inline) {
+        (Some(id), None) => Ok(TaskSelection::Named(id)),
+        (None, Some(definition)) => Ok(TaskSelection::Inline(definition)),
+        _ => Err("expected exactly one of task and taskDefinition".into()),
+    }
+}
+
+fn present_task<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<TaskDefinition>, D::Error> {
+    TaskDefinition::deserialize(deserializer).map(Some)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "TaskNodeWire")]
 pub struct TaskNode {
-    #[serde(deserialize_with = "strict_string")]
-    pub task: String,
-    #[serde(deserialize_with = "strict_string")]
+    #[serde(flatten)]
+    pub task: TaskSelection,
     pub agent: String,
-    #[serde(default)]
     pub execution: Execution,
-    #[serde(default, deserialize_with = "strict_strings")]
     pub inputs: Vec<String>,
-    #[serde(default, deserialize_with = "strict_strings")]
     pub outputs: Vec<String>,
     pub next: Transition,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TaskNodeWire {
+    #[serde(default, deserialize_with = "present_string")]
+    task: Option<String>,
+    #[serde(default, rename = "taskDefinition", deserialize_with = "present_task")]
+    task_definition: Option<TaskDefinition>,
+    #[serde(deserialize_with = "strict_string")]
+    agent: String,
+    #[serde(default)]
+    execution: Execution,
+    #[serde(default, deserialize_with = "strict_strings")]
+    inputs: Vec<String>,
+    #[serde(default, deserialize_with = "strict_strings")]
+    outputs: Vec<String>,
+    next: Transition,
+}
+
+impl TryFrom<TaskNodeWire> for TaskNode {
+    type Error = String;
+    fn try_from(raw: TaskNodeWire) -> Result<Self, Self::Error> {
+        Ok(Self {
+            task: select_task(raw.task, raw.task_definition)?,
+            agent: raw.agent,
+            execution: raw.execution,
+            inputs: raw.inputs,
+            outputs: raw.outputs,
+            next: raw.next,
+        })
+    }
+}
+
 /// An opaque task/agent reference used by a parallel node.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "WorkerWire")]
 pub struct WorkerReference {
-    #[serde(deserialize_with = "strict_string")]
-    pub task: String,
-    #[serde(deserialize_with = "strict_string")]
+    #[serde(flatten)]
+    pub task: TaskSelection,
     pub agent: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkerWire {
+    #[serde(default, deserialize_with = "present_string")]
+    task: Option<String>,
+    #[serde(default, rename = "taskDefinition", deserialize_with = "present_task")]
+    task_definition: Option<TaskDefinition>,
+    #[serde(deserialize_with = "strict_string")]
+    agent: String,
+}
+
+impl TryFrom<WorkerWire> for WorkerReference {
+    type Error = String;
+    fn try_from(raw: WorkerWire) -> Result<Self, Self::Error> {
+        Ok(Self {
+            task: select_task(raw.task, raw.task_definition)?,
+            agent: raw.agent,
+        })
+    }
 }
 
 /// Concurrent workers, with authored input/output ordering preserved.
@@ -353,7 +580,11 @@ impl<'de> Deserialize<'de> for NodeDefinition {
         let kind = match fields.remove(&type_key) {
             Some(Value::String(kind)) => kind,
             Some(_) => return Err(D::Error::custom("node type must be a string")),
-            None if fields.contains_key(Value::String("task".into())) => "task".into(),
+            None if fields.contains_key(Value::String("task".into()))
+                || fields.contains_key(Value::String("taskDefinition".into())) =>
+            {
+                "task".into()
+            }
             None => return Err(D::Error::missing_field("type")),
         };
         let value = Value::Mapping(fields);

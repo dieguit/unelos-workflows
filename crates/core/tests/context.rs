@@ -18,6 +18,12 @@ fn runtime_project() -> (TempDir, unelos_core::LoadedProject) {
     for path in [
         ".unelos/project.yaml",
         ".unelos/workflows/implement-feature.yaml",
+        ".unelos/tasks/create-plan/task.yaml",
+        ".unelos/tasks/implement-plan/task.yaml",
+        ".unelos/tasks/review-implementation/task.yaml",
+        ".unelos/agents/planner/agent.yaml",
+        ".unelos/agents/engineer/agent.yaml",
+        ".unelos/agents/reviewer/agent.yaml",
     ] {
         fs::create_dir_all(root.join(path).parent().unwrap()).unwrap();
         fs::copy(source.join(path), root.join(path)).unwrap();
@@ -147,6 +153,7 @@ fn resolves_only_selected_skills_and_does_not_load_unused_agents_skills() {
     project.definitions.agents.insert(
         "unused".into(),
         unelos_core::AgentDefinition {
+            instructions_file: None,
             instructions: String::new(),
             skills: vec!["missing".into()],
             mcps: vec![],

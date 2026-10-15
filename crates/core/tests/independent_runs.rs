@@ -1,23 +1,27 @@
-use assert_fs::{fixture::PathCopy, TempDir};
+use assert_fs::TempDir;
 use camino::{Utf8Path, Utf8PathBuf};
 use unelos_core::*;
 
 fn fixture() -> (TempDir, Utf8PathBuf) {
     let temp = TempDir::new().unwrap();
-    temp.copy_from(
-        Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/opencode-execution"),
-        &["**/*"],
+    let root = Utf8Path::from_path(temp.path()).unwrap().to_owned();
+    install_workflow(
+        &root,
+        Some(
+            &Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples/simple-plan-execute-review"),
+        ),
+        "simple-plan-execute-review",
     )
     .unwrap();
-    let root = Utf8Path::from_path(temp.path()).unwrap().to_owned();
     (temp, root)
 }
 
 #[test]
 fn independent_unfinished_runs_do_not_redirect_reads_or_writes() {
     let (_temp, root) = fixture();
-    let a = start_workflow(&root, "page-change", Some("first-run")).unwrap();
-    let b = start_workflow(&root, "page-change", Some("second-run")).unwrap();
+    let a = start_workflow(&root, "simple-plan-execute-review", Some("first-run")).unwrap();
+    let b = start_workflow(&root, "simple-plan-execute-review", Some("second-run")).unwrap();
     let b_path = root.join(".unelos/runs/second-run/state.json");
     let before_b = std::fs::read(&b_path).unwrap();
     assert_eq!(status(&root, &a.run_id).unwrap(), a);
@@ -44,7 +48,7 @@ fn simultaneous_starts_allocate_distinct_ids() {
             let barrier = barrier.clone();
             std::thread::spawn(move || {
                 barrier.wait();
-                start_workflow(&root, "page-change", Some(name)).unwrap()
+                start_workflow(&root, "simple-plan-execute-review", Some(name)).unwrap()
             })
         })
         .collect();
@@ -56,8 +60,8 @@ fn simultaneous_starts_allocate_distinct_ids() {
 #[test]
 fn rename_keeps_identity_and_ignores_obsolete_pointer() {
     let (_temp, root) = fixture();
-    let a = start_workflow(&root, "page-change", Some("first-run")).unwrap();
-    let b = start_workflow(&root, "page-change", Some("second-run")).unwrap();
+    let a = start_workflow(&root, "simple-plan-execute-review", Some("first-run")).unwrap();
+    let b = start_workflow(&root, "simple-plan-execute-review", Some("second-run")).unwrap();
     std::fs::write(root.join(".unelos/active-run"), "../invalid-old-pointer").unwrap();
     let before_b = std::fs::read(root.join(".unelos/runs/second-run/state.json")).unwrap();
     rename_run(&root, &a.run_id, "renamed-first").unwrap();
@@ -76,8 +80,8 @@ fn rename_keeps_identity_and_ignores_obsolete_pointer() {
 #[test]
 fn cross_run_callback_with_same_task_label_never_writes_either_run() {
     let (_temp, root) = fixture();
-    let a = execution_start(&root, "page-change", Some("first-run")).unwrap();
-    let b = execution_start(&root, "page-change", Some("second-run")).unwrap();
+    let a = execution_start(&root, "simple-plan-execute-review", Some("first-run")).unwrap();
+    let b = execution_start(&root, "simple-plan-execute-review", Some("second-run")).unwrap();
     let a_path = root.join(".unelos/runs/first-run/state.json");
     let b_path = root.join(".unelos/runs/second-run/state.json");
     let before = (
@@ -119,8 +123,8 @@ fn cross_run_callback_with_same_task_label_never_writes_either_run() {
 #[test]
 fn duplicate_persisted_ids_fail_lookup_and_discovery() {
     let (_temp, root) = fixture();
-    let a = start_workflow(&root, "page-change", Some("first-run")).unwrap();
-    start_workflow(&root, "page-change", Some("second-run")).unwrap();
+    let a = start_workflow(&root, "simple-plan-execute-review", Some("first-run")).unwrap();
+    start_workflow(&root, "simple-plan-execute-review", Some("second-run")).unwrap();
     let path = root.join(".unelos/runs/second-run/state.json");
     let mut saved: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
@@ -139,9 +143,9 @@ fn duplicate_persisted_ids_fail_lookup_and_discovery() {
 #[test]
 fn legacy_name_identity_survives_another_start_and_rename() {
     let (_temp, root) = fixture();
-    let project = load_project(&root, "page-change").unwrap();
+    let project = load_project(&root, "simple-plan-execute-review").unwrap();
     let legacy = start(&project, "legacy-name", "Legacy request").unwrap();
-    let other = start_workflow(&root, "page-change", Some("other-run")).unwrap();
+    let other = start_workflow(&root, "simple-plan-execute-review", Some("other-run")).unwrap();
     assert_eq!(status(&root, "legacy-name").unwrap(), legacy);
     let renamed = rename_run(&root, "legacy-name", "renamed-legacy").unwrap();
     assert_eq!(renamed.run_id, "legacy-name");
@@ -153,8 +157,8 @@ fn legacy_name_identity_survives_another_start_and_rename() {
 fn corrupted_sibling_is_not_silently_skipped_for_a_valid_target() {
     for corruption in ["missing", "json", "name"] {
         let (_temp, root) = fixture();
-        let a = start_workflow(&root, "page-change", Some("first-run")).unwrap();
-        start_workflow(&root, "page-change", Some("second-run")).unwrap();
+        let a = start_workflow(&root, "simple-plan-execute-review", Some("first-run")).unwrap();
+        start_workflow(&root, "simple-plan-execute-review", Some("second-run")).unwrap();
         let path = root.join(".unelos/runs/second-run/state.json");
         match corruption {
             "missing" => std::fs::remove_file(&path).unwrap(),

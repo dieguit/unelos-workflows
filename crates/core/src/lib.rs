@@ -25,8 +25,8 @@ pub use execution::{
 };
 pub use graph::{build_graph, GraphEdge, GraphNode, NodeKind, WorkflowGraph};
 pub use install::{
-    check_install_path, export_workflow_agents, install_workflow, write_install_file, AgentExport,
-    InstallError, WorkflowInstall,
+    check_install_path, check_project_init, export_workflow_agents, initialize_project,
+    install_workflow, write_install_file, AgentExport, InstallError, WorkflowInstall,
 };
 pub use project::{list_workflows, load_project, LoadedProject, ProjectLoadError};
 pub use runtime::{

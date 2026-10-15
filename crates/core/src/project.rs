@@ -1,18 +1,48 @@
 use camino::{Utf8Path, Utf8PathBuf};
-use std::{fs, io};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs, io,
+};
 
 use crate::{
-    parse_project_definitions, parse_workflow_definition, DefinitionParseError, ProjectDefinitions,
-    ProjectValidationError, WorkflowDefinition,
+    parse_agent_definition, parse_project_settings, parse_task_definition,
+    parse_workflow_definition, DefinitionParseError, NodeDefinition, ProjectDefinitions,
+    ProjectValidationError, TaskSelection, WorkflowDefinition,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoadedProject {
     pub project_root: Utf8PathBuf,
     pub project_source: Utf8PathBuf,
+    pub authoring_root: Utf8PathBuf,
     pub workflow_source: Utf8PathBuf,
+    pub task_sources: BTreeMap<String, Utf8PathBuf>,
+    pub agent_sources: BTreeMap<String, Utf8PathBuf>,
+    pub instruction_dependencies: BTreeMap<Utf8PathBuf, BTreeSet<Utf8PathBuf>>,
     pub definitions: ProjectDefinitions,
     pub workflow: WorkflowDefinition,
+}
+
+impl LoadedProject {
+    pub(crate) fn selected_task<'a>(
+        &'a self,
+        selection: &'a crate::TaskSelection,
+        field: &str,
+    ) -> Result<(&'a crate::TaskDefinition, String), ProjectValidationError> {
+        match selection {
+            crate::TaskSelection::Named(id) => self
+                .definitions
+                .task_definitions
+                .get(id)
+                .map(|task| (task, id.clone()))
+                .ok_or_else(|| ProjectValidationError {
+                    path: self.workflow_source.clone(),
+                    field: format!("{field}.task"),
+                    cause: format!("unknown Task Definition {id:?}"),
+                }),
+            crate::TaskSelection::Inline(task) => Ok((task, format!("{field}.taskDefinition"))),
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -51,17 +81,36 @@ pub enum ProjectLoadError {
 
 /// List valid project Workflows in filename order without changing runtime state.
 pub fn list_workflows(project_root: &Utf8Path) -> Result<Vec<String>, ProjectLoadError> {
+    Ok(list_workflow_descriptions(project_root)?
+        .into_keys()
+        .collect())
+}
+
+pub(crate) fn list_workflow_descriptions(
+    project_root: &Utf8Path,
+) -> Result<BTreeMap<String, Option<String>>, ProjectLoadError> {
     let root = absolute_root(project_root).map_err(|source| ProjectLoadError::Root {
         path: project_root.to_owned(),
         source,
     })?;
-    let definitions_path = root.join(".unelos/project.yaml");
-    parse_project_definitions(definitions_path.as_str(), &read(&definitions_path)?)?;
+    let authoring_root = root.join(".unelos");
+    let definitions_path = bounded_path(
+        &authoring_root,
+        Utf8Path::new("project.yaml"),
+        &authoring_root,
+        "project",
+    )?;
+    parse_project_settings(definitions_path.as_str(), &read(&definitions_path)?)?;
 
-    let directory = root.join(".unelos/workflows");
+    let directory = bounded_path(
+        &authoring_root,
+        Utf8Path::new("workflows"),
+        &definitions_path,
+        "workflows",
+    )?;
     let entries = match fs::read_dir(&directory) {
         Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
         Err(source) => {
             return Err(ProjectLoadError::Read {
                 path: directory,
@@ -69,7 +118,7 @@ pub fn list_workflows(project_root: &Utf8Path) -> Result<Vec<String>, ProjectLoa
             })
         }
     };
-    let mut workflows = Vec::new();
+    let mut workflows = BTreeMap::new();
     for entry in entries {
         let entry = entry.map_err(|source| ProjectLoadError::Read {
             path: directory.clone(),
@@ -96,9 +145,8 @@ pub fn list_workflows(project_root: &Utf8Path) -> Result<Vec<String>, ProjectLoa
             .to_owned();
         let project = load_project(&root, &name)?;
         crate::validate_project(&project)?;
-        workflows.push(name);
+        workflows.insert(name, project.workflow.description);
     }
-    workflows.sort();
     Ok(workflows)
 }
 
@@ -124,6 +172,27 @@ pub fn load_project(
     project_root: &Utf8Path,
     workflow_name: &str,
 ) -> Result<LoadedProject, ProjectLoadError> {
+    let project_root = absolute_root(project_root).map_err(|source| ProjectLoadError::Root {
+        path: project_root.to_owned(),
+        source,
+    })?;
+    let authoring_root = project_root.join(".unelos");
+    let settings = bounded_path(
+        &authoring_root,
+        Utf8Path::new("project.yaml"),
+        &authoring_root.join("project.yaml"),
+        "project",
+    )?;
+    parse_project_settings(settings.as_str(), &read(&settings)?)?;
+    let mut loaded = load_authoring(&authoring_root, workflow_name)?;
+    loaded.project_root = project_root;
+    Ok(loaded)
+}
+
+pub(crate) fn load_authoring(
+    authoring_root: &Utf8Path,
+    workflow_name: &str,
+) -> Result<LoadedProject, ProjectLoadError> {
     if workflow_name.is_empty()
         || matches!(workflow_name, "." | "..")
         || workflow_name.contains(['/', '\\'])
@@ -133,14 +202,53 @@ pub fn load_project(
             name: workflow_name.to_owned(),
         });
     }
-    let project_root = absolute_root(project_root).map_err(|source| ProjectLoadError::Root {
-        path: project_root.to_owned(),
-        source,
-    })?;
-    let project_source = project_root.join(".unelos/project.yaml");
-    let workflow_source = project_root.join(format!(".unelos/workflows/{workflow_name}.yaml"));
-    let definitions = parse_project_definitions(project_source.as_str(), &read(&project_source)?)?;
-    let workflow = parse_workflow_definition(workflow_source.as_str(), &read(&workflow_source)?)?;
+    let authoring_root =
+        absolute_root(authoring_root).map_err(|source| ProjectLoadError::Root {
+            path: authoring_root.to_owned(),
+            source,
+        })?;
+    let project_source = authoring_root.join("project.yaml");
+    let workflow_source = bounded_path(
+        &authoring_root,
+        &Utf8PathBuf::from(format!("workflows/{workflow_name}.yaml")),
+        &project_source,
+        "workflow",
+    )?;
+    let mut definitions = ProjectDefinitions {
+        task_definitions: BTreeMap::new(),
+        agents: BTreeMap::new(),
+    };
+    let mut task_sources = BTreeMap::new();
+    let mut agent_sources = BTreeMap::new();
+    let mut instruction_dependencies = BTreeMap::new();
+    for (id, source) in definition_sources(&authoring_root, "tasks", "task.yaml")? {
+        let mut task = parse_task_definition(source.as_str(), &read(&source)?)?;
+        resolve_instructions(
+            &authoring_root,
+            &source,
+            "instructionsFile",
+            &task.instructions_file,
+            &mut task.instructions,
+            &mut instruction_dependencies,
+        )?;
+        task_sources.insert(id.clone(), source);
+        definitions.task_definitions.insert(id, task);
+    }
+    for (id, source) in definition_sources(&authoring_root, "agents", "agent.yaml")? {
+        let mut agent = parse_agent_definition(source.as_str(), &read(&source)?)?;
+        resolve_instructions(
+            &authoring_root,
+            &source,
+            "instructionsFile",
+            &agent.instructions_file,
+            &mut agent.instructions,
+            &mut instruction_dependencies,
+        )?;
+        agent_sources.insert(id.clone(), source);
+        definitions.agents.insert(id, agent);
+    }
+    let mut workflow =
+        parse_workflow_definition(workflow_source.as_str(), &read(&workflow_source)?)?;
     if workflow.name != workflow_name {
         return Err(ProjectLoadError::NameMismatch {
             path: workflow_source,
@@ -148,13 +256,183 @@ pub fn load_project(
             declared: workflow.name,
         });
     }
+    for (id, node) in &mut workflow.nodes {
+        let selections: Vec<_> = match node {
+            NodeDefinition::Task(task) => vec![(
+                format!("nodes.{id}.taskDefinition.instructionsFile"),
+                &mut task.task,
+            )],
+            NodeDefinition::Parallel(parallel) => parallel
+                .tasks
+                .iter_mut()
+                .enumerate()
+                .map(|(index, worker)| {
+                    (
+                        format!("nodes.{id}.tasks[{index}].taskDefinition.instructionsFile"),
+                        &mut worker.task,
+                    )
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        for (field, selection) in selections {
+            if let TaskSelection::Inline(task) = selection {
+                resolve_instructions(
+                    &authoring_root,
+                    &workflow_source,
+                    &field,
+                    &task.instructions_file,
+                    &mut task.instructions,
+                    &mut instruction_dependencies,
+                )?;
+            }
+        }
+    }
     Ok(LoadedProject {
-        project_root,
+        project_root: authoring_root.clone(),
+        authoring_root,
         project_source,
         workflow_source,
+        task_sources,
+        agent_sources,
+        instruction_dependencies,
         definitions,
         workflow,
     })
+}
+
+pub(crate) fn safe_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_'))
+}
+
+fn diagnostic(source: &Utf8Path, field: &str, cause: impl ToString) -> ProjectLoadError {
+    ProjectValidationError {
+        path: source.to_owned(),
+        field: field.into(),
+        cause: cause.to_string(),
+    }
+    .into()
+}
+
+/// Normalize relative paths once, then use the installer's shared symlink checks.
+pub(crate) fn bounded_path(
+    root: &Utf8Path,
+    relative: &Utf8Path,
+    source: &Utf8Path,
+    field: &str,
+) -> Result<Utf8PathBuf, ProjectLoadError> {
+    if relative.is_absolute() || relative.as_str().contains(['\\', ':', '\0']) {
+        return Err(diagnostic(
+            source,
+            field,
+            "expected a relative authoring path",
+        ));
+    }
+    let mut normalized = Utf8PathBuf::new();
+    for component in relative.components() {
+        match component {
+            camino::Utf8Component::Normal(part) => normalized.push(part),
+            camino::Utf8Component::CurDir => {}
+            camino::Utf8Component::ParentDir if normalized.pop() => {}
+            _ => return Err(diagnostic(source, field, "path escapes authoring root")),
+        }
+    }
+    if fs::symlink_metadata(root).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+        return Err(diagnostic(source, field, "symlinked authoring root"));
+    }
+    crate::check_install_path(root, &normalized)
+        .map_err(|error| diagnostic(source, field, error))?;
+    Ok(root.join(normalized))
+}
+
+fn definition_sources(
+    root: &Utf8Path,
+    directory: &str,
+    filename: &str,
+) -> Result<BTreeMap<String, Utf8PathBuf>, ProjectLoadError> {
+    let path = bounded_path(root, Utf8Path::new(directory), root, directory)?;
+    let entries = match fs::read_dir(&path) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
+        Err(source) => return Err(ProjectLoadError::Read { path, source }),
+    };
+    let mut paths = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|source| ProjectLoadError::Read {
+            path: path.clone(),
+            source,
+        })?;
+        let name = entry
+            .file_name()
+            .into_string()
+            .map_err(|_| diagnostic(&path, directory, "definition ID is not UTF-8"))?;
+        paths.push(name);
+    }
+    paths.sort();
+    let mut sources = BTreeMap::new();
+    for id in paths {
+        let relative = Utf8PathBuf::from(directory).join(&id);
+        let entry = bounded_path(root, &relative, &path, &id)?;
+        if !entry.is_dir() {
+            continue;
+        }
+        if !safe_id(&id) {
+            return Err(diagnostic(&entry, "id", "invalid definition ID: use ASCII letters, digits, hyphen or underscore (1–128 bytes)"));
+        }
+        let source = bounded_path(root, &relative.join(filename), &entry, filename)?;
+        sources.insert(id, source);
+    }
+    Ok(sources)
+}
+
+fn resolve_instructions(
+    root: &Utf8Path,
+    source: &Utf8Path,
+    field: &str,
+    file: &Option<String>,
+    text: &mut String,
+    dependencies: &mut BTreeMap<Utf8PathBuf, BTreeSet<Utf8PathBuf>>,
+) -> Result<(), ProjectLoadError> {
+    let Some(file) = file else {
+        return Ok(());
+    };
+    let base = source.parent().unwrap().strip_prefix(root).unwrap();
+    // Validate the user-supplied path before joining: joining an absolute path discards the base.
+    if Utf8Path::new(file).is_absolute() || file.contains(['\\', ':', '\0']) {
+        return Err(diagnostic(
+            source,
+            field,
+            "expected a relative instructionsFile path",
+        ));
+    }
+    let path = bounded_path(root, &base.join(file), source, field)?;
+    let relative = path.strip_prefix(root).unwrap();
+    if matches!(
+        relative.components().next().map(|part| part.as_str()),
+        Some(
+            "runs"
+                | "runtime.lock"
+                | "run-sequence"
+                | "rename.json"
+                | "opencode"
+                | "project.yaml"
+                | "integration.json"
+                | "active-run"
+                | "README.md"
+        )
+    ) {
+        return Err(diagnostic(source, field, "instructionsFile must reference authoring, not settings, integration, documentation or runtime state"));
+    }
+    *text = read(&path).map_err(|error| diagnostic(source, field, error))?;
+    dependencies
+        .entry(source.to_owned())
+        .or_default()
+        .insert(relative.to_owned());
+    Ok(())
 }
 
 pub(crate) fn absolute_root(project_root: &Utf8Path) -> io::Result<Utf8PathBuf> {

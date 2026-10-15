@@ -32,13 +32,17 @@ prompts exclude raw-packet controller metadata.
 
 ## Project-owned instructions and runtime data
 
-- `.unelos/project.yaml`: `taskDefinitions.*.instructions`, `agents.*.instructions`,
-  selected Skills, declared outcomes and agent resource requirements.
-- `.unelos/workflows/<workflow>.yaml`: graph, Task/agent references, execution mode,
-  logical input and output names. [Example workflow](../../../../examples/opencode-execution/.unelos/workflows/page-change.yaml).
+- `.unelos/project.yaml`: reserved project settings; empty mapping for now.
+- `.unelos/tasks/<id>/task.yaml` and `.unelos/agents/<id>/agent.yaml`: discovered
+  reusable definitions, Skills, outcomes and agent resource requirements.
+- `.unelos/workflows/<workflow>.yaml`: graph, Task/agent references or inline
+  `taskDefinition`, execution mode, logical input and output names.
+  [Example workflow](../../../../examples/simple-plan-execute-review/workflows/simple-plan-execute-review.yaml).
+- Task/agent `instructions` or `instructionsFile`: exactly one source. Markdown
+  paths resolve relative to the containing YAML within the authoring root.
 - `.unelos/skills/<skill>/SKILL.md`: selected project Skill bodies.
-  [Example definitions](../../../../examples/opencode-execution/.unelos/project.yaml)
-  and [Skill](../../../../examples/opencode-execution/.unelos/skills/page-change/SKILL.md).
+  [Example agents](../../../../examples/simple-plan-execute-review/agents/)
+  (this example requires no bundled Skill).
 
 There is no separate shared input-reading instruction today: Task instructions
 describe how to use inputs; core validates bindings and supplies their paths.

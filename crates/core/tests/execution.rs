@@ -1,4 +1,4 @@
-use assert_fs::{fixture::PathCopy, TempDir};
+use assert_fs::TempDir;
 use camino::{Utf8Path, Utf8PathBuf};
 use unelos_core::*;
 
@@ -50,7 +50,8 @@ fn advance(root: &Utf8Path, package: &ExecutionPackage) -> ExecutionPackage {
 }
 
 fn gate(root: &Utf8Path) -> ExecutionPackage {
-    let interview = execution_start(root, "page-change", Some("guard-check")).unwrap();
+    let interview =
+        execution_start(root, "simple-plan-execute-review", Some("guard-check")).unwrap();
     let plan = advance(root, &interview);
     let packet = serde_json::to_value(&plan.packet).unwrap();
     std::fs::write(
@@ -65,7 +66,7 @@ fn gate(root: &Utf8Path) -> ExecutionPackage {
 fn unnamed_start_derives_its_name_without_requesting_a_user_name() {
     let (_temp, root) = fixture();
     let fresh = execution_new(&root).unwrap();
-    let package = execution_start(&root, "page-change", None).unwrap();
+    let package = execution_start(&root, "simple-plan-execute-review", None).unwrap();
     for policy in [
         &fresh.controller_instructions,
         &package.controller_instructions,
@@ -114,7 +115,8 @@ fn main_and_delegated_packages_deliver_mandatory_controller_completion_policy() 
 #[test]
 fn guarded_completion_returns_next_package_and_rejects_duplicate() {
     let (_temp, root) = fixture();
-    let package = execution_start(&root, "page-change", Some("guard-check")).unwrap();
+    let package =
+        execution_start(&root, "simple-plan-execute-review", Some("guard-check")).unwrap();
     write_outputs(&package);
     let control = finished_control(&package);
     let next_package =
@@ -131,7 +133,8 @@ fn guarded_completion_returns_next_package_and_rejects_duplicate() {
 #[test]
 fn rejected_completion_never_changes_confirmation_or_state() {
     let (_temp, root) = fixture();
-    let package = execution_start(&root, "page-change", Some("guard-check")).unwrap();
+    let package =
+        execution_start(&root, "simple-plan-execute-review", Some("guard-check")).unwrap();
     let bytes = state_bytes(&root);
     let control = finished_control(&package);
     assert!(execution_mutate(&root, "r-000001", ExecutionOperation::Complete, &control).is_err());
@@ -221,6 +224,10 @@ fn gate_reentry_rejects_old_activation_and_continuation_preserves_reports() {
         },
     )
     .unwrap();
+    assert_eq!(
+        serde_json::to_value(&revised_plan.packet).unwrap()["nodeId"],
+        "plan"
+    );
     let new_gate = advance(&root, &revised_plan);
     assert_ne!(new_gate.expected, Some(old.expected.clone()));
     let bytes = state_bytes(&root);
@@ -237,6 +244,10 @@ fn gate_reentry_rejects_old_activation_and_continuation_preserves_reports() {
     )
     .unwrap();
     write_outputs(&implementation);
+    let implementation_context = serde_json::to_value(&implementation.packet).unwrap();
+    assert_eq!(implementation_context["nodeId"], "implement");
+    assert_eq!(implementation_context["execution"], "subagent");
+    assert_eq!(implementation_context["agent"], "simple-implementer");
     let before = state_bytes(&root);
     let packet = serde_json::to_value(&implementation.packet).unwrap();
     let ledger_path = packet["ledgerPath"].as_str().unwrap();
@@ -255,6 +266,10 @@ fn gate_reentry_rejects_old_activation_and_continuation_preserves_reports() {
     assert_eq!(ledger, std::fs::read(ledger_path).unwrap());
     assert_eq!(report, std::fs::read(report_path).unwrap());
     let review = advance(&root, &implementation);
+    let review_context = serde_json::to_value(&review.packet).unwrap();
+    assert_eq!(review_context["nodeId"], "review");
+    assert_eq!(review_context["execution"], "subagent");
+    assert_eq!(review_context["agent"], "simple-reviewer");
     write_outputs(&review);
     let invalid = ExecutionControl {
         outcome: Some("invented".into()),
@@ -273,6 +288,10 @@ fn gate_reentry_rejects_old_activation_and_continuation_preserves_reports() {
     );
     let reentered =
         execution_mutate(&root, "r-000001", ExecutionOperation::Complete, &correction).unwrap();
+    assert_eq!(
+        serde_json::to_value(&reentered.packet).unwrap()["nodeId"],
+        "implement"
+    );
     assert_ne!(reentered.expected, implementation.expected);
     assert!(execution_continue(&root, "r-000001", &control).is_err());
 }
@@ -280,7 +299,8 @@ fn gate_reentry_rejects_old_activation_and_continuation_preserves_reports() {
 #[test]
 fn concurrent_duplicate_mutations_commit_once() {
     let (_temp, root) = fixture();
-    let package = execution_start(&root, "page-change", Some("guard-check")).unwrap();
+    let package =
+        execution_start(&root, "simple-plan-execute-review", Some("guard-check")).unwrap();
     write_outputs(&package);
     let control = finished_control(&package);
     let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
@@ -369,17 +389,21 @@ fn concurrent_gate_approval_commits_once_and_missing_brief_never_advances() {
 
 fn fixture() -> (TempDir, Utf8PathBuf) {
     let temp = TempDir::new().unwrap();
-    temp.copy_from(
-        Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/opencode-execution"),
-        &["**/*"],
+    let root = Utf8Path::from_path(temp.path()).unwrap().to_owned();
+    unelos_core::install_workflow(
+        &root,
+        Some(
+            &Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples/simple-plan-execute-review"),
+        ),
+        "simple-plan-execute-review",
     )
     .unwrap();
-    let root = Utf8Path::from_path(temp.path()).unwrap().to_owned();
     (temp, root)
 }
 
 fn packet(root: &Utf8Path, delegated: bool) -> WorkPacket {
-    let mut project = load_project(root, "page-change").unwrap();
+    let mut project = load_project(root, "simple-plan-execute-review").unwrap();
     let node_id = if delegated { "implement" } else { "interview" };
     project.workflow.start = node_id.into();
     if let NodeDefinition::Task(node) = project.workflow.nodes.get_mut(node_id).unwrap() {
@@ -410,6 +434,19 @@ fn packet(root: &Utf8Path, delegated: bool) -> WorkPacket {
 #[test]
 fn delegated_prompt_contains_resolved_context_without_controller_metadata() {
     let (_temp, root) = fixture();
+    // Skill forwarding is tested independently of the example's dependencies.
+    let definitions = root.join(".unelos/workflows/simple-plan-execute-review.yaml");
+    let text = std::fs::read_to_string(&definitions)
+        .unwrap()
+        .replace("\r\n", "\n")
+        .replace(
+            "  implement:\n    taskDefinition:\n",
+            "  implement:\n    taskDefinition:\n      skills: [test-context]\n",
+        );
+    std::fs::write(definitions, text).unwrap();
+    let directory = root.join(".unelos/skills/test-context");
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(directory.join("SKILL.md"), "---\nname: test-context\ndescription: Test context forwarding.\n---\nUse the supplied context.\n").unwrap();
     let packet = packet(&root, true);
     let WorkPacket::Task(task) = &packet else {
         panic!()
@@ -443,9 +480,11 @@ fn main_and_idle_packages_do_not_require_a_brief() {
     let main = render_execution_package(Some(packet(&root, false)), vec![], None, None).unwrap();
     assert_eq!(main.status, "running");
     assert!(main.worker_prompt.is_none());
-    let idle = render_execution_package(None, vec!["page-change".into()], None, None).unwrap();
+    let idle =
+        render_execution_package(None, vec!["simple-plan-execute-review".into()], None, None)
+            .unwrap();
     assert_eq!(idle.status, "idle");
-    assert_eq!(idle.workflows, ["page-change"]);
+    assert_eq!(idle.workflows, ["simple-plan-execute-review"]);
     assert!(idle.expected.is_none());
 }
 

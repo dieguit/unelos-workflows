@@ -1,4 +1,4 @@
-use crate::{Execution, LoadedProject, NodeDefinition, ProjectDefinitions};
+use crate::{Execution, LoadedProject, NodeDefinition, TaskSelection};
 use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
 use serde::Serialize;
 use std::{
@@ -42,19 +42,15 @@ fn io_error(error: io::Error) -> InstallError {
     fail("install_io_failed", error.to_string())
 }
 
-fn safe_id(id: &str) -> bool {
-    !id.is_empty()
-        && id.len() <= 128
-        && id
-            .bytes()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_'))
-}
+use crate::project::safe_id;
 
 fn references(project: &LoadedProject) -> (BTreeSet<String>, BTreeMap<String, (bool, bool)>) {
     let mut tasks = BTreeSet::new();
     let mut agents = BTreeMap::new();
-    let mut add = |task: &str, agent: &str, execution: Execution| {
-        tasks.insert(task.to_owned());
+    let mut add = |task: &TaskSelection, agent: &str, execution: Execution| {
+        if let TaskSelection::Named(id) = task {
+            tasks.insert(id.clone());
+        }
         let modes = agents.entry(agent.to_owned()).or_insert((false, false));
         match execution {
             Execution::Main => modes.0 = true,
@@ -133,15 +129,28 @@ pub fn export_workflow_agents(
             "Workflow must be a safe local identifier",
         ));
     }
-    checked_path(root, Utf8Path::new(".unelos/project.yaml"))?;
-    checked_path(
-        root,
-        &Utf8PathBuf::from(format!(".unelos/workflows/{workflow}.yaml")),
-    )?;
-    let project =
-        crate::load_project(root, workflow).map_err(|e| fail("invalid_project", e.to_string()))?;
+    let project = load_install_source(root, workflow)?;
     crate::validate_project(&project).map_err(|e| fail("invalid_project", e.to_string()))?;
     export(&project)
+}
+
+fn load_install_source(root: &Utf8Path, workflow: &str) -> Result<LoadedProject, InstallError> {
+    checked_path(root, Utf8Path::new(".unelos"))?;
+    if root.join(".unelos").exists() {
+        return crate::load_project(root, workflow)
+            .map_err(|error| fail("invalid_project", error.to_string()));
+    }
+    let settings = checked_path(root, Utf8Path::new("project.yaml"))?;
+    match fs::read_to_string(&settings) {
+        Ok(text) => {
+            crate::parse_project_settings(settings.as_str(), &text)
+                .map_err(|error| fail("invalid_project", error.to_string()))?;
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(io_error(error)),
+    }
+    crate::project::load_authoring(root, workflow)
+        .map_err(|error| fail("invalid_project", error.to_string()))
 }
 
 pub fn install_workflow(
@@ -156,82 +165,97 @@ pub fn install_workflow(
         ));
     }
     let Some(source) = source else {
+        let project = crate::load_project(root, workflow)
+            .map_err(|error| fail("invalid_project", error.to_string()))?;
+        crate::validate_project(&project)
+            .map_err(|error| fail("invalid_project", error.to_string()))?;
         return Ok(WorkflowInstall {
             workflow: workflow.into(),
-            agents: export_workflow_agents(root, workflow)?,
+            agents: export(&project)?,
         });
     };
-    let agents = export_workflow_agents(source, workflow)?;
-    let project = crate::load_project(source, workflow)
-        .map_err(|e| fail("invalid_project", e.to_string()))?;
-    let project_path = checked_path(root, Utf8Path::new(".unelos/project.yaml"))?;
-    let mut definitions = match fs::read_to_string(&project_path) {
-        Ok(text) => crate::parse_project_definitions(project_path.as_str(), &text)
-            .map_err(|e| fail("invalid_project", e.to_string()))?,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => ProjectDefinitions {
-            task_definitions: BTreeMap::new(),
-            agents: BTreeMap::new(),
-        },
-        Err(error) => return Err(io_error(error)),
-    };
+    let project = load_install_source(source, workflow)?;
+    crate::validate_project(&project)
+        .map_err(|error| fail("invalid_project", error.to_string()))?;
+    let agents = export(&project)?;
+    check_project_init(root)?;
+    let mut files = BTreeMap::new();
+    let authoring = &project.authoring_root;
     let (tasks, agent_ids) = references(&project);
+    let mut selected_sources = BTreeSet::from([project.workflow_source.clone()]);
     for id in &tasks {
-        let value = &project.definitions.task_definitions[id];
-        if definitions
-            .task_definitions
-            .get(id)
-            .is_some_and(|existing| existing != value)
-        {
-            return Err(fail(
-                "import_collision",
-                format!("Existing Task definition differs: {id}"),
-            ));
-        }
-        definitions
-            .task_definitions
-            .insert(id.clone(), value.clone());
+        collect_files(authoring, &Utf8PathBuf::from("tasks").join(id), &mut files)?;
+        selected_sources.insert(project.task_sources[id].clone());
     }
     for id in agent_ids.keys() {
-        let value = &project.definitions.agents[id];
-        if definitions
-            .agents
-            .get(id)
-            .is_some_and(|existing| existing != value)
-        {
-            return Err(fail(
-                "import_collision",
-                format!("Existing Agent definition differs: {id}"),
-            ));
-        }
-        definitions.agents.insert(id.clone(), value.clone());
+        collect_files(authoring, &Utf8PathBuf::from("agents").join(id), &mut files)?;
+        selected_sources.insert(project.agent_sources[id].clone());
     }
-    let workflow_relative = Utf8PathBuf::from(format!(".unelos/workflows/{workflow}.yaml"));
-    let mut files = vec![(
-        workflow_relative,
+    files.insert(
+        Utf8PathBuf::from(format!("workflows/{workflow}.yaml")),
         fs::read(&project.workflow_source).map_err(io_error)?,
-    )];
-    let skill_ids: Vec<_> = tasks
-        .iter()
-        .flat_map(|id| project.definitions.task_definitions[id].skills.iter())
-        .chain(
-            agent_ids
-                .keys()
-                .flat_map(|id| project.definitions.agents[id].skills.iter()),
-        )
-        .cloned()
-        .collect();
-    let skills = crate::resolve_skills(source, &skill_ids)
+    );
+    for source in selected_sources {
+        if let Some(dependencies) = project.instruction_dependencies.get(&source) {
+            for relative in dependencies {
+                let mut components = relative.components();
+                let registry = components.next().map(|part| part.as_str());
+                let id = components
+                    .next()
+                    .map(|part| part.as_str())
+                    .unwrap_or_default();
+                if (registry == Some("tasks") && !tasks.contains(id))
+                    || (registry == Some("agents") && !agent_ids.contains_key(id))
+                    || (registry == Some("workflows")
+                        && relative.extension() == Some("yaml")
+                        && relative != &Utf8PathBuf::from(format!("workflows/{workflow}.yaml")))
+                {
+                    return Err(fail("invalid_project", format!("{source}: instructionsFile dependency {relative} belongs to unselected authoring; place shared instructions outside definition/workflow registries")));
+                }
+                files.insert(
+                    relative.clone(),
+                    fs::read(checked_path(authoring, relative)?).map_err(io_error)?,
+                );
+            }
+        }
+    }
+    let mut skill_ids = Vec::new();
+    for (node_id, node) in &project.workflow.nodes {
+        let selections: Vec<_> = match node {
+            NodeDefinition::Task(task) => vec![(&task.task, format!("nodes.{node_id}"))],
+            NodeDefinition::Parallel(parallel) => parallel
+                .tasks
+                .iter()
+                .enumerate()
+                .map(|(index, worker)| (&worker.task, format!("nodes.{node_id}.tasks[{index}]")))
+                .collect(),
+            _ => Vec::new(),
+        };
+        for (selection, field) in selections {
+            let (task, _) = project
+                .selected_task(selection, &field)
+                .map_err(|error| fail("invalid_project", error.to_string()))?;
+            skill_ids.extend(task.skills.iter().cloned());
+        }
+    }
+    skill_ids.extend(
+        agent_ids
+            .keys()
+            .flat_map(|id| project.definitions.agents[id].skills.iter().cloned()),
+    );
+    let skills = crate::skills::resolve_authoring_skills(authoring, &skill_ids)
         .map_err(|e| fail("invalid_skill", e.to_string()))?;
     for skill in skills {
         collect_files(
-            source,
-            &Utf8PathBuf::from(format!(".unelos/skills/{}", skill.id)),
+            authoring,
+            &Utf8PathBuf::from("skills").join(skill.id),
             &mut files,
         )?;
     }
     // Validate all imported destinations before any write; native generated profiles overwrite separately.
     for (relative, bytes) in &files {
-        let path = checked_path(root, relative)?;
+        let relative = Utf8PathBuf::from(".unelos").join(relative);
+        let path = checked_path(root, &relative)?;
         match fs::read(&path) {
             Ok(existing) if existing != *bytes => {
                 return Err(fail(
@@ -244,12 +268,10 @@ pub fn install_workflow(
             Err(error) => return Err(io_error(error)),
         }
     }
-    let yaml = serde_yaml_ng::to_string(&definitions)
-        .map_err(|e| fail("invalid_project", e.to_string()))?;
     for (relative, bytes) in files {
-        write_install_file(root, &relative, &bytes)?;
+        write_install_file(root, &Utf8PathBuf::from(".unelos").join(relative), &bytes)?;
     }
-    write_install_file(root, Utf8Path::new(".unelos/project.yaml"), yaml.as_bytes())?;
+    initialize_project(root)?;
     Ok(WorkflowInstall {
         workflow: workflow.into(),
         agents,
@@ -259,7 +281,7 @@ pub fn install_workflow(
 fn collect_files(
     root: &Utf8Path,
     relative: &Utf8Path,
-    files: &mut Vec<(Utf8PathBuf, Vec<u8>)>,
+    files: &mut BTreeMap<Utf8PathBuf, Vec<u8>>,
 ) -> Result<(), InstallError> {
     let path = checked_path(root, relative)?;
     for entry in fs::read_dir(path).map_err(io_error)? {
@@ -267,18 +289,18 @@ fn collect_files(
         let name = entry
             .file_name()
             .into_string()
-            .map_err(|_| fail("invalid_path", "Skill resource is not UTF-8"))?;
+            .map_err(|_| fail("invalid_path", "Authoring resource is not UTF-8"))?;
         let relative = relative.join(name);
         let path = checked_path(root, &relative)?;
         let metadata = fs::symlink_metadata(&path).map_err(io_error)?;
         if metadata.is_dir() {
             collect_files(root, &relative, files)?;
         } else if metadata.is_file() {
-            files.push((relative, fs::read(path).map_err(io_error)?));
+            files.insert(relative, fs::read(path).map_err(io_error)?);
         } else {
             return Err(fail(
                 "invalid_path",
-                "Skill resources must be ordinary files/directories",
+                "Authoring resources must be ordinary files/directories",
             ));
         }
     }
@@ -302,6 +324,12 @@ fn checked_path(root: &Utf8Path, relative: &Utf8Path) -> Result<Utf8PathBuf, Ins
                     format!("Symlinked installation path: {path}"),
                 ))
             }
+            Ok(metadata) if path != root.join(relative) && !metadata.is_dir() => {
+                return Err(fail(
+                    "invalid_path",
+                    format!("Installation parent is not a directory: {path}"),
+                ));
+            }
             Ok(_) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(io_error(error)),
@@ -313,6 +341,70 @@ fn checked_path(root: &Utf8Path, relative: &Utf8Path) -> Result<Utf8PathBuf, Ins
 /// Check a destination without creating or changing project files.
 pub fn check_install_path(root: &Utf8Path, relative: &Utf8Path) -> Result<(), InstallError> {
     checked_path(root, relative).map(|_| ())
+}
+
+/// Validate authored scaffold destinations without changing project files.
+pub fn check_project_init(root: &Utf8Path) -> Result<(), InstallError> {
+    if !root.is_dir() {
+        return Err(fail(
+            "invalid_project",
+            "Project must be an existing directory",
+        ));
+    }
+    for relative in [
+        ".unelos/project.yaml",
+        ".unelos/workflows",
+        ".unelos/skills",
+        ".unelos/tasks",
+        ".unelos/agents",
+    ] {
+        let path = checked_path(root, Utf8Path::new(relative))?;
+        match fs::metadata(&path) {
+            Ok(meta)
+                if relative.ends_with(".yaml") && !meta.is_file()
+                    || !relative.ends_with(".yaml") && !meta.is_dir() =>
+            {
+                return Err(fail(
+                    "invalid_path",
+                    format!("Wrong destination type: {path}"),
+                ));
+            }
+            Ok(_) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(io_error(e)),
+        }
+    }
+    let path = root.join(".unelos/project.yaml");
+    match fs::read_to_string(&path) {
+        Ok(text) => {
+            crate::parse_project_settings(path.as_str(), &text)
+                .map_err(|e| fail("invalid_project", e.to_string()))?;
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => return Err(io_error(e)),
+    }
+    Ok(())
+}
+
+/// Create only missing shared authoring scaffold; preserve existing bytes.
+pub fn initialize_project(root: &Utf8Path) -> Result<(), InstallError> {
+    check_project_init(root)?;
+    for relative in [
+        ".unelos/workflows",
+        ".unelos/skills",
+        ".unelos/tasks",
+        ".unelos/agents",
+    ] {
+        fs::create_dir_all(root.join(relative)).map_err(io_error)?;
+    }
+    if !root.join(".unelos/project.yaml").exists() {
+        write_install_file(
+            root,
+            Utf8Path::new(".unelos/project.yaml"),
+            b"# Project settings will live here.\n{}\n",
+        )?;
+    }
+    Ok(())
 }
 
 /// Safe project-local installation transport shared by authoring and harness adapters.

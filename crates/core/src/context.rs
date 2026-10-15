@@ -106,7 +106,14 @@ pub fn inspect_task(
         });
     };
     Ok(TaskInspection {
-        context: resolve_task_context(project, node_id, &node.task, &node.agent, node.execution)?,
+        context: resolve_task_context(
+            project,
+            node_id,
+            &format!("nodes.{node_id}"),
+            &node.task,
+            &node.agent,
+            node.execution,
+        )?,
         inputs: node.inputs.clone(),
         outputs: node.outputs.clone(),
     })
@@ -115,28 +122,28 @@ pub fn inspect_task(
 pub(crate) fn resolve_task_context(
     project: &LoadedProject,
     node_id: &str,
-    task_id: &str, // Task Definition reference, not a runtime Task identity
+    field: &str,
+    selection: &crate::TaskSelection,
     agent_id: &str,
     execution: crate::Execution,
 ) -> Result<TaskContext, ContextError> {
-    let task = project
-        .definitions
-        .task_definitions
-        .get(task_id)
-        .ok_or_else(|| ContextError::Diagnostic {
-            path: project.project_source.clone(),
-            field: format!("taskDefinitions.{task_id}"),
-            cause: "referenced Task Definition is missing".into(),
-        })?;
+    let (task, identity) =
+        project
+            .selected_task(selection, field)
+            .map_err(|error| ContextError::Diagnostic {
+                path: error.path,
+                field: error.field,
+                cause: error.cause,
+            })?;
     let agent =
         project
             .definitions
             .agents
             .get(agent_id)
             .ok_or_else(|| ContextError::Diagnostic {
-                path: project.project_source.clone(),
-                field: format!("agents.{agent_id}"),
-                cause: "referenced Agent is missing".into(),
+                path: project.workflow_source.clone(),
+                field: format!("{field}.agent"),
+                cause: format!("referenced Agent {agent_id:?} is missing"),
             })?;
     let ids: Vec<&str> = task
         .skills
@@ -149,7 +156,7 @@ pub(crate) fn resolve_task_context(
     Ok(TaskContext {
         kind: "task",
         node_id: node_id.to_owned(),
-        task_definition: task_id.to_owned(),
+        task_definition: identity,
         agent: agent_id.to_owned(),
         execution,
         task_instructions: task.instructions.clone(),

@@ -81,8 +81,13 @@ fn legacy_state_without_naming_metadata_is_already_named() {
 fn discovery_accepts_empty_workflows_and_ignores_non_yaml_files() {
     let (_temp, root) = project_copy();
     fs::write(root.join(".unelos/workflows/readme.txt"), "not a Workflow").unwrap();
-    assert_eq!(list_workflows(&root).unwrap(), vec!["implement-feature"]);
-    fs::remove_file(root.join(".unelos/workflows/implement-feature.yaml")).unwrap();
+    assert_eq!(
+        list_workflows(&root).unwrap(),
+        vec!["completion-loop", "implement-feature", "research-feature"]
+    );
+    for name in ["completion-loop", "implement-feature", "research-feature"] {
+        fs::remove_file(root.join(format!(".unelos/workflows/{name}.yaml"))).unwrap();
+    }
     assert!(list_workflows(&root).unwrap().is_empty());
 }
 

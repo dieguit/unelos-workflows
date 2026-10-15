@@ -11,11 +11,19 @@ fn project() -> (TempDir, unelos_core::LoadedProject) {
     let temp = TempDir::new().unwrap();
     let root = Utf8Path::from_path(temp.path()).unwrap();
     fs::create_dir_all(root.join(".unelos/workflows")).unwrap();
-    fs::write(
-        root.join(".unelos/project.yaml"),
-        "taskDefinitions:\n  plan:\n    instructions: Write the plan.\n  backend:\n    instructions: Research backend.\n    skills: [backend]\n  frontend:\n    instructions: Research frontend.\n    skills: [frontend]\nagents:\n  planner:\n    instructions: Plan carefully.\n  backend-researcher:\n    instructions: Backend context only.\n    skills: [backend]\n    model: example/backend\n    mcps: [backend-mcp]\n    tools: [read-file]\n  frontend-researcher:\n    instructions: Frontend context only.\n    tools: [read-file]\n",
-    )
-    .unwrap();
+    fs::write(root.join(".unelos/project.yaml"), "{}\n").unwrap();
+    for (path, yaml) in [
+        ("tasks/plan/task.yaml", "instructions: Write the plan.\n"),
+        ("tasks/backend/task.yaml", "instructions: Research backend.\nskills: [backend]\n"),
+        ("tasks/frontend/task.yaml", "instructions: Research frontend.\nskills: [frontend]\n"),
+        ("agents/planner/agent.yaml", "instructions: Plan carefully.\n"),
+        ("agents/backend-researcher/agent.yaml", "instructions: Backend context only.\nskills: [backend]\nmodel: example/backend\nmcps: [backend-mcp]\ntools: [read-file]\n"),
+        ("agents/frontend-researcher/agent.yaml", "instructions: Frontend context only.\ntools: [read-file]\n"),
+    ] {
+        let path = root.join(".unelos").join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, yaml).unwrap();
+    }
     fs::write(
         root.join(".unelos/workflows/research-feature.yaml"),
         "name: research-feature\nstart: plan\nnodes:\n  plan:\n    task: plan\n    agent: planner\n    outputs: [plan.md]\n    next: parallel-research\n  parallel-research:\n    type: parallel\n    inputs: [plan.md]\n    tasks:\n      - task: backend\n        agent: backend-researcher\n      - task: frontend\n        agent: frontend-researcher\n    outputs: [research-summary.md]\n    next: approve-plan\n  approve-plan:\n    type: human-gate\n    inputs: [plan.md, research-summary.md]\n    next:\n      approved: done\n      rejected: parallel-research\n  done:\n    type: end\n",

@@ -37,7 +37,8 @@ pub fn validate_project(
             NodeDefinition::Task(task) => {
                 validate_references(project, &field, &task.task, &task.agent)?;
                 validate_transition(project, &field, &task.next)?;
-                let outcomes = &project.definitions.task_definitions[&task.task].outcomes;
+                let (definition, identity) = project.selected_task(&task.task, &field)?;
+                let outcomes = &definition.outcomes;
                 let matches = match &task.next {
                     Transition::Single(_) => outcomes.is_empty(),
                     Transition::Outcomes(routes) => {
@@ -48,7 +49,7 @@ pub fn validate_project(
                 if !matches {
                     return Err(error(&format!("{field}.next"), format!(
                         "routes must match Task Definition {:?} outcomes {:?}; declared outcomes require an outcome map",
-                        task.task, outcomes
+                        identity, outcomes
                     )));
                 }
                 (&task.inputs, &task.outputs[..])
@@ -125,28 +126,16 @@ pub fn validate_project(
 fn validate_references(
     project: &LoadedProject,
     field: &str,
-    task: &str,
+    task: &crate::TaskSelection,
     agent: &str,
 ) -> Result<(), ProjectValidationError> {
-    for (kind, found, cause) in [
-        (
-            "task",
-            project.definitions.task_definitions.contains_key(task),
-            format!("unknown Task Definition {task:?}"),
-        ),
-        (
-            "agent",
-            project.definitions.agents.contains_key(agent),
-            format!("unknown Agent {agent:?}"),
-        ),
-    ] {
-        if !found {
-            return Err(ProjectValidationError {
-                path: project.workflow_source.clone(),
-                field: format!("{field}.{kind}"),
-                cause,
-            });
-        }
+    project.selected_task(task, field)?;
+    if !project.definitions.agents.contains_key(agent) {
+        return Err(ProjectValidationError {
+            path: project.workflow_source.clone(),
+            field: format!("{field}.agent"),
+            cause: format!("unknown Agent {agent:?}"),
+        });
     }
     Ok(())
 }

@@ -13,7 +13,7 @@ This report adds evidence without replacing [T15 results/failures](opencode-deli
   outcome selection, single mutation and uncertainty reconciliation.
 - Controller automatic ordinary completion, explicit human gates, recovery-only
   activation, controller-owned brief/ledger and in-place reports.
-- [Reusable page-change workflow](../examples/opencode-execution/README.md):
+- [Reusable workflow (now simple-plan-execute-review)](../examples/simple-plan-execute-review/README.md):
   interview → plan → approval → implementation → independent review → finish.
 
 Final packed archive SHA-256:

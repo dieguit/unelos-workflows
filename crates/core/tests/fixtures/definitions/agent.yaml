@@ -1,0 +1,5 @@
+instructions: Follow project conventions.
+skills: [rust, verification]
+model: vendor/model#variant
+mcps: [github, local]
+tools: [read, shell]

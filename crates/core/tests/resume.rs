@@ -1,23 +1,52 @@
-use assert_fs::{fixture::PathCopy, TempDir};
+use assert_fs::TempDir;
 use camino::{Utf8Path, Utf8PathBuf};
 use unelos_core::*;
 
 fn fixture() -> (TempDir, Utf8PathBuf) {
     let temp = TempDir::new().unwrap();
-    temp.copy_from(
-        Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/opencode-execution"),
-        &["**/*"],
+    let root = Utf8Path::from_path(temp.path()).unwrap().to_owned();
+    install_workflow(
+        &root,
+        Some(
+            &Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples/simple-plan-execute-review"),
+        ),
+        "simple-plan-execute-review",
     )
     .unwrap();
-    let root = Utf8Path::from_path(temp.path()).unwrap().to_owned();
     (temp, root)
+}
+
+#[test]
+fn fresh_entry_delivers_descriptions_and_zero_based_opt_out_instructions() {
+    let (_temp, root) = fixture();
+    std::fs::write(
+        root.join(".unelos/workflows/aaa.yaml"),
+        "name: aaa\ndescription: A short workflow\nstart: end\nnodes: {end: {type: end}}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join(".unelos/workflows/bbb.yaml"),
+        "name: bbb\nstart: end\nnodes: {end: {type: end}}\n",
+    )
+    .unwrap();
+    let package = serde_json::to_value(execution_new(&root).unwrap()).unwrap();
+    assert_eq!(package["workflows"][0], "aaa");
+    assert_eq!(package["workflows"][1], "bbb");
+    assert_eq!(package["workflowDescriptions"]["aaa"], "A short workflow");
+    assert!(package["workflowDescriptions"].get("bbb").is_none());
+    let instructions = package["controllerInstructions"].as_str().unwrap();
+    assert!(instructions.contains("0. Continue without Unelos"));
+    assert!(instructions.contains("1..N"));
+    assert!(instructions.contains("number or workflow name"));
+    assert!(!root.join(".unelos/runs").exists());
 }
 
 #[test]
 fn fresh_entry_never_selects_history_and_resume_is_read_only() {
     let (_temp, root) = fixture();
-    let a = execution_start(&root, "page-change", Some("first-run")).unwrap();
-    let b = execution_start(&root, "page-change", Some("second-run")).unwrap();
+    let a = execution_start(&root, "simple-plan-execute-review", Some("first-run")).unwrap();
+    let b = execution_start(&root, "simple-plan-execute-review", Some("second-run")).unwrap();
     let a_id = a.run_id.as_deref().unwrap();
     let b_id = b.run_id.as_deref().unwrap();
     let ledger = root.join(".unelos/runs/first-run/ledger.md");
@@ -60,14 +89,14 @@ fn fresh_entry_never_selects_history_and_resume_is_read_only() {
 #[test]
 fn finished_run_is_addressable_but_not_resumable() {
     let (_temp, root) = fixture();
-    let path = root.join(".unelos/workflows/page-change.yaml");
+    let path = root.join(".unelos/workflows/simple-plan-execute-review.yaml");
     let definition = std::fs::read_to_string(&path).unwrap();
     std::fs::write(
         path,
         definition.replace("start: interview", "start: finish"),
     )
     .unwrap();
-    let finished = execution_start(&root, "page-change", None).unwrap();
+    let finished = execution_start(&root, "simple-plan-execute-review", None).unwrap();
     assert_eq!(finished.status, "finished");
     assert!(execution_runs(&root).unwrap().runs.is_empty());
     assert_eq!(
@@ -78,7 +107,7 @@ fn finished_run_is_addressable_but_not_resumable() {
     );
     let fresh = execution_new(&root).unwrap();
     assert!(fresh.packet.is_none());
-    assert_eq!(fresh.workflows, vec!["page-change"]);
+    assert_eq!(fresh.workflows, vec!["simple-plan-execute-review"]);
 }
 
 #[test]
@@ -88,7 +117,7 @@ fn fresh_entry_does_not_read_corrupt_run_storage_or_write_runtime() {
     std::fs::create_dir_all(&run).unwrap();
     std::fs::write(run.join("state.json"), "{").unwrap();
     let new = execution_new(&root).unwrap();
-    assert_eq!(new.workflows, vec!["page-change"]);
+    assert_eq!(new.workflows, vec!["simple-plan-execute-review"]);
     assert!(!root.join(".unelos/runtime.lock").exists());
 }
 
@@ -105,7 +134,7 @@ fn finish_main(root: &Utf8Path, state: &RunState) -> RunState {
 #[test]
 fn empty_output_is_distinct_from_missing_and_missing_input_blocks_dispatch() {
     let (_temp, root) = fixture();
-    let state = start_workflow(&root, "page-change", None).unwrap();
+    let state = start_workflow(&root, "simple-plan-execute-review", None).unwrap();
     let CurrentWork::Task(record) = &state.current else {
         panic!()
     };
@@ -162,7 +191,7 @@ fn resume_rejects_oversize_or_invalid_utf8_without_mutation() {
         (vec![255], "invalid_resume_context"),
     ] {
         let (_temp, root) = fixture();
-        let state = start_workflow(&root, "page-change", None).unwrap();
+        let state = start_workflow(&root, "simple-plan-execute-review", None).unwrap();
         let CurrentWork::Task(record) = &state.current else {
             panic!()
         };
@@ -184,7 +213,7 @@ fn resume_rejects_oversize_or_invalid_utf8_without_mutation() {
 #[test]
 fn resume_rejects_external_report_symlink_without_touching_target() {
     let (_temp, root) = fixture();
-    let state = start_workflow(&root, "page-change", None).unwrap();
+    let state = start_workflow(&root, "simple-plan-execute-review", None).unwrap();
     let CurrentWork::Task(record) = &state.current else {
         panic!()
     };
@@ -198,7 +227,7 @@ fn resume_rejects_external_report_symlink_without_touching_target() {
 #[test]
 fn resume_gate_preserves_activation_and_never_approves() {
     let (_temp, root) = fixture();
-    let state = start_workflow(&root, "page-change", None).unwrap();
+    let state = start_workflow(&root, "simple-plan-execute-review", None).unwrap();
     let state = finish_main(&root, &state);
     let gate = finish_main(&root, &state);
     let path = root
@@ -219,7 +248,7 @@ fn resume_gate_preserves_activation_and_never_approves() {
 #[test]
 fn delegated_resume_keeps_prompt_identity_and_reports_and_missing_brief_blocks() {
     let (_temp, root) = fixture();
-    let state = start_workflow(&root, "page-change", None).unwrap();
+    let state = start_workflow(&root, "simple-plan-execute-review", None).unwrap();
     let state = finish_main(&root, &state);
     let state = finish_main(&root, &state);
     let ledger = root

@@ -336,10 +336,21 @@ fn workflow_selection_is_sorted_and_empty_selection_succeeds() {
     .unwrap();
     assert_eq!(
         result(root, &["start"])["workflows"],
-        serde_json::json!(["another", "implement-feature"])
+        serde_json::json!([
+            "another",
+            "completion-loop",
+            "implement-feature",
+            "research-feature"
+        ])
     );
-    fs::remove_file(root.join(".unelos/workflows/another.yaml")).unwrap();
-    fs::remove_file(root.join(".unelos/workflows/implement-feature.yaml")).unwrap();
+    for name in [
+        "another",
+        "completion-loop",
+        "implement-feature",
+        "research-feature",
+    ] {
+        fs::remove_file(root.join(format!(".unelos/workflows/{name}.yaml"))).unwrap();
+    }
     assert_eq!(result(root, &["start"])["workflows"], serde_json::json!([]));
     assert!(!root.join(".unelos/active-run").exists());
 }
