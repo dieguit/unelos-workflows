@@ -16,7 +16,7 @@ Do all of this review yourself. Never spawn a subagent to review part of the dif
 Pick the mode from the latest section of the implementer's report and from the transition feedback.
 
 - **Task review** — latest report section is `## Task N`. Diff its BASE..HEAD. Judge spec compliance AND task quality; both are required. This is a task-scoped gate, not a merge review.
-- **Scoped re-review** — latest report section is `## Task N — fix round R`. Not a fresh review. Take each prior open finding (from the previous `review.md` sections) and verdict it ADDRESSED or NOT ADDRESSED with `file:line` evidence ("attempted" is not addressed: the specific defect must no longer exist). Inspect the fix diff (the fix base is the head the previous review saw, up to the new HEAD) for new breakage only. Issues entirely outside the fix diff go under Out-of-Scope Observations as Minor; they do not block the task.
+- **Scoped re-review** — latest report section is `## Task N — fix round R`. Not a fresh review. Take each prior open finding (from the previous `review.md` sections) and verdict it ADDRESSED or NOT ADDRESSED with `file:line` evidence ("attempted" is not addressed: the specific defect must no longer exist). If the report's fix section has `### Disputed findings`, give each disputed finding the verdict `DISPUTED`, with your assessment of the implementer's evidence: whether it holds up and why. Do not rule; the controller rules. Inspect the fix diff (the fix base is the head the previous review saw, up to the new HEAD) for new breakage only. Issues entirely outside the fix diff go under Out-of-Scope Observations as Minor; they do not block the task.
 - **Final review** — whole branch from the merge-base recorded in `worktree.md` to HEAD. Also triage every `minor (deferred)` and `parked` line in `progress.md`: say which still matter at merge time and which can stay deferred.
 - **Final re-review** — the feedback contains `final-fix-report.md`. Append `## Re-review of fix wave`, scoped to that report's BASE..HEAD: verdict each finding the fix wave claims to address, and check that diff for new breakage. Do not re-review the rest of the branch.
 
@@ -73,7 +73,7 @@ Task quality: Approved | Needs fixes
 Reasoning: <1-2 sentences>
 ```
 
-**Scoped re-review:** per prior finding, in order: `<finding one-liner> — ADDRESSED | NOT ADDRESSED` with file:line. Then `New breakage in the fix diff` (severity, file:line, or "None"), `Out-of-Scope Observations` (Minor, or "None"), and `Task quality: Approved | Needs fixes` listing any findings still open.
+**Scoped re-review:** per prior finding, in order: `<finding one-liner> — ADDRESSED | NOT ADDRESSED | DISPUTED` with file:line (DISPUTED: your assessment of the evidence). Then `New breakage in the fix diff` (severity, file:line, or "None"), `Out-of-Scope Observations` (Minor, or "None"), and `Task quality: Approved | Needs fixes` listing any findings still open.
 
 **Final review and final re-review:** Strengths, then Critical / Important / Minor with `file:line`, the `minor (deferred)` / `parked` triage, Declined to judge, and `Assessment: Ready to merge | Needs fixes` with a 1-2 sentence reasoning. A re-review is headed `## Re-review of fix wave` and carries the same Assessment line.
 

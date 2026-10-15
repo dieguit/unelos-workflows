@@ -29,6 +29,7 @@ stop and ask.
 
 - **setup-worktree**: after the worktree skill, run the preflight scan on `plan.md`; write the table and every `Ruling:` into `worktree.md`.
 - **advance**: read the latest section of `review.md` and your existing `progress.md` (initialize it from `plan.md` on first visit: `Current: Task 1`, task count, `Phase: tasks`). Update `progress.md`, then choose exactly one outcome:
+  - Disputes first: rule on each `DISPUTED` finding in the review, and each item under `### Disputed findings` in the latest report section. **uphold:** it stays an open finding and counts toward `fix`. **dismiss:** record `Task N: parked — <finding> — Ruling: <why> — cost if wrong: <…>`.
   - `fix`: spec ❌, any Critical/Important, or a ⚠️ item you confirm as a real gap, and fix round R < 5. Write `Task N: fix round R/5 (…)` and the open findings verbatim under `## Open findings`.
   - At R = 5 with findings open: adjudicate each (`Task N: parked — <finding> — Ruling: <why> — cost if wrong: <…>`, or rule the smallest unblocking change and record it under `## Carry forward`), then treat the task as complete.
   - `next_task`: task complete and tasks remain. Write `Task N: complete (commits a..b, review clean | K parked)`, set `Current: Task N+1`, clear `## Open findings`.
