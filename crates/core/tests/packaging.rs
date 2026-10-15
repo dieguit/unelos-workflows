@@ -405,21 +405,64 @@ fn collisions_are_preflighted_before_any_authoring_write() {
 }
 
 #[test]
-fn sole_flat_example_installs_without_settings_or_reusable_tasks() {
-    let package =
-        Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/simple-plan-execute-review");
+fn sole_flat_example_installs_with_its_bundled_skills() {
+    let package = Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/superpowers-dev");
     assert!(!package.join(".unelos").exists());
     assert!(!package.join("project.yaml").exists());
     let target = TempDir::new().unwrap();
     let root = Utf8Path::from_path(target.path()).unwrap();
-    install_workflow(root, Some(&package), "simple-plan-execute-review").unwrap();
-    let loaded = load_project(root, "simple-plan-execute-review").unwrap();
+    install_workflow(root, Some(&package), "superpowers-dev").unwrap();
+    let loaded = load_project(root, "superpowers-dev").unwrap();
     validate_project(&loaded).unwrap();
     assert!(loaded.definitions.task_definitions.is_empty());
     assert_eq!(
-        inspect_task(&loaded, "review").unwrap().context.outcomes,
-        ["passed", "changes_requested"]
+        inspect_task(&loaded, "advance").unwrap().context.outcomes,
+        ["fix", "next_task", "all_done"]
     );
+    assert_eq!(
+        inspect_task(&loaded, "advance-final")
+            .unwrap()
+            .context
+            .outcomes,
+        ["final_fix", "finish"]
+    );
+    let mut skills: Vec<String> = std::fs::read_dir(root.join(".unelos/skills"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect();
+    skills.sort();
+    assert_eq!(
+        skills,
+        [
+            "brainstorming",
+            "code-review",
+            "finishing-a-development-branch",
+            "receiving-code-review",
+            "sdd-controller",
+            "systematic-debugging",
+            "test-driven-development",
+            "using-git-worktrees",
+            "verification-before-completion",
+            "writing-plans",
+        ]
+    );
+    for id in &skills {
+        let text = std::fs::read_to_string(root.join(".unelos/skills").join(id).join("SKILL.md"))
+            .unwrap()
+            .replace("\r\n", "\n");
+        assert!(
+            text.starts_with(&format!("---\nname: {id}\n")),
+            "{id} frontmatter"
+        );
+        assert!(
+            text.contains("Adapted from superpowers"),
+            "{id} attribution"
+        );
+        assert!(text.lines().count() <= 200, "{id} exceeds 200 lines");
+        for banned in ["superpowers:", "docs/superpowers", "scripts/"] {
+            assert!(!text.contains(banned), "{id} contains {banned}");
+        }
+    }
     assert!(!root.join(".unelos/README.md").exists());
 }
 

@@ -41,12 +41,11 @@ fn inspect_normalizes_the_existing_fixture() {
 #[test]
 fn inspect_shipped_example_after_flat_install() {
     let temp = assert_fs::TempDir::new().unwrap();
-    let example = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../core/tests/fixtures/simple-plan-execute-review");
+    let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/superpowers-dev");
     command()
         .arg("--project")
         .arg(temp.path())
-        .args(["install", "simple-plan-execute-review", "--source"])
+        .args(["install", "superpowers-dev", "--source"])
         .arg(example)
         .assert()
         .success();
@@ -55,17 +54,20 @@ fn inspect_shipped_example_after_flat_install() {
         .arg(temp.path())
         .args([
             "inspect",
-            "simple-plan-execute-review",
+            "superpowers-dev",
             "--node",
-            "implement",
+            "implement-task",
             "--json",
         ])
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
     let actual: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(actual["taskDefinition"], "nodes.implement.taskDefinition");
-    assert_eq!(actual["agent"], "simple-implementer");
+    assert_eq!(
+        actual["taskDefinition"],
+        "nodes.implement-task.taskDefinition"
+    );
+    assert_eq!(actual["agent"], "sp-implementer");
     assert_eq!(actual["outputs"], json!(["implementation-report.md"]));
 }
 
