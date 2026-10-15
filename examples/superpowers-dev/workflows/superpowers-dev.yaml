@@ -55,8 +55,9 @@ nodes:
     taskDefinition:
       instructions: |
         Implement one plan task or one fix round in the worktree from worktree.md.
-        Your assignment is in transition feedback progress.md (Current task and
-        Open findings); with no progress.md feedback, implement Task 1. Append your
+        Your assignment is in transition feedback progress.md (Current task, Open
+        findings and Carry forward, whose rulings bind over the plan text); with no
+        progress.md feedback, implement Task 1. Append your
         section to the bound implementation report.
     agent: sp-implementer
     execution: subagent
