@@ -7,7 +7,7 @@ fn source() -> TempDir {
     let temp = TempDir::new().unwrap();
     temp.copy_from(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../examples/simple-plan-execute-review"),
+            .join("../core/tests/fixtures/simple-plan-execute-review"),
         &["**/*"],
     )
     .unwrap();

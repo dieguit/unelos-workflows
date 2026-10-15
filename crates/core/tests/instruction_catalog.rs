@@ -16,7 +16,7 @@ fn catalog_sources_are_delivered_with_runtime_paths_kept_separate() {
         root,
         Some(
             &Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../examples/simple-plan-execute-review"),
+                .join("tests/fixtures/simple-plan-execute-review"),
         ),
         "simple-plan-execute-review",
     )

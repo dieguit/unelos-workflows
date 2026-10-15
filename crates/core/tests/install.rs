@@ -8,7 +8,7 @@ fn export_deduplicates_agents_and_combines_native_modes() {
     source
         .copy_from(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../examples/simple-plan-execute-review"),
+                .join("tests/fixtures/simple-plan-execute-review"),
             &["**/*"],
         )
         .unwrap();
@@ -32,7 +32,7 @@ fn unsafe_agent_and_workflow_ids_are_rejected_before_writing() {
     source
         .copy_from(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../examples/simple-plan-execute-review"),
+                .join("tests/fixtures/simple-plan-execute-review"),
             &["**/*"],
         )
         .unwrap();

@@ -41,8 +41,8 @@ fn inspect_normalizes_the_existing_fixture() {
 #[test]
 fn inspect_shipped_example_after_flat_install() {
     let temp = assert_fs::TempDir::new().unwrap();
-    let example =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/simple-plan-execute-review");
+    let example = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../core/tests/fixtures/simple-plan-execute-review");
     command()
         .arg("--project")
         .arg(temp.path())

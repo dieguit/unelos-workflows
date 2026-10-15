@@ -407,7 +407,7 @@ fn collisions_are_preflighted_before_any_authoring_write() {
 #[test]
 fn sole_flat_example_installs_without_settings_or_reusable_tasks() {
     let package =
-        Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/simple-plan-execute-review");
+        Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/simple-plan-execute-review");
     assert!(!package.join(".unelos").exists());
     assert!(!package.join("project.yaml").exists());
     let target = TempDir::new().unwrap();
