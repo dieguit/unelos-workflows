@@ -131,7 +131,7 @@ npm test / cargo test / pytest / go test ./...
 
 ### Write `worktree.md`
 
-Write `worktree.md`: absolute worktree path, branch, merge-base SHA (`git merge-base <base-branch> HEAD`), baseline test command and its result. Never start on main/master without explicit user consent.
+Write `worktree.md`: absolute worktree path, branch, base branch name (`Base branch: <name>`), merge-base SHA (`git merge-base <base-branch> HEAD`), baseline test command and its result. Never start on main/master without explicit user consent.
 
 ## Common Rationalizations
 

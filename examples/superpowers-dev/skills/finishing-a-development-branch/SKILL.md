@@ -39,9 +39,8 @@ This determines which menu to show and how cleanup works:
 
 ## Step 3: Determine Base Branch
 
-The base branch is whatever this work forked from — usually named in the
-plan, the conversation, or the branch's upstream. If it is not already
-known, ask: "This branch split from <your best guess> - is that correct?"
+Read the base branch from `Base branch:` in `worktree.md`; do not ask.
+Only if it is missing, ask: "This branch split from <your best guess> - is that correct?"
 Confirm before merging: merging into the wrong base is expensive to undo.
 
 Print `## Rulings I made`: every `Ruling:` line from `worktree.md`, `progress.md` and `final-rulings.md`, in that order, each with its cost if wrong.
@@ -189,5 +188,5 @@ Write `finish.md`: verification command and result, the rulings list, the chosen
 | "This other worktree looks stale — I'll clean it too" | Clean up only worktrees under `.worktrees/` or `worktrees/`. Everything else belongs to the host. |
 | "Removal refused — `--force` is just finishing the cleanup" | The refusal means files exist only in that worktree. `--force` destroys them permanently. Show your human partner and ask. |
 | "The merged-result failure is probably flaky" | A failing merged result stops everything. Branch and worktree stay put while you investigate. |
-| "The base branch is obviously main" | Confirm the fork point or ask. Merging into the wrong base is expensive to undo. |
+| "The base branch is obviously main" | Use `Base branch:` from `worktree.md`; if missing, ask. Merging into the wrong base is expensive to undo. |
 | "The push was rejected — force-push will fix it" | A rejected push means the remote moved. Investigate; force-push only on your human partner's explicit request. |

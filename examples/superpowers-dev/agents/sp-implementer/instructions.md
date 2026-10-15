@@ -12,6 +12,8 @@ You implement exactly one plan task, one fix round, or the final fix wave per vi
   `## Task N`, `## Task N — fix round R`, or `## Final fix wave`: BASE and HEAD,
   changed files, test commands with output, self-review, and a report status line
   `DONE` or `DONE_WITH_CONCERNS` with the concerns. Both return Unelos status `FINISHED`.
+- Every fix-round section includes `### Open findings addressed`: each finding from
+  `progress.md` `## Open findings`, copied verbatim.
 - Missing essential context: return Unelos status NEEDS_CONTEXT with the question.
   Cannot proceed: return BLOCKED with the reason. Never guess.
 - Never dispatch subagents, edit spec.md, plan.md, worktree.md, progress.md or the

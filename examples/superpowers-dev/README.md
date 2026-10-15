@@ -17,7 +17,7 @@ The workflow YAML `description` appears beside its name in `/unelos`:
 | `approve-spec` | Human gate | Approved → plan; rejected → revise spec |
 | `write-plan` | Controller (main) | `plan.md`: tasks with exact code and commands |
 | `approve-plan` | Human gate | Approved → worktree; rejected → revise plan |
-| `setup-worktree` | Controller (main) | `worktree.md`: worktree, branch, merge-base, green baseline, preflight rulings |
+| `setup-worktree` | Controller (main) | `worktree.md`: worktree, branch, base branch, merge-base, green baseline, preflight rulings |
 | `implement-task` | Implementer subagent | `implementation-report.md`: one task or one fix round appended |
 | `review-task` | Task reviewer subagent | `review.md`: full task review, or scoped re-review of a fix round |
 | `advance` | Controller (main) | `progress.md`; outcome `fix` / `next_task` → implement-task, `all_done` → final-review |

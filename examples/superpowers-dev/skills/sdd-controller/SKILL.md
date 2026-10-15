@@ -35,7 +35,7 @@ stop and ask.
   - `next_task`: task complete and tasks remain. Write `Task N: complete (commits a..b, review clean | K parked)`, set `Current: Task N+1`, clear `## Open findings`.
   - `all_done`: last task complete; set `Phase: done`.
   - Minor findings never trigger `fix`: write `Task N: minor (deferred): <one-liner>`.
-- **advance-final**: read `final-review.md`. Must-fix findings and no `## Re-review of fix wave` section → `final_fix`. Clean, or the re-review section exists (the single fix wave is spent) → write every residual's `Ruling:` to `final-rulings.md`, then `finish`.
+- **advance-final**: read `final-review.md`. Must-fix findings and no `## Re-review of fix wave` section → write `final-rulings.md` noting the fix wave is pending, with any rulings made so far, then `final_fix`. Clean, or the re-review section exists (the single fix wave is spent) → write every residual's `Ruling:` to `final-rulings.md`, then `finish`.
 
 ## Setup preflight
 
@@ -69,7 +69,7 @@ An implementer returns one of four statuses. NEEDS_CONTEXT and BLOCKED never com
 During `implement-task`:
 
 - **NEEDS_CONTEXT:** the implementer lacked information. Answer from `spec.md`, `plan.md` or the code when possible; otherwise relay the question to the user. Then continue the same worker through Unelos continuation. Never advance the task.
-- **BLOCKED:** assess the blocker. Context problem → supply context. Task too large → rule a smaller scope. Plan itself wrong → rule on the correction. Record the ruling in the run ledger, never complete the task, and re-dispatch with the context or ruling. At the next `advance`, copy the ruling into `progress.md` (under `## Carry forward`) so it survives.
+- **BLOCKED:** assess the blocker. Context problem → supply context. Task too large → rule a smaller scope. Plan itself wrong → rule on the correction. Record the ruling in the run ledger, never complete the task, and continue the same worker (Unelos continuation) with the context or ruling. At the next `advance`, copy the ruling into `progress.md` (under `## Carry forward`) so it survives.
 
 **Never** ignore an escalation or send the same work back unchanged. If the implementer said it's stuck, something needs to change.
 
@@ -115,13 +115,13 @@ looping. Adjudicate each open finding yourself — you hold the plan and
 the cross-task context the reviewer lacks:
 
 - **The reviewer is wrong, or the point is contestable:** park it —
-  `Task <N>: parked — <finding> — Ruling: <why the code stands>`. The final
+  `Task <N>: parked — <finding> — Ruling: <why the code stands> — cost if wrong: <…>`. The final
   review sees both sides.
 - **Real, but nothing downstream builds on it:** park it the same way, with
   a ruling that says it's real and deferred.
 - **Real and load-bearing** — a later task builds on it, or it reveals a
   plan defect: rule on the smallest change that unblocks the dependent work,
-  record it as `Task <N>: Ruling: <finding> — <what you decided and why>`
+  record it as `Task <N>: Ruling: <finding> — <what you decided and why> — cost if wrong: <…>`
   under `## Carry forward`, so it reaches the next task. Parking a structural failure
   silently lets every dependent task build on it. Stop only when the defect
   leaves every path forward a guess.
