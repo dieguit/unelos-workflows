@@ -59,7 +59,7 @@ required `.opencode/agents/unelos-*.md`, inferring the version recorded by `init
 To import a workflow package or another project, add `--source /path/to/workflow-source`.
 Packages have `workflows/`, `agents/`, and any required `tasks/`/`skills/` directly
 at their root; installation copies selected authoring under the project's `.unelos`.
-See the sole [plan/execute/review example](examples/simple-plan-execute-review/README.md).
+See the sole [superpowers-dev example](examples/superpowers-dev/README.md).
 Explicit `install --opencode v1|v2` overrides generation only. Without initialization
 or an explicit version, `install` remains core-only.
 
@@ -169,7 +169,7 @@ cannot use a single-successor transition.
 
 There is no standalone validation-only CLI command: `inspect` validates the
 selected Workflow before printing its normalized graph and reports authoring
-diagnostics. See the [workflow walkthrough](examples/simple-plan-execute-review/README.md)
+diagnostics. See the [workflow walkthrough](examples/superpowers-dev/README.md)
 for the example and safe QA steps. Core validation terminal QA:
 
 ```sh

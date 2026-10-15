@@ -36,8 +36,8 @@ fails explicitly; no custom schema shim or automatic/global installation.
 ## Install Workflow and native agents
 
 ```sh
-unelos --project /absolute/project install simple-plan-execute-review \
-  --source /absolute/unelos/examples/simple-plan-execute-review --json
+unelos --project /absolute/project install superpowers-dev \
+  --source /absolute/unelos/examples/superpowers-dev --json
 ```
 
 After init, `install` infers the recorded OpenCode version. This imports referenced authoring/Skills and generates
@@ -53,7 +53,7 @@ to their YAML file. Agent/task resource folders are copied; destination settings
 and package README files are not imported.
 
 ```sh
-unelos --project /absolute/project install simple-plan-execute-review --json
+unelos --project /absolute/project install superpowers-dev --json
 ```
 
 Unrelated native agents/configuration and existing run state remain untouched.

@@ -11,7 +11,7 @@ replace the historical failures below.
 
 [Setup](../integrations/opencode/README.md) ·
 The historical delivery fixture has been removed; the current
-[workflow example](../examples/simple-plan-execute-review/README.md) replaces it
+[workflow example](../examples/superpowers-dev/README.md) replaces it
 for new installations, not as evidence for these past observations.
 
 Actual `npm pack` archive installed/extracted outside the source tree in each

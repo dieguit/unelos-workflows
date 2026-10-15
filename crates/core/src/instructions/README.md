@@ -37,12 +37,12 @@ prompts exclude raw-packet controller metadata.
   reusable definitions, Skills, outcomes and agent resource requirements.
 - `.unelos/workflows/<workflow>.yaml`: graph, Task/agent references or inline
   `taskDefinition`, execution mode, logical input and output names.
-  [Example workflow](../../../../examples/simple-plan-execute-review/workflows/simple-plan-execute-review.yaml).
+  [Example workflow](../../../../examples/superpowers-dev/workflows/superpowers-dev.yaml).
 - Task/agent `instructions` or `instructionsFile`: exactly one source. Markdown
   paths resolve relative to the containing YAML within the authoring root.
 - `.unelos/skills/<skill>/SKILL.md`: selected project Skill bodies.
-  [Example agents](../../../../examples/simple-plan-execute-review/agents/)
-  (this example requires no bundled Skill).
+  [Example agents](../../../../examples/superpowers-dev/agents/)
+  (the example bundles its Skills under `skills/`).
 
 There is no separate shared input-reading instruction today: Task instructions
 describe how to use inputs; core validates bindings and supplies their paths.
