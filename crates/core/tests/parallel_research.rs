@@ -496,3 +496,17 @@ fn gate_rejection_reenters_parallel_with_same_paths_and_new_identity() {
     .unwrap();
     assert_eq!(packet_json(&finished)["nodeId"], "synthesis");
 }
+
+#[test]
+fn parallel_package_carries_concurrent_dispatch_policy() {
+    let (_temp, root) = fixture();
+    let policy = parallel(&root).controller_instructions;
+    for phrase in [
+        "before waiting for any result",
+        "workerKey",
+        "partial set",
+        "every worker's final frame",
+    ] {
+        assert!(policy.contains(phrase), "{phrase}");
+    }
+}

@@ -12,6 +12,7 @@ This catalog extraction preserves existing instruction text and behavior.
 | [controller.md](controller.md) | Coordinator policy in execution packages and the resume run catalog: entry, naming, delegation, completion, gates, recovery and finish announcement. |
 | [task-outputs.md](task-outputs.md) | Main and delegated Tasks, including parallel workers: `completionInstructions` in resolved Task context. |
 | [worker-result.md](worker-result.md) | Delegated serial workers: appended to the exact generated `workerPrompt`; result frame and controller/worker boundaries. |
+| [parallel-worker-result.md](parallel-worker-result.md) | Parallel workers: appended to each generated `workerPrompts[].prompt`; frame grammar with `workerKey` and report-only ownership. |
 
 ## Raw work packets and inspection
 

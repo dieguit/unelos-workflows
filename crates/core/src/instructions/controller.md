@@ -39,6 +39,19 @@ profiles or reconstruct prompts. Selected Skill bodies are already resolved.
 Check project-required resources; missing requirements block applicable work.
 Dispatch implementation and review to separate native worker sessions.
 
+For parallel work, dispatch every supplied workerPrompts entry to its designated
+native agent concurrently, before waiting for any result; never run workers in the
+main conversation or one after another. A worker's NEEDS_CONTEXT pauses only that
+worker: consult context or ask the user, prepare its continuation with the parent
+expected identity and its workerKey, and continue its native handle while others
+keep running. BLOCKED or missing workers keep the parent current; report the
+missing work and never complete a partial set. After every worker is FINISHED,
+read every report, then write each aggregate output at its supplied path,
+preserving useful content: per worker its key and agent, summary, report path,
+questions/decisions and remaining concerns. Record ledger notes, then call
+unelos_complete with the parallel expected identity and resultText containing
+every worker's final frame. Unelos then follows the parent's next.
+
 Native worker return alone is not completion. Inspect the declared reports and
 actual Task-specific verification evidence. A valid FINISHED result requires completion;
 NEEDS_CONTEXT requires consulting valid context or relaying the question to the
