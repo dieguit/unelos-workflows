@@ -11,10 +11,10 @@
   assert(sidebar && main, 'Shell landmarks missing')
   assert(document.querySelectorAll('main').length === 1, 'Expected one main landmark')
   assert(sidebar.getBoundingClientRect().width === 240, 'Sidebar must be 240px')
-  const buttons = [...sidebar.querySelectorAll('button[data-section]')]
-  assert(buttons.length === 5, 'Expected five sections')
+  const links = [...sidebar.querySelectorAll('a[data-section]')]
+  assert(links.length === 5, 'Expected five sections')
   assert(main.querySelector('h1')?.textContent === 'Workflows', 'Default page must be Workflows')
-  for (const button of buttons) {
+  for (const button of links) {
     button.click()
     await settle()
     assert(button.getAttribute('aria-current') === 'page', 'Selected state missing')
@@ -55,7 +55,7 @@
   } finally {
     filler.remove()
     main.scrollTop = 0
-    buttons[0].click()
+    links[0].click()
     await settle()
   }
   console.log('App shell check passed')

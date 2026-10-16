@@ -9,6 +9,7 @@ import {
   SunIcon,
   WorkflowIcon,
 } from "lucide-react"
+import { Link } from "@tanstack/react-router"
 import { useTheme } from "@/components/theme-provider"
 import {
   Tooltip,
@@ -25,44 +26,31 @@ export const sections = [
   { id: "settings", label: "Project settings", icon: SettingsIcon },
 ] as const
 
-export type SectionId = (typeof sections)[number]["id"]
-
 const rowClass =
   "flex h-8 w-full items-center gap-2.5 rounded-md px-2 text-base text-foreground-dim outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
 
-export function AppSidebar({
-  activeSection,
-  onSelect,
-}: {
-  activeSection: SectionId
-  onSelect: (id: SectionId) => void
-}) {
+export function AppSidebar() {
   const { toggleTheme } = useTheme()
   const renderSection = ({
     id,
     label,
     icon: Icon,
   }: (typeof sections)[number]) => (
-    <button
+    <Link
       key={id}
-      type="button"
+      to={`/${id}`}
       data-section={id}
-      aria-current={activeSection === id ? "page" : undefined}
-      onClick={() => onSelect(id)}
       className={cn(
         rowClass,
-        activeSection === id && "bg-primary-muted font-medium text-foreground"
+        "group data-[status=active]:bg-primary-muted data-[status=active]:font-medium data-[status=active]:text-foreground"
       )}
     >
       <Icon
         aria-hidden="true"
-        className={cn(
-          "size-4 shrink-0 text-muted-foreground",
-          activeSection === id && "text-primary"
-        )}
+        className="size-4 shrink-0 text-muted-foreground group-data-[status=active]:text-primary"
       />
       {label}
-    </button>
+    </Link>
   )
   return (
     <aside
