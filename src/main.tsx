@@ -7,6 +7,7 @@ import { routeTree } from "./routeTree.gen"
 import { ThemeProvider } from "@/components/theme-provider.tsx"
 import { ExternalLinkGuard } from "./components/external-link-guard.tsx"
 import { DebugPanel } from "./components/debug-panel.tsx"
+import { isTauri } from "./lib/tauri"
 
 const router = createRouter({ routeTree })
 
@@ -15,6 +16,11 @@ declare module "@tanstack/react-router" {
     router: typeof router
   }
 }
+
+if (import.meta.env.DEV && !isTauri()) {
+  ;(await import("./lib/dev-ipc-mock")).installDevIpcMock()
+}
+window.addEventListener("focus", () => void router.invalidate())
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
