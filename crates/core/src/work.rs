@@ -112,6 +112,17 @@ pub enum WorkPacket {
     Finished(FinishedPacket),
 }
 
+impl WorkPacket {
+    /// Delegated work needs the agreed Brief before dispatch.
+    pub fn requires_brief(&self) -> bool {
+        match self {
+            WorkPacket::Task(task) => task.packet.context.execution == Execution::Subagent,
+            WorkPacket::Parallel(_) => true,
+            _ => false,
+        }
+    }
+}
+
 const LEDGER_DUTY: &str = include_str!("instructions/ledger.md");
 const OUTPUT_CONFIRMATION_DUTY: &str = include_str!("instructions/output-confirmation.md");
 const CONTEXT_AND_NAMING_DUTY: &str = include_str!("instructions/context-and-naming.md");

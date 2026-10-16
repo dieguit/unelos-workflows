@@ -18,10 +18,10 @@ pub use context::{
 };
 pub use definitions::*;
 pub use execution::{
-    parse_worker_result, read_brief, render_execution_package, ContinuationControl,
-    ExecutionControl, ExecutionEntry, ExecutionError, ExecutionIdentity, ExecutionOperation,
-    ExecutionPackage, ResumeContext, ResumeFile, RunCatalog, RunSummary, WorkerResult,
-    WorkerStatus,
+    parse_parallel_results, parse_worker_result, read_brief, render_execution_package,
+    ContinuationControl, ExecutionControl, ExecutionEntry, ExecutionError, ExecutionIdentity,
+    ExecutionOperation, ExecutionPackage, ResumeContext, ResumeFile, RunCatalog, RunSummary,
+    WorkerPrompt, WorkerResult, WorkerStatus,
 };
 pub use graph::{build_graph, GraphEdge, GraphNode, NodeKind, WorkflowGraph};
 pub use install::{

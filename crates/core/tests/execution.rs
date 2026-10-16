@@ -256,6 +256,7 @@ fn gate_reentry_rejects_old_activation_and_continuation_preserves_reports() {
     let report = std::fs::read(report_path).unwrap();
     let control = ContinuationControl {
         expected: implementation.expected.clone().unwrap(),
+        worker_key: None,
         answer: Some("Keep mobile".into()),
         progress: vec!["Read layout".into()],
     };
@@ -506,6 +507,7 @@ fn continuation_keeps_identity_and_rejects_stale_or_missing_brief() {
     let expected = ExecutionIdentity::from_packet(&packet).unwrap();
     let control = ContinuationControl {
         expected: expected.clone(),
+        worker_key: None,
         answer: Some("Keep mobile".into()),
         progress: vec!["Layout inspected".into()],
     };
