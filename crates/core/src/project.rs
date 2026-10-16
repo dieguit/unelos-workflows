@@ -89,6 +89,65 @@ pub fn list_workflows(project_root: &Utf8Path) -> Result<Vec<String>, ProjectLoa
 pub(crate) fn list_workflow_descriptions(
     project_root: &Utf8Path,
 ) -> Result<BTreeMap<String, Option<String>>, ProjectLoadError> {
+    let (root, names) = workflow_files(project_root)?;
+    let mut workflows = BTreeMap::new();
+    for name in names {
+        let project = load_project(&root, &name)?;
+        crate::validate_project(&project)?;
+        workflows.insert(name, project.workflow.description);
+    }
+    Ok(workflows)
+}
+
+/// One row per `.unelos/workflows/*.yaml`; a broken Workflow yields `problem`
+/// instead of failing the list. Only project-level problems return `Err`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowSummary {
+    pub name: String,
+    pub file: String,
+    pub description: Option<String>,
+    pub steps: usize,
+    pub problem: Option<String>,
+}
+
+pub fn workflow_summaries(
+    project_root: &Utf8Path,
+) -> Result<Vec<WorkflowSummary>, ProjectLoadError> {
+    let (root, names) = workflow_files(project_root)?;
+    Ok(names
+        .into_iter()
+        .map(|name| {
+            let file = format!("{name}.yaml");
+            match load_project(&root, &name) {
+                Ok(project) => WorkflowSummary {
+                    problem: crate::validate_project(&project)
+                        .err()
+                        .map(|error| format!("{}: {}", error.field, error.cause)),
+                    description: project.workflow.description.clone(),
+                    steps: project
+                        .workflow
+                        .nodes
+                        .values()
+                        .filter(|node| !matches!(node, NodeDefinition::End))
+                        .count(),
+                    name,
+                    file,
+                },
+                Err(error) => WorkflowSummary {
+                    problem: Some(error.to_string()),
+                    description: None,
+                    steps: 0,
+                    name,
+                    file,
+                },
+            }
+        })
+        .collect())
+}
+
+/// Resolved project root plus sorted Workflow names (file stems).
+fn workflow_files(project_root: &Utf8Path) -> Result<(Utf8PathBuf, Vec<String>), ProjectLoadError> {
     let root = absolute_root(project_root).map_err(|source| ProjectLoadError::Root {
         path: project_root.to_owned(),
         source,
@@ -110,7 +169,7 @@ pub(crate) fn list_workflow_descriptions(
     )?;
     let entries = match fs::read_dir(&directory) {
         Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok((root, Vec::new())),
         Err(source) => {
             return Err(ProjectLoadError::Read {
                 path: directory,
@@ -118,7 +177,7 @@ pub(crate) fn list_workflow_descriptions(
             })
         }
     };
-    let mut workflows = BTreeMap::new();
+    let mut names = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|source| ProjectLoadError::Read {
             path: directory.clone(),
@@ -143,11 +202,10 @@ pub(crate) fn list_workflow_descriptions(
                 name: path.to_string(),
             })?
             .to_owned();
-        let project = load_project(&root, &name)?;
-        crate::validate_project(&project)?;
-        workflows.insert(name, project.workflow.description);
+        names.push(name);
     }
-    Ok(workflows)
+    names.sort();
+    Ok((root, names))
 }
 
 fn read(path: &Utf8Path) -> Result<String, ProjectLoadError> {

@@ -28,7 +28,10 @@ pub use install::{
     check_install_path, check_project_init, export_workflow_agents, initialize_project,
     install_workflow, write_install_file, AgentExport, InstallError, WorkflowInstall,
 };
-pub use project::{list_workflows, load_project, LoadedProject, ProjectLoadError};
+pub use project::{
+    list_workflows, load_project, workflow_summaries, LoadedProject, ProjectLoadError,
+    WorkflowSummary,
+};
 pub use runtime::{
     approve, approve_node, complete, complete_node, confirm_outputs, execution_continue,
     execution_mutate, execution_new, execution_next, execution_resume, execution_runs,
