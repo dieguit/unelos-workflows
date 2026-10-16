@@ -1,47 +1,19 @@
-import type { CSSProperties } from "react"
-import { AppSidebar } from "@/components/app-sidebar"
-import { ChartAreaInteractive } from "@/components/chart-area-interactive"
-import { DataTable } from "@/components/data-table"
-import { SectionCards } from "@/components/section-cards"
+import { useState } from "react"
+import { AppSidebar, sections, type SectionId } from "@/components/app-sidebar"
 import { SiteHeader } from "@/components/site-header"
-import {
-  SidebarInset,
-  SidebarProvider,
-} from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { Greet } from "@/components/greet"
-import data from "@/app/dashboard/data.json"
 
 export default function App() {
+  const [activeSection, setActiveSection] = useState<SectionId>("workflows")
+  const section = sections.find(({ id }) => id === activeSection)!
   return (
     <TooltipProvider>
-      <SidebarProvider
-        style={
-          {
-            "--sidebar-width": "calc(var(--spacing) * 72)",
-            "--header-height": "calc(var(--spacing) * 12)",
-          } as CSSProperties
-        }
-      >
-        <AppSidebar variant="inset" />
-        <SidebarInset>
-          <SiteHeader />
-          <div className="flex flex-1 flex-col">
-            <div className="@container/main flex flex-1 flex-col gap-2">
-              <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
-                <SectionCards />
-                <div className="px-4 lg:px-6">
-                  <Greet />
-                </div>
-                <div className="px-4 lg:px-6">
-                  <ChartAreaInteractive />
-                </div>
-                <DataTable data={data} />
-              </div>
-            </div>
-          </div>
-        </SidebarInset>
-      </SidebarProvider>
+      <div className="flex h-full w-full overflow-hidden bg-background">
+        <AppSidebar activeSection={activeSection} onSelect={setActiveSection} />
+        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-none px-8 pt-6 pb-8">
+          <SiteHeader title={section.label} />
+        </main>
+      </div>
     </TooltipProvider>
   )
 }

@@ -30,3 +30,4 @@ dist-ssr
 docs/superpowers/
 docs/ignored/
 .superpowers/
+.playwright-mcp/
