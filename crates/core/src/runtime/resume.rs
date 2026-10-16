@@ -2,7 +2,6 @@ use super::{packet_for_snapshot, store::RunStore, CurrentWork};
 use crate::{
     read_brief, render_execution_package, ExecutionEntry, ExecutionError, ExecutionIdentity,
     ExecutionPackage, ResumeContext, ResumeFile, RunCatalog, RunState, RunSummary, RuntimeError,
-    WorkPacket,
 };
 use camino::Utf8Path;
 use std::{
@@ -175,7 +174,7 @@ pub fn execution_resume(root: &Utf8Path, run_id: &str) -> Result<ExecutionPackag
             ));
         }
     }
-    let delegated = matches!(&packet, WorkPacket::Task(task) if task.packet.context.execution == crate::Execution::Subagent);
+    let delegated = packet.requires_brief();
     let brief = if delegated {
         match read_brief(ledger.content.as_deref().unwrap_or("")) {
             Ok(brief) => Some(brief),
@@ -198,6 +197,7 @@ pub fn execution_resume(root: &Utf8Path, run_id: &str) -> Result<ExecutionPackag
     if !issues.is_empty() {
         package.status = "needs-context".into();
         package.worker_prompt = None;
+        package.worker_prompts.clear();
     }
     package.run_id = Some(state.run_id.clone());
     package.entry_mode = Some(ExecutionEntry::Resume);

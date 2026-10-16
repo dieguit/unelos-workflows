@@ -1,8 +1,8 @@
 use super::{artifacts, completion, gates, packet_for_state, store, CurrentWork, RunState};
 use crate::{
-    parse_worker_result, read_brief, render_execution_package, ContinuationControl,
-    ExecutionControl, ExecutionError, ExecutionIdentity, ExecutionOperation, ExecutionPackage,
-    LoadedProject, RuntimeError, WorkPacket, WorkerStatus,
+    parse_parallel_results, parse_worker_result, read_brief, render_execution_package,
+    ContinuationControl, ExecutionControl, ExecutionError, ExecutionIdentity, ExecutionOperation,
+    ExecutionPackage, LoadedProject, RuntimeError, WorkPacket, WorkerStatus,
 };
 use camino::Utf8Path;
 
@@ -18,8 +18,7 @@ fn package_from_state(
     continuation: Option<&ContinuationControl>,
 ) -> Result<ExecutionPackage, ExecutionError> {
     let packet = packet_for_state(project, state)?;
-    let brief = if matches!(&packet, WorkPacket::Task(task) if task.packet.context.execution == crate::Execution::Subagent)
-    {
+    let brief = if packet.requires_brief() {
         let path = project
             .project_root
             .join(".unelos/runs")
@@ -61,6 +60,16 @@ fn assert_identity(state: &RunState, expected: &ExecutionIdentity) -> Result<(),
             run_id == &state.run_id
                 && node_id == &record.node_id
                 && activation_id == &record.execution_id
+        }
+        (
+            CurrentWork::Parallel(record),
+            ExecutionIdentity::Parallel {
+                run_id,
+                node_id,
+                task_id,
+            },
+        ) => {
+            run_id == &state.run_id && node_id == &record.node_id && task_id == &record.execution_id
         }
         _ => false,
     };
@@ -133,7 +142,7 @@ pub fn execution_mutate(
     let project = project_for(root, &state)?;
     let candidate = match operation {
         ExecutionOperation::Complete => {
-            let CurrentWork::Task(record) = &state.current else {
+            let (CurrentWork::Task(record) | CurrentWork::Parallel(record)) = &state.current else {
                 return Err(ExecutionError::protocol(
                     "invalid_control",
                     "Completion requires a Task",
@@ -151,29 +160,46 @@ pub fn execution_mutate(
                     "Completion requires an inspected result",
                 )
             })?;
-            let result = parse_worker_result(text, &control.expected)?;
-            if result.status != WorkerStatus::Finished {
-                return Err(ExecutionError::protocol(
-                    "invalid_worker_result",
-                    "Only FINISHED work can complete",
-                ));
-            }
-            let WorkPacket::Task(task) = packet_for_state(&project, &state)? else {
-                unreachable!()
-            };
-            let outcomes = &task.packet.context.outcomes;
-            if result.outcome != control.outcome
-                || match &control.outcome {
-                    Some(outcome) => !outcomes.contains(outcome),
-                    None => !outcomes.is_empty(),
+            match packet_for_state(&project, &state)? {
+                WorkPacket::Task(task) => {
+                    let result = parse_worker_result(text, &control.expected)?;
+                    if result.status != WorkerStatus::Finished {
+                        return Err(ExecutionError::protocol(
+                            "invalid_worker_result",
+                            "Only FINISHED work can complete",
+                        ));
+                    }
+                    let outcomes = &task.packet.context.outcomes;
+                    if result.outcome != control.outcome
+                        || match &control.outcome {
+                            Some(outcome) => !outcomes.contains(outcome),
+                            None => !outcomes.is_empty(),
+                        }
+                    {
+                        return Err(ExecutionError::protocol(
+                            "invalid_outcome",
+                            "Select exactly one declared outcome, or none for ordinary work",
+                        ));
+                    }
                 }
-            {
-                return Err(ExecutionError::protocol(
-                    "invalid_outcome",
-                    "Select exactly one declared outcome, or none for ordinary work",
-                ));
+                WorkPacket::Parallel(parallel) => {
+                    if control.outcome.is_some() {
+                        return Err(ExecutionError::protocol(
+                            "invalid_outcome",
+                            "Parallel parents have no outcomes",
+                        ));
+                    }
+                    let keys: Vec<String> =
+                        parallel.workers.iter().map(|w| w.key.clone()).collect();
+                    parse_parallel_results(text, &control.expected, &keys)?;
+                }
+                _ => unreachable!(),
             }
-            for output in &record.outputs {
+            for output in record
+                .outputs
+                .iter()
+                .chain(record.worker_reports.iter().map(|r| &r.report))
+            {
                 artifacts::require_regular_file(&output.path).map_err(|cause| {
                     ExecutionError::protocol(
                         "missing_output",
@@ -182,7 +208,9 @@ pub fn execution_mutate(
                 })?;
             }
             let mut confirmed = state.clone();
-            if let CurrentWork::Task(record) = &mut confirmed.current {
+            if let CurrentWork::Task(record) | CurrentWork::Parallel(record) =
+                &mut confirmed.current
+            {
                 record.confirmed_execution_id = Some(record.execution_id.clone());
             }
             completion::prepare_completion(
