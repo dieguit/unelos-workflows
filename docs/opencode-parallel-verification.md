@@ -43,7 +43,7 @@ Run `r-000001`, main session `ses_…3COtilS`; worker sessions `ses_…lrQsreGUg
 
 ## Observations
 
-### 1. Concurrent dispatch — PASS (with one deviation)
+### 1. Overlapping workers — PASS; single-message dispatch NOT observed
 
 Both `subagent` calls had `background:true`, used the package's `nativeAgent`,
 and their prompts were byte-identical to `workerPrompts[i].prompt`. Each
@@ -57,12 +57,16 @@ Timestamps (UTC, from tool `time`, child session messages and frames):
 | first worker result | 01:23:01.355 (w2 NEEDS_CONTEXT) | 01:27:38.211 (w1 FINISHED) |
 | other worker result | 01:23:42.217 (w1 FINISHED) | 01:27:59.915 (w2 FINISHED) |
 
-Both workers started before either result in both passes; in pass 1 they ran
-overlapped for ~15 s and backend kept running for 41 s after the frontend
+Both workers started before either result in both passes, so the two background
+workers did overlap. Pass 1: worker-2 started ~15.7 s after worker-1 (start gap,
+not overlap length); both were then running for ~14.7 s until the first result
+(worker-2 NEEDS_CONTEXT), and backend kept running ~41 s past the frontend
 question. **Deviation:** the controller emitted the two calls in two consecutive
 model steps of the same user turn (separate assistant messages, ~15 s apart
-while generating the second long prompt), not two calls in one message. In
-pass 2 the margin was ~1.1 s. This is model behavior, not adapter/core: the
+while generating the second long prompt), not two calls in one message; so
+single-message dispatch was not observed. Pass 2: start gap ~17.6 s; both ran
+together only ~1.1 s (worker-2 started 01:27:37.075, worker-1 FINISHED
+01:27:38.211). This is model behavior, not adapter/core: the
 package contains both prompts and the harness instruction says "in one turn …
 for every entry before waiting". Concurrency is shown by start/result
 timestamps, not by file existence.
@@ -117,11 +121,17 @@ rewritten to the copy; real run untouched):
 | Probe `resultText` | Result |
 | --- | --- |
 | worker-1 FINISHED only | `invalid_worker_result`: "Missing or unfinished worker results: worker-2" |
-| worker-1 FINISHED + worker-2 BLOCKED | `invalid_worker_result`: "Worker result does not match the expected execution" |
+| worker-1 FINISHED + worker-2 BLOCKED (probe frame as sent) | `invalid_worker_result`: "Worker result does not match the expected execution" |
 | both FINISHED | accepted → `synthesis` task-6 |
 
-Copy state stayed `parallel task-5` after both rejections. The BLOCKED message
-is generic rather than naming the unfinished key (minor).
+Copy state stayed `parallel task-5` after both rejections. The original BLOCKED
+probe frame was not preserved and, by the message, was malformed (that text is
+`validate_frame`'s rejection of a frame that fails shape/identity checks, e.g. a
+BLOCKED frame without a nonempty `reason`). Core is not generic here: re-run
+afterwards on a fresh throwaway run at a parallel task, a well-formed BLOCKED
+`parallel-worker` frame (nonempty `reason`) alongside worker-1 FINISHED is
+rejected with `invalid_worker_result`: "Missing or unfinished worker results:
+worker-2"; the same frame without `reason` gives the "does not match" message.
 
 ### 4. Ledger written only by controller — PASS
 

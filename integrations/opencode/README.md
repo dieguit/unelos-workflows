@@ -100,6 +100,7 @@ Parallel Nodes (V2 only) supply `workerPrompts[]`, each with its own mapped
 `nativeAgent`. The controller starts every worker with `background=true` in one
 turn, relays a worker's question with `unelos_continue` + `workerKey`, writes the
 aggregate itself, then completes the parent with every worker's final frame.
+
 Core validates result frames; gate decisions still require real human intent.
 `mutation_uncertain` requires explicit run-list/state reconciliation, never retrying
 start automatically. CLI run-specific commands require `--run RUN_ID`.
