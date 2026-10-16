@@ -1,15 +1,13 @@
 import {
   BookOpenIcon,
   BotIcon,
-  ChevronsUpDownIcon,
-  FolderGit2Icon,
   HistoryIcon,
   MoonIcon,
   SettingsIcon,
   SunIcon,
   WorkflowIcon,
 } from "lucide-react"
-import { Link } from "@tanstack/react-router"
+import { Link, useRouteContext } from "@tanstack/react-router"
 import { useTheme } from "@/components/theme-provider"
 import {
   Tooltip,
@@ -17,6 +15,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { ProjectSelector } from "./project-selector"
 
 export const sections = [
   { id: "workflows", label: "Workflows", icon: WorkflowIcon },
@@ -31,27 +30,49 @@ const rowClass =
 
 export function AppSidebar() {
   const { toggleTheme } = useTheme()
+  const { project } = useRouteContext({ from: "__root__" })
   const renderSection = ({
     id,
     label,
     icon: Icon,
-  }: (typeof sections)[number]) => (
-    <Link
-      key={id}
-      to={`/${id}`}
-      data-section={id}
-      className={cn(
-        rowClass,
-        "group data-[status=active]:bg-primary-muted data-[status=active]:font-medium data-[status=active]:text-foreground"
-      )}
-    >
-      <Icon
-        aria-hidden="true"
-        className="size-4 shrink-0 text-muted-foreground group-data-[status=active]:text-primary"
-      />
-      {label}
-    </Link>
-  )
+  }: (typeof sections)[number]) =>
+    !project ? (
+      <Tooltip key={id}>
+        <TooltipTrigger
+          render={
+            <span
+              role="link"
+              aria-disabled="true"
+              data-section={id}
+              className={cn(
+                rowClass,
+                "cursor-default text-foreground-disabled hover:bg-transparent"
+              )}
+            />
+          }
+        >
+          <Icon aria-hidden="true" className="size-4 shrink-0" />
+          {label}
+        </TooltipTrigger>
+        <TooltipContent side="right">Open a project first</TooltipContent>
+      </Tooltip>
+    ) : (
+      <Link
+        key={id}
+        to={`/${id}`}
+        data-section={id}
+        className={cn(
+          rowClass,
+          "group data-[status=active]:bg-primary-muted data-[status=active]:font-medium data-[status=active]:text-foreground"
+        )}
+      >
+        <Icon
+          aria-hidden="true"
+          className="size-4 shrink-0 text-muted-foreground group-data-[status=active]:text-primary"
+        />
+        {label}
+      </Link>
+    )
   return (
     <aside
       aria-label="Project sidebar"
@@ -66,41 +87,7 @@ export function AppSidebar() {
         </span>
         <span className="text-base font-semibold">Unelos</span>
       </div>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <button
-              type="button"
-              aria-disabled="true"
-              aria-label="Sample project unelos-app at /home/dieguit/projects/unelos/unelos-app; project selection is not wired yet"
-              className="flex w-full items-center gap-2.5 rounded-md border bg-card p-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            />
-          }
-        >
-          <span className="flex size-7 shrink-0 items-center justify-center rounded-sm bg-secondary">
-            <FolderGit2Icon
-              aria-hidden="true"
-              className="size-4 text-primary"
-            />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-base font-semibold">
-              unelos-app
-            </span>
-            <span className="block truncate font-mono text-xs text-muted-foreground">
-              ~/…/unelos-app
-            </span>
-          </span>
-          <ChevronsUpDownIcon
-            aria-hidden="true"
-            className="size-3.5 shrink-0 text-muted-foreground"
-          />
-        </TooltipTrigger>
-        <TooltipContent side="right">
-          Sample project: /home/dieguit/projects/unelos/unelos-app. Project
-          selection is not wired yet.
-        </TooltipContent>
-      </Tooltip>
+      <ProjectSelector />
       <nav aria-label="Project sections" className="flex flex-col gap-0.5">
         {sections.slice(0, 4).map(renderSection)}
       </nav>
