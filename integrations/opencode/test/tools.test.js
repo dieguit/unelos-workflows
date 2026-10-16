@@ -153,3 +153,18 @@ test('transport times out a hung CLI without retrying',async t=>{
   await assert.rejects(module.callCli(f.binary,f.project,['execution','next','--json']),{code:'cli_failed'});
   assert.equal(f.calls().length,1);
 });
+
+test('v2: parallel package maps every worker and forwards workerKey continuations',async t=>{
+  const f=await fixture(t,'v2');
+  const parallel={kind:'parallel',runId:'r-1',nodeId:'parallel-research',taskId:'task-4'};
+  assert.ok(module.toolSchemas.complete.properties.expected.properties.kind.enum.includes('parallel'));
+  assert.deepEqual(module.toolSchemas.continue.properties.workerKey,{type:'string'});
+  writeFileSync(f.project+'/package',JSON.stringify({...pkg,expected:parallel,packet:{kind:'parallel'},workerPrompt:null,
+    workerPrompts:[{key:'worker-1',agent:'backend-researcher',prompt:'B'},{key:'worker-2',agent:'frontend-researcher',prompt:'F'}]}));
+  await f.command('');await f.call('unelos_start',{workflow:'parallel-research'});
+  const value=JSON.parse((await f.call('unelos_continue',{expected:parallel,workerKey:'worker-2',answer:'Yes',progress:[]})).content);
+  assert.deepEqual(value.workerPrompts.map(w=>[w.key,w.prompt,w.nativeAgent]),[['worker-1','B','unelos-backend-researcher'],['worker-2','F','unelos-frontend-researcher']]);
+  assert.equal(value.nativeAgent,undefined);
+  assert.match(value.harnessInstructions,/background=true/);
+  assert.deepEqual(f.calls().at(-1).input,{expected:parallel,workerKey:'worker-2',answer:'Yes',progress:[]});
+});

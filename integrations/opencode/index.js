@@ -6,14 +6,14 @@ const OWNER='unelos.opencode';
 const fail=(code,message)=>Object.assign(new Error(message),{code});
 const object=(properties={},required=[])=>({type:'object',properties,required,additionalProperties:false});
 const string={type:'string'};
-const identity=object({kind:{type:'string',enum:['task','human-gate']},runId:string,nodeId:string,taskId:string,activationId:string},['kind','runId','nodeId']);
+const identity=object({kind:{type:'string',enum:['task','human-gate','parallel']},runId:string,nodeId:string,taskId:string,activationId:string},['kind','runId','nodeId']);
 const descriptions={next:'Read the selected Unelos execution package',start:'Start a fresh Unelos workflow and bind this session',resume:'Bind the explicitly selected unfinished run and immediately continue using core resume context',complete:'Complete the expected Unelos Task after inspection',approve:'Record explicit approval of the expected human gate',reject:'Reject the expected human gate with actionable feedback',continue:'Prepare a same-Task worker continuation',status:'Read selected Unelos status',inspect:'Inspect a Unelos workflow or Node',rename:'Name the selected Unelos run'};
 
 export const toolSchemas={
   next:object(),start:object({workflow:string,name:string},['workflow']),resume:object({runId:string},['runId']),
   complete:object({expected:identity,resultText:string,outcome:string},['expected','resultText']),
   approve:object({expected:identity},['expected']),reject:object({expected:identity,reason:string},['expected','reason']),
-  continue:object({expected:identity,answer:string,progress:{type:'array',items:string}},['expected','progress']),
+  continue:object({expected:identity,workerKey:string,answer:string,progress:{type:'array',items:string}},['expected','progress']),
   status:object(),inspect:object({workflow:string,node:string},['workflow']),rename:object({name:string,runId:string},['name','runId']),
 };
 
@@ -59,11 +59,14 @@ function binaryOption(options) {
 function mapping(version) {
   return 'Native Unelos tools: '+Object.keys(toolSchemas).map(name=>'unelos_'+name).join(', ')+'.\n'
     +(version==='v1'?'Native worker: task(subagent_type=nativeAgent, prompt=workerPrompt, task_id for continuation).'
-      :'Native worker: subagent(agent=nativeAgent, prompt=workerPrompt, sessionID for continuation).');
+      :'Native worker: subagent(agent=nativeAgent, prompt=workerPrompt, sessionID for continuation).\n'
+        +'Parallel workers: in one turn call subagent(agent=workerPrompts[i].nativeAgent, prompt=workerPrompts[i].prompt, background=true) for every entry before waiting; continue one worker with its sessionID.');
 }
 
 function nativePackage(value,version) {
-  return {...value,...(value.workerPrompt&&value.packet?.agent?{nativeAgent:'unelos-'+value.packet.agent}:{}),harnessInstructions:mapping(version)};
+  return {...value,...(value.workerPrompt&&value.packet?.agent?{nativeAgent:'unelos-'+value.packet.agent}:{}),
+    ...(value.workerPrompts?.length?{workerPrompts:value.workerPrompts.map(w=>({...w,nativeAgent:'unelos-'+w.agent}))}:{}),
+    harnessInstructions:mapping(version)};
 }
 
 function bridge(binary,version,get,update,directory) {
@@ -121,7 +124,7 @@ function bridge(binary,version,get,update,directory) {
         case 'resume':argv=['execution','resume','--run',input.runId];break;
         case 'complete':case 'approve':case 'reject':
           argv=['execution',name,'--run',active.runId];control={expected:input.expected,resultText:input.resultText??null,outcome:input.outcome??null,reason:input.reason??null};break;
-        case 'continue':argv=['execution','continue','--run',active.runId];control={expected:input.expected,answer:input.answer??null,progress:input.progress};break;
+        case 'continue':argv=['execution','continue','--run',active.runId];control={expected:input.expected,workerKey:input.workerKey??null,answer:input.answer??null,progress:input.progress};break;
         case 'status':argv=['status','--run',active.runId];break;
         case 'inspect':argv=['inspect',input.workflow,...(input.node?['--node',input.node]:[])];break;
         case 'rename':argv=['rename',input.name,'--run',active.runId];break;
