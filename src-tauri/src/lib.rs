@@ -49,6 +49,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             projects::project_state,
             projects::open_project,
+            projects::pick_project,
             projects::remove_recent,
             projects::list_workflows
         ])

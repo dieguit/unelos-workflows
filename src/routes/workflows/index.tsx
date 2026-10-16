@@ -13,7 +13,10 @@ import { NoResults, NoWorkflows } from "./-components/workflows-empty"
 
 export const Route = createFileRoute("/workflows/")({
   beforeLoad: requireProject,
-  loader: ({ context }) => listWorkflows(context.project.path),
+  loader: async ({ context }) => ({
+    root: context.project.path,
+    workflows: await listWorkflows(context.project.path),
+  }),
   component: WorkflowsHome,
   errorComponent: WorkflowsError,
 })
@@ -38,7 +41,9 @@ const isEditable = (el: EventTarget | null) =>
   (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName))
 
 function WorkflowsHome() {
-  const workflows = Route.useLoaderData()
+  const data = Route.useLoaderData()
+  const { project } = Route.useRouteContext()
+  const workflows = data.root === project.path ? data.workflows : []
   const [query, setQuery] = useState("")
   const search = useRef<HTMLInputElement>(null)
   const shown = filterWorkflows(workflows, query)
@@ -54,6 +59,14 @@ function WorkflowsHome() {
     document.addEventListener("keydown", onKey)
     return () => document.removeEventListener("keydown", onKey)
   }, [])
+
+  if (data.root !== project.path)
+    return (
+      <div role="status" className="flex flex-col gap-6">
+        <Header />
+        <p>Loading workflows…</p>
+      </div>
+    )
 
   if (workflows.length === 0)
     return (

@@ -17,13 +17,33 @@ fn project_copy() -> (TempDir, Utf8PathBuf) {
 const MISSING_AGENT: &str = "name: broken\nstart: a\nnodes:\n  a:\n    task: create-plan\n    agent: ghost\n    next: done\n  done:\n    type: end\n";
 
 #[test]
+fn summaries_sort_filenames_not_stems() {
+    let (_temp, root) = project_copy();
+    let source = root.join(".unelos/workflows/implement-feature.yaml");
+    for name in ["a", "a.b"] {
+        let yaml = fs::read_to_string(&source)
+            .unwrap()
+            .replace("name: implement-feature", &format!("name: {name}"));
+        fs::write(root.join(format!(".unelos/workflows/{name}.yaml")), yaml).unwrap();
+    }
+    let rows = workflow_summaries(&root).unwrap();
+    assert_eq!((&*rows[0].file, &*rows[1].file), ("a.b.yaml", "a.yaml"));
+    let names = list_workflows(&root).unwrap();
+    assert_eq!((&*names[0], &*names[1]), ("a", "a.b"));
+}
+
+#[test]
 fn valid_rows_count_steps_without_end_and_sort_by_file() {
     let (_temp, root) = project_copy();
     let rows = workflow_summaries(&root).unwrap();
     let files: Vec<_> = rows.iter().map(|r| r.file.as_str()).collect();
     assert_eq!(
         files,
-        ["completion-loop.yaml", "implement-feature.yaml", "research-feature.yaml"]
+        [
+            "completion-loop.yaml",
+            "implement-feature.yaml",
+            "research-feature.yaml"
+        ]
     );
     let implement = &rows[1];
     assert_eq!(implement.name, "implement-feature");
@@ -41,15 +61,28 @@ fn invalid_workflow_becomes_problem_row_and_keeps_others() {
     assert_eq!(broken.steps, 1);
     let problem = broken.problem.as_deref().unwrap();
     assert!(problem.contains("ghost"), "{problem}");
-    assert!(!problem.contains(root.as_str()), "problem should not repeat the file path: {problem}");
-    assert!(rows.iter().filter(|r| r.name != "broken").all(|r| r.problem.is_none()));
-    assert!(list_workflows(&root).is_err(), "list_workflows keeps fail-fast behavior");
+    assert!(
+        !problem.contains(root.as_str()),
+        "problem should not repeat the file path: {problem}"
+    );
+    assert!(rows
+        .iter()
+        .filter(|r| r.name != "broken")
+        .all(|r| r.problem.is_none()));
+    assert!(
+        list_workflows(&root).is_err(),
+        "list_workflows keeps fail-fast behavior"
+    );
 }
 
 #[test]
 fn unparseable_workflow_becomes_problem_row() {
     let (_temp, root) = project_copy();
-    fs::write(root.join(".unelos/workflows/garbage.yaml"), "name: [unclosed").unwrap();
+    fs::write(
+        root.join(".unelos/workflows/garbage.yaml"),
+        "name: [unclosed",
+    )
+    .unwrap();
     let rows = workflow_summaries(&root).unwrap();
     let garbage = rows.iter().find(|r| r.name == "garbage").unwrap();
     assert_eq!((garbage.steps, garbage.description.as_deref()), (0, None));

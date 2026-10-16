@@ -1,7 +1,7 @@
 import { useRouter } from "@tanstack/react-router"
 import { revealItemInDir } from "@tauri-apps/plugin-opener"
 import { toast } from "sonner"
-import { openProject, pickFolder, removeRecentProject } from "@/lib/projects"
+import { openProject, pickProject, removeRecentProject } from "@/lib/projects"
 
 export function useProjectActions() {
   const router = useRouter()
@@ -21,8 +21,11 @@ export function useProjectActions() {
     openPath,
     pickAndOpen: async () => {
       try {
-        const path = await pickFolder()
-        if (path) await openPath(path)
+        const state = await pickProject()
+        if (state) {
+          await router.invalidate()
+          await router.navigate({ to: "/workflows" })
+        }
       } catch (error) {
         fail(error)
       }
@@ -35,10 +38,14 @@ export function useProjectActions() {
         fail(error)
       }
     },
-    copyPath: (path: string) =>
-      navigator.clipboard
-        .writeText(path)
-        .then(() => void toast.success("Path copied"), fail),
+    copyPath: async (path: string) => {
+      try {
+        await navigator.clipboard.writeText(path)
+        toast.success("Path copied")
+      } catch (error) {
+        fail(error)
+      }
+    },
     reveal: (path: string) => revealItemInDir(path).catch(fail),
   }
 }

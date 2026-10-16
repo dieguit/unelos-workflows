@@ -115,7 +115,7 @@ pub fn workflow_summaries(
     project_root: &Utf8Path,
 ) -> Result<Vec<WorkflowSummary>, ProjectLoadError> {
     let (root, names) = workflow_files(project_root)?;
-    Ok(names
+    let mut summaries: Vec<_> = names
         .into_iter()
         .map(|name| {
             let file = format!("{name}.yaml");
@@ -143,7 +143,9 @@ pub fn workflow_summaries(
                 },
             }
         })
-        .collect())
+        .collect();
+    summaries.sort_by(|a, b| a.file.cmp(&b.file));
+    Ok(summaries)
 }
 
 /// Resolved project root plus sorted Workflow names (file stems).

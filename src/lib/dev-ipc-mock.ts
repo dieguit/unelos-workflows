@@ -4,6 +4,7 @@ import type { ProjectState, WorkflowSummary } from "./projects"
 const home = "/home/dieguit"
 const day = 86_400_000
 const mode = new URLSearchParams(location.search).get("mock")
+const pick = new URLSearchParams(location.search).get("pick")
 
 const state: ProjectState = {
   home,
@@ -28,29 +29,39 @@ const workflows: WorkflowSummary[] =
       ]
 
 export function installDevIpcMock() {
-  mockIPC((cmd, args) => {
+  mockIPC(async (cmd, args) => {
     const path = (args as { path?: string })?.path
     switch (cmd) {
       case "project_state":
         return structuredClone(state)
+      case "pick_project":
       case "open_project": {
-        const entry = state.recents.find((r) => r.path === path)
-        if (path?.endsWith("/plain")) throw "plain is not a Unelos project (no .unelos folder)"
+        if (cmd === "pick_project" && pick === "cancel") return null
+        if (cmd === "pick_project" && pick === "plain") throw "plain is not a Unelos project (missing .unelos/project.yaml)"
+        const selected = cmd === "pick_project" ? `${home}/work/api-gateway` : path
+        const entry = state.recents.find((r) => r.path === selected)
+        if (cmd === "open_project" && !entry) throw "Project is not approved; select it using Open folder…"
         if (entry && !entry.available) throw `${entry.name} couldn’t be opened: the folder no longer exists`
         state.recents = [
-          { path: path!, name: path!.split("/").pop()!, openedAt: Date.now(), available: true },
-          ...state.recents.filter((r) => r.path !== path),
+          { path: selected!, name: selected!.split("/").pop()!, openedAt: Date.now(), available: true },
+          ...state.recents.filter((r) => r.path !== selected),
         ]
         return structuredClone(state)
       }
       case "remove_recent":
         state.recents = state.recents.filter((r) => r.path !== path)
         return structuredClone(state)
-      case "list_workflows":
+      case "list_workflows": {
+        const root = (args as { root: string }).root
+        if (!state.recents.some((r) => r.path === root && r.available)) throw "Project is not approved"
         if (mode === "error") throw "missing file /x/.unelos/project.yaml"
+        if (mode === "switch") {
+          await new Promise((resolve) => setTimeout(resolve, 900))
+          const name = root.split("/").pop()!
+          return workflows.map((w) => ({ ...w, name: `${name}: ${w.name}`, file: `${name}-${w.file}` }))
+        }
         return structuredClone(workflows)
-      case "plugin:dialog|open":
-        return `${home}/work/api-gateway`
+      }
       case "plugin:opener|reveal_item_in_dir":
         return null
     }

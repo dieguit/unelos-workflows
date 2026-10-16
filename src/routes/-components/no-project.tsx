@@ -20,7 +20,9 @@ export function NoProject() {
           <TriangleAlertIcon className="text-warning" />
           <AlertTitle>{lost.name} couldn’t be opened</AlertTitle>
           <AlertDescription>
-            The folder {shortPath(lost.path, home, 9)} no longer exists. It may have been moved, renamed or deleted.
+            The project at <span className="break-all">{lost.path}</span> is
+            unavailable. The folder may have moved or its .unelos/project.yaml
+            may be missing.
             <div className="mt-3 flex gap-2">
               <Button size="sm" variant="outline" onClick={() => void pickAndOpen()}>
                 <FolderOpenIcon /> Locate folder…

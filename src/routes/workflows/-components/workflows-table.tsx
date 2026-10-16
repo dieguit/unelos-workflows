@@ -45,7 +45,12 @@ function Truncated({ text, className }: { text: string; className?: string }) {
   return (
     <Tooltip>
       <TooltipTrigger
-        render={<span className={`block truncate ${className ?? ""}`} />}
+        render={
+          <span
+            tabIndex={0}
+            className={`block truncate outline-offset-2 focus-visible:outline-2 focus-visible:outline-ring ${className ?? ""}`}
+          />
+        }
       >
         {text}
       </TooltipTrigger>
@@ -64,10 +69,15 @@ function Definition({ problem }: { problem: string | null }) {
   return (
     <Tooltip>
       <TooltipTrigger
-        render={<Badge className="max-w-full bg-warning-muted text-warning" />}
+        render={
+          <Badge
+            tabIndex={0}
+            className="max-w-full bg-warning-muted text-warning outline-offset-2 focus-visible:outline-2 focus-visible:outline-ring"
+          />
+        }
       >
         <TriangleAlertIcon />
-        <span className="truncate">{problem.split(": ").pop()}</span>
+        <span className="truncate">{problem}</span>
       </TooltipTrigger>
       <TooltipContent className="max-w-sm">{problem}</TooltipContent>
     </Tooltip>

@@ -1,5 +1,4 @@
 import { redirect } from "@tanstack/react-router"
-import { open } from "@tauri-apps/plugin-dialog"
 import { trackedInvoke } from "./tauri"
 
 export type RecentProject = {
@@ -25,10 +24,7 @@ export const removeRecentProject = (path: string) =>
 export const listWorkflows = (root: string) =>
   trackedInvoke<WorkflowSummary[]>("list_workflows", { root })
 
-export async function pickFolder() {
-  const path = await open({ directory: true, multiple: false })
-  return typeof path === "string" ? path : null
-}
+export const pickProject = () => trackedInvoke<ProjectState | null>("pick_project")
 
 export function requireProject({
   context,
