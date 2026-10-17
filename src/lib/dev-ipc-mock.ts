@@ -1,5 +1,5 @@
 import { mockIPC } from "@tauri-apps/api/mocks"
-import type { ProjectState, WorkflowSummary } from "./projects"
+import type { AgentSummary, ProjectState, SkillSummary, WorkflowSummary } from "./projects"
 
 const home = "/home/dieguit"
 const day = 86_400_000
@@ -27,6 +27,19 @@ const workflows: WorkflowSummary[] =
         { name: "Review change", file: "review-change.yaml", description: "Independent review of a diff with a findings report and human sign-off.", steps: 3, problem: "nodes.review.agent: Agent reference missing" },
         { name: "Refactor module", file: "refactor-module.yaml", description: "Map affected code, refactor in parallel slices and verify behavior is unchanged.", steps: 6, problem: null },
       ]
+
+const agents: AgentSummary[] = [
+  { name: "broken", model: null, skills: [], mcps: [], problem: "model: expected a string" },
+  { name: "engineer", model: "provider/fast", skills: ["rust", "typescript"], mcps: ["github"], problem: null },
+  { name: "reviewer", model: null, skills: [], mcps: [], problem: null },
+]
+
+const skills: SkillSummary[] = [
+  { name: "broken", description: null, problem: "frontmatter: missing closing ---" },
+  { name: "code-review", description: "Review code for correctness and missing tests.", problem: null },
+  { name: "planning", description: "Write a concrete implementation plan from the request.", problem: null },
+  { name: "rust", description: null, problem: null },
+]
 
 export function installDevIpcMock() {
   mockIPC(async (cmd, args) => {
@@ -61,6 +74,25 @@ export function installDevIpcMock() {
           return workflows.map((w) => ({ ...w, name: `${name}: ${w.name}`, file: `${name}-${w.file}` }))
         }
         return structuredClone(workflows)
+      }
+      case "list_agents": {
+        const root = (args as { root: string }).root
+        if (!state.recents.some((r) => r.path === root && r.available)) throw "Project is not approved"
+        if (mode === "error") throw "missing file /x/.unelos/project.yaml"
+        if (mode === "empty") return []
+        if (mode === "switch") {
+          await new Promise((resolve) => setTimeout(resolve, 900))
+          const name = root.split("/").pop()!
+          return agents.filter((a) => !a.problem).map((a) => ({ ...a, name: `${name}-${a.name}` }))
+        }
+        return structuredClone(agents)
+      }
+      case "list_skills": {
+        const root = (args as { root: string }).root
+        if (!state.recents.some((r) => r.path === root && r.available)) throw "Project is not approved"
+        if (mode === "error") throw "missing file /x/.unelos/project.yaml"
+        if (mode === "empty") return []
+        return structuredClone(skills)
       }
       case "plugin:opener|reveal_item_in_dir":
         return null

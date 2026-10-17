@@ -228,6 +228,28 @@ pub fn list_workflows(
     unelos_core::workflow_summaries(root).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub async fn list_agents(app: AppHandle, root: String) -> Result<Vec<unelos_core::AgentSummary>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = approved_root(&load_from(&store_file(&app)?), Path::new(&root))?;
+        let root = camino::Utf8Path::from_path(&root).ok_or("Project path is not UTF-8")?;
+        unelos_core::agent_summaries(root).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn list_skills(app: AppHandle, root: String) -> Result<Vec<unelos_core::SkillSummary>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = approved_root(&load_from(&store_file(&app)?), Path::new(&root))?;
+        let root = camino::Utf8Path::from_path(&root).ok_or("Project path is not UTF-8")?;
+        unelos_core::skill_summaries(root).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -304,6 +326,19 @@ mod tests {
             .contains("project.yaml"));
         forget(&mut store, picked.to_str().unwrap());
         assert!(approved_root(&store, &picked).is_err());
+    }
+
+    #[test]
+    fn agent_reads_require_an_approved_project_root() {
+        let temp = TempDir::new().unwrap();
+        let root = fs::canonicalize(project(&temp, "agents-project")).unwrap();
+        assert!(approved_root(&Store::default(), &root).is_err());
+        let mut store = Store::default();
+        push_recent(&mut store, root.to_str().unwrap().to_owned(), 1);
+        let approved = approved_root(&store, &root).unwrap();
+        let result =
+            unelos_core::agent_summaries(camino::Utf8Path::from_path(&approved).unwrap()).unwrap();
+        assert!(result.is_empty());
     }
 
     #[cfg(unix)]

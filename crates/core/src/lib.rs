@@ -29,7 +29,8 @@ pub use install::{
     install_workflow, write_install_file, AgentExport, InstallError, WorkflowInstall,
 };
 pub use project::{
-    list_workflows, load_project, workflow_summaries, LoadedProject, ProjectLoadError,
+    agent_summaries, list_workflows, load_project, skill_summaries, workflow_summaries,
+    AgentSummary, LoadedProject, ProjectLoadError, SkillSummary,
     WorkflowSummary,
 };
 pub use runtime::{

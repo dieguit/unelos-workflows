@@ -17,6 +17,7 @@
         "title": "unelos-app",
         "width": 1400,
         "height": 918,
+        "minWidth": 1100,
         "center": true,
         "visible": false
       }

@@ -47,7 +47,7 @@ fn valid_rows_count_steps_without_end_and_sort_by_file() {
     );
     let implement = &rows[1];
     assert_eq!(implement.name, "implement-feature");
-    assert_eq!(implement.steps, 4);
+    assert_eq!(implement.steps, Some(4));
     assert_eq!(implement.problem, None);
 }
 
@@ -58,7 +58,7 @@ fn invalid_workflow_becomes_problem_row_and_keeps_others() {
     let rows = workflow_summaries(&root).unwrap();
     assert_eq!(rows.len(), 4);
     let broken = rows.iter().find(|r| r.name == "broken").unwrap();
-    assert_eq!(broken.steps, 1);
+    assert_eq!(broken.steps, Some(1));
     let problem = broken.problem.as_deref().unwrap();
     assert!(problem.contains("ghost"), "{problem}");
     assert!(
@@ -85,7 +85,7 @@ fn unparseable_workflow_becomes_problem_row() {
     .unwrap();
     let rows = workflow_summaries(&root).unwrap();
     let garbage = rows.iter().find(|r| r.name == "garbage").unwrap();
-    assert_eq!((garbage.steps, garbage.description.as_deref()), (0, None));
+    assert_eq!((garbage.steps, garbage.description.as_deref()), (None, None));
     assert!(garbage.problem.is_some());
 }
 

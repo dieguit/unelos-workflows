@@ -51,7 +51,9 @@ pub fn run() {
             projects::open_project,
             projects::pick_project,
             projects::remove_recent,
-            projects::list_workflows
+            projects::list_workflows,
+            projects::list_agents,
+            projects::list_skills
         ])
         .on_page_load(|webview, payload| {
             if webview.label() == "main" && matches!(payload.event(), PageLoadEvent::Finished) {

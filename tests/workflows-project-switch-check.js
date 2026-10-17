@@ -7,6 +7,7 @@ async (page) => {
   await page.evaluate(() => {
     window.projectSamples = []
     const sample = () => {
+      if (!location.pathname.startsWith("/workflows")) return
       const project = document.querySelector('button[aria-haspopup="menu"] .font-semibold')?.textContent
       const names = [...document.querySelectorAll("tbody tr[data-row] td:first-child > span:first-child")].map((el) => el.textContent)
       window.projectSamples.push({ project, names })

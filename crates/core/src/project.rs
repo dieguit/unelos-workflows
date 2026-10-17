@@ -1,6 +1,7 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use std::{
     collections::{BTreeMap, BTreeSet},
+    ffi::OsString,
     fs, io,
 };
 
@@ -107,7 +108,8 @@ pub struct WorkflowSummary {
     pub name: String,
     pub file: String,
     pub description: Option<String>,
-    pub steps: usize,
+    /// `None` when the workflow file could not be loaded.
+    pub steps: Option<usize>,
     pub problem: Option<String>,
 }
 
@@ -125,19 +127,21 @@ pub fn workflow_summaries(
                         .err()
                         .map(|error| format!("{}: {}", error.field, error.cause)),
                     description: project.workflow.description.clone(),
-                    steps: project
-                        .workflow
-                        .nodes
-                        .values()
-                        .filter(|node| !matches!(node, NodeDefinition::End))
-                        .count(),
+                    steps: Some(
+                        project
+                            .workflow
+                            .nodes
+                            .values()
+                            .filter(|node| !matches!(node, NodeDefinition::End))
+                            .count(),
+                    ),
                     name,
                     file,
                 },
                 Err(error) => WorkflowSummary {
                     problem: Some(error.to_string()),
                     description: None,
-                    steps: 0,
+                    steps: None,
                     name,
                     file,
                 },
@@ -210,20 +214,231 @@ fn workflow_files(project_root: &Utf8Path) -> Result<(Utf8PathBuf, Vec<String>),
     Ok((root, names))
 }
 
-fn read(path: &Utf8Path) -> Result<String, ProjectLoadError> {
-    fs::read_to_string(path).map_err(|source| {
-        if source.kind() == io::ErrorKind::NotFound {
-            ProjectLoadError::Missing {
-                path: path.to_owned(),
-                source,
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct AgentSummary {
+    pub name: String,
+    pub model: Option<String>,
+    pub skills: Vec<String>,
+    pub mcps: Vec<String>,
+    /// Why this agent's definition could not be read; other fields are then empty.
+    pub problem: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct SkillSummary {
+    pub name: String,
+    pub description: Option<String>,
+    /// Why this skill's SKILL.md could not be read; other fields are then empty.
+    pub problem: Option<String>,
+}
+
+/// Validate project settings, then summarize each `.unelos/<directory>/<id>` child in name
+/// order. A child that fails becomes `broken(id, message)` instead of failing the list; only
+/// project-level problems return `Err`. A missing directory yields no rows.
+fn summarize_definitions<T>(
+    project_root: &Utf8Path,
+    directory: &str,
+    summarize: impl Fn(&Utf8Path, &Utf8Path, &str) -> Result<T, ProjectLoadError>,
+    broken: impl Fn(String, String) -> T,
+) -> Result<Vec<T>, ProjectLoadError> {
+    let root = absolute_root(project_root).map_err(|source| ProjectLoadError::Root {
+        path: project_root.to_owned(),
+        source,
+    })?;
+    let authoring_root = root.join(".unelos");
+    let settings = bounded_path(
+        &authoring_root,
+        Utf8Path::new("project.yaml"),
+        &authoring_root,
+        "project",
+    )?;
+    parse_project_settings(settings.as_str(), &read(&settings)?)?;
+    let path = bounded_path(&authoring_root, Utf8Path::new(directory), &settings, directory)?;
+    let entries = match fs::read_dir(&path) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(source) => return Err(ProjectLoadError::Read { path, source }),
+    };
+    let candidates = agent_candidates(
+        &path,
+        entries.map(|entry| {
+            entry.map(|entry| {
+                (
+                    entry.file_name(),
+                    entry.file_type().map(|kind| kind.is_file()),
+                )
+            })
+        }),
+    )?;
+    Ok(candidates
+        .into_iter()
+        .map(|(name, inspect)| {
+            let Some(id) = name.to_str() else {
+                return broken(
+                    name.to_string_lossy().into_owned(),
+                    "definition ID is not UTF-8".into(),
+                );
+            };
+            inspect
+                .map_err(|source| ProjectLoadError::Read {
+                    path: path.join(id),
+                    source,
+                })
+                .and_then(|()| summarize(&authoring_root, &path, id))
+                .unwrap_or_else(|error| broken(id.to_owned(), error.to_string()))
+        })
+        .collect())
+}
+
+/// Summarize each `.unelos/agents/<id>/agent.yaml`; a broken agent is a row with `problem`.
+pub fn agent_summaries(project_root: &Utf8Path) -> Result<Vec<AgentSummary>, ProjectLoadError> {
+    summarize_definitions(
+        project_root,
+        "agents",
+        |authoring_root, directory, id| {
+            let relative = Utf8PathBuf::from("agents").join(id);
+            let entry = bounded_path(authoring_root, &relative, directory, id)?;
+            if !safe_id(id) {
+                return Err(diagnostic(&entry, "id", "invalid definition ID"));
             }
-        } else {
-            ProjectLoadError::Read {
-                path: path.to_owned(),
-                source,
-            }
+            let source = bounded_path(
+                authoring_root,
+                &relative.join("agent.yaml"),
+                &entry,
+                "agent.yaml",
+            )?;
+            let mut agent = parse_agent_definition(source.as_str(), &read(&source)?)?;
+            resolve_instructions(
+                authoring_root,
+                &source,
+                "instructionsFile",
+                &agent.instructions_file,
+                &mut agent.instructions,
+                &mut BTreeMap::new(),
+            )?;
+            Ok(AgentSummary {
+                name: id.to_owned(),
+                model: agent.model,
+                skills: agent.skills,
+                mcps: agent.mcps,
+                problem: None,
+            })
+        },
+        |name, problem| AgentSummary {
+            name,
+            model: None,
+            skills: Vec::new(),
+            mcps: Vec::new(),
+            problem: Some(problem),
+        },
+    )
+}
+
+/// Summarize each `.unelos/skills/<id>/SKILL.md`; a broken skill is a row with `problem`.
+/// IDs follow `resolve_skills`, so `safe_id` is not applied.
+pub fn skill_summaries(project_root: &Utf8Path) -> Result<Vec<SkillSummary>, ProjectLoadError> {
+    summarize_definitions(
+        project_root,
+        "skills",
+        |authoring_root, directory, id| {
+            let relative = Utf8PathBuf::from("skills").join(id);
+            let entry = bounded_path(authoring_root, &relative, directory, id)?;
+            let source = bounded_path(
+                authoring_root,
+                &relative.join("SKILL.md"),
+                &entry,
+                "SKILL.md",
+            )?;
+            let description = skill_description(&read(&source)?)
+                .map_err(|error| diagnostic(&source, "frontmatter", error))?;
+            Ok(SkillSummary {
+                name: id.to_owned(),
+                description,
+                problem: None,
+            })
+        },
+        |name, problem| SkillSummary {
+            name,
+            description: None,
+            problem: Some(problem),
+        },
+    )
+}
+
+/// `description` from a leading `---` YAML block; no block, empty block or no key → `None`.
+fn skill_description(text: &str) -> Result<Option<String>, String> {
+    let Some(rest) = text
+        .strip_prefix("---\n")
+        .or_else(|| text.strip_prefix("---\r\n"))
+    else {
+        return Ok(None);
+    };
+    let yaml = if rest.starts_with("---") {
+        ""
+    } else {
+        &rest[..rest.find("\n---").ok_or("missing closing ---")?]
+    };
+    #[derive(serde::Deserialize)]
+    struct Frontmatter {
+        description: Option<String>,
+    }
+    let front: Option<Frontmatter> =
+        serde_yaml_ng::from_str(yaml).map_err(|error| error.to_string())?;
+    Ok(front
+        .and_then(|front| front.description)
+        .map(|description| description.trim().to_owned())
+        .filter(|description| !description.is_empty()))
+}
+
+/// Non-file children to inspect, sorted by name. An iterator error is an unnamed readdir
+/// failure, so the listing is untrustworthy and fails the directory. A child whose type
+/// cannot be read (e.g. removed mid-scan) is kept with its error so only that agent fails.
+fn agent_candidates(
+    directory: &Utf8Path,
+    entries: impl IntoIterator<Item = io::Result<(OsString, io::Result<bool>)>>,
+) -> Result<Vec<(OsString, io::Result<()>)>, ProjectLoadError> {
+    let mut candidates = Vec::new();
+    for entry in entries {
+        let (name, is_file) = entry.map_err(|source| ProjectLoadError::Read {
+            path: directory.to_owned(),
+            source,
+        })?;
+        match is_file {
+            Ok(true) => {}
+            Ok(false) => candidates.push((name, Ok(()))),
+            Err(source) => candidates.push((name, Err(source))),
         }
-    })
+    }
+    candidates.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(candidates)
+}
+
+fn read(path: &Utf8Path) -> Result<String, ProjectLoadError> {
+    // Stat first: opening a FIFO without a writer blocks, so only regular files are opened.
+    fs::metadata(path)
+        .and_then(|metadata| {
+            if metadata.is_file() {
+                fs::read_to_string(path)
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "not a regular file",
+                ))
+            }
+        })
+        .map_err(|source| {
+            if source.kind() == io::ErrorKind::NotFound {
+                ProjectLoadError::Missing {
+                    path: path.to_owned(),
+                    source,
+                }
+            } else {
+                ProjectLoadError::Read {
+                    path: path.to_owned(),
+                    source,
+                }
+            }
+        })
 }
 
 /// Load only the selected authoring Workflow; references are not validated here.
@@ -503,4 +718,36 @@ pub(crate) fn absolute_root(project_root: &Utf8Path) -> io::Result<Utf8PathBuf> 
         io::Error::new(io::ErrorKind::InvalidData, "current directory is not UTF-8")
     })?;
     Ok(cwd.join(project_root))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agent_candidates_isolate_child_metadata_failures() {
+        let entries = vec![
+            Ok((
+                OsString::from("gone"),
+                Err(io::Error::from(io::ErrorKind::NotFound)),
+            )),
+            Ok((OsString::from("file"), Ok(true))),
+            Ok((OsString::from("agent"), Ok(false))),
+        ];
+        let candidates = agent_candidates(Utf8Path::new("agents"), entries).unwrap();
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].0, "agent");
+        assert!(candidates[0].1.is_ok());
+        assert_eq!(candidates[1].0, "gone");
+        assert_eq!(
+            candidates[1].1.as_ref().unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
+    }
+
+    #[test]
+    fn agent_candidates_fail_directory_on_unnamed_iterator_error() {
+        let entries = vec![Err(io::Error::other("readdir failed"))];
+        assert!(agent_candidates(Utf8Path::new("agents"), entries).is_err());
+    }
 }

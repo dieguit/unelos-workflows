@@ -9,8 +9,3 @@ export function filterWorkflows(list: WorkflowSummary[], query: string) {
     )
   )
 }
-
-export function countLabel(shown: number, total: number, filtering: boolean) {
-  const noun = total === 1 ? "workflow" : "workflows"
-  return filtering ? `${shown} of ${total} ${noun}` : `${total} ${noun}`
-}

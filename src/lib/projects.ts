@@ -12,7 +12,19 @@ export type WorkflowSummary = {
   name: string
   file: string
   description: string | null
-  steps: number
+  steps: number | null
+  problem: string | null
+}
+export type AgentSummary = {
+  name: string
+  model: string | null
+  skills: string[]
+  mcps: string[]
+  problem: string | null
+}
+export type SkillSummary = {
+  name: string
+  description: string | null
   problem: string | null
 }
 
@@ -23,6 +35,10 @@ export const removeRecentProject = (path: string) =>
   trackedInvoke<ProjectState>("remove_recent", { path })
 export const listWorkflows = (root: string) =>
   trackedInvoke<WorkflowSummary[]>("list_workflows", { root })
+export const listAgents = (root: string) =>
+  trackedInvoke<AgentSummary[]>("list_agents", { root })
+export const listSkills = (root: string) =>
+  trackedInvoke<SkillSummary[]>("list_skills", { root })
 
 export const pickProject = () => trackedInvoke<ProjectState | null>("pick_project")
 

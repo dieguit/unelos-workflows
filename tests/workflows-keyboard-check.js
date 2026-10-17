@@ -13,9 +13,8 @@ async (page) => {
   await page.keyboard.press("Escape")
   await rows.nth(2).focus()
   await page.keyboard.press("Tab")
-  await page.keyboard.press("Tab")
   const diagnostic = "nodes.review.agent: Agent reference missing"
-  assert(await page.evaluate((text) => document.activeElement?.textContent === text, diagnostic), "Tab must focus entire diagnostic, including field context")
+  assert(await page.evaluate((text) => document.activeElement?.getAttribute("aria-label") === `Problem: ${text}`, diagnostic), "Tab must focus the problem warning next to the name")
   await page.locator('[data-slot="tooltip-content"]').filter({ hasText: diagnostic }).waitFor()
-  return "Keyboard check passed (Tab exposes full description and diagnostic tooltips)"
+  return "Keyboard check passed (Tab exposes full description and problem tooltips)"
 }

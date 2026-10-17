@@ -8,7 +8,7 @@
     new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
   const main = document.querySelector("main")
   const search = main.querySelector('input[type="search"]')
-  const count = () => main.querySelector("[data-workflow-count]")?.textContent
+  const count = () => main.querySelector("[data-list-count]")?.textContent
   const rows = () => [...main.querySelectorAll("tbody tr[data-row]")]
   const type = async (value) => {
     const set = Object.getOwnPropertyDescriptor(
@@ -35,8 +35,8 @@
     "New workflow must be disabled"
   )
   assert(
-    rows()[2].textContent.includes("Agent reference missing"),
-    "Problem badge on Review change"
+    rows()[2].querySelector('[aria-label="Problem: nodes.review.agent: Agent reference missing"]'),
+    "Problem warning next to Review change name"
   )
 
   await type("BUG")
