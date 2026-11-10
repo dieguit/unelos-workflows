@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.dieguit.unelos-app",
   "build": {
-    "beforeDevCommand": "bun run dev",
+    "beforeDevCommand": "sh scripts/build-sidecar.sh && bun run dev",
     "devUrl": "http://localhost:3000",
-    "beforeBuildCommand": "bun run build",
+    "beforeBuildCommand": "sh scripts/build-sidecar.sh --release && bun run build",
     "frontendDist": "../dist",
     "removeUnusedCommands": true
   },
@@ -27,6 +27,7 @@
     }
   },
   "bundle": {
+    "externalBin": ["binaries/unelos"],
     "active": true,
     "targets": "all",
     "icon": [

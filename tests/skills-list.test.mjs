@@ -29,9 +29,9 @@ const skills = [
   { name: "rust", description: null, problem: null },
 ]
 const broken = { name: "bad", description: null, problem: "bad <yaml>" }
-const render = (skills, query = "") =>
+const render = (skills, query = "", selected) =>
   renderToStaticMarkup(
-    createElement(mod.SkillsList, { skills, query, onClear() {} })
+    createElement(mod.SkillsList, { skills, query, onClear() {}, selected })
   )
 
 test("filterSkills matches name or description, case-insensitive, trimmed", () => {
@@ -76,4 +76,10 @@ test("names and descriptions render as text", () => {
   assert.match(html, /&lt;script&gt;x&lt;\/script&gt;/)
   assert.match(html, /&lt;b&gt;d&lt;\/b&gt;/)
   assert.doesNotMatch(html, /<script\b|<b>/)
+})
+
+test("selected skill row is marked selected", () => {
+  const html = render(skills, "", "rust")
+  assert.equal([...html.matchAll(/aria-selected="true"/g)].length, 1)
+  assert.match(html, /aria-selected="true"[^>]*>(?:(?!<tr).)*rust/s)
 })

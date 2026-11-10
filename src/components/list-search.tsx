@@ -2,13 +2,15 @@ import { useEffect, type RefObject } from "react"
 import { SearchIcon } from "lucide-react"
 import { Input } from "@/components/ui/input"
 
+const plural = (noun: string) => (noun.endsWith("s") ? `${noun}es` : `${noun}s`)
+
 export function countLabel(
   shown: number,
   total: number,
   noun: string,
   filtering: boolean
 ) {
-  const n = total === 1 ? noun : `${noun}s`
+  const n = total === 1 ? noun : plural(noun)
   return filtering ? `${shown} of ${total} ${n}` : `${total} ${n}`
 }
 
@@ -31,7 +33,7 @@ export function ListSearch({
   total: number
   inputRef: RefObject<HTMLInputElement | null>
 }) {
-  const label = `Search ${noun}s`
+  const label = `Search ${plural(noun)}`
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

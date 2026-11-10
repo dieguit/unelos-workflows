@@ -11,6 +11,8 @@
 import { Route as rootRouteImport } from "./routes/__root"
 import { Route as IndexRouteImport } from "./routes/index"
 import { Route as AgentsIndexRouteImport } from "./routes/agents/index"
+import { Route as HarnessesIndexRouteImport } from "./routes/harnesses/index"
+import { Route as ModelMappingsIndexRouteImport } from "./routes/model-mappings/index"
 import { Route as RunsIndexRouteImport } from "./routes/runs/index"
 import { Route as SettingsIndexRouteImport } from "./routes/settings/index"
 import { Route as SkillsIndexRouteImport } from "./routes/skills/index"
@@ -24,6 +26,16 @@ const IndexRoute = IndexRouteImport.update({
 const AgentsIndexRoute = AgentsIndexRouteImport.update({
   id: "/agents/",
   path: "/agents/",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HarnessesIndexRoute = HarnessesIndexRouteImport.update({
+  id: "/harnesses/",
+  path: "/harnesses/",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ModelMappingsIndexRoute = ModelMappingsIndexRouteImport.update({
+  id: "/model-mappings/",
+  path: "/model-mappings/",
   getParentRoute: () => rootRouteImport,
 } as any)
 const RunsIndexRoute = RunsIndexRouteImport.update({
@@ -50,6 +62,8 @@ const WorkflowsIndexRoute = WorkflowsIndexRouteImport.update({
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
   "/agents/": typeof AgentsIndexRoute
+  "/harnesses/": typeof HarnessesIndexRoute
+  "/model-mappings/": typeof ModelMappingsIndexRoute
   "/runs/": typeof RunsIndexRoute
   "/settings/": typeof SettingsIndexRoute
   "/skills/": typeof SkillsIndexRoute
@@ -58,6 +72,8 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
   "/agents": typeof AgentsIndexRoute
+  "/harnesses": typeof HarnessesIndexRoute
+  "/model-mappings": typeof ModelMappingsIndexRoute
   "/runs": typeof RunsIndexRoute
   "/settings": typeof SettingsIndexRoute
   "/skills": typeof SkillsIndexRoute
@@ -67,6 +83,8 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   "/": typeof IndexRoute
   "/agents/": typeof AgentsIndexRoute
+  "/harnesses/": typeof HarnessesIndexRoute
+  "/model-mappings/": typeof ModelMappingsIndexRoute
   "/runs/": typeof RunsIndexRoute
   "/settings/": typeof SettingsIndexRoute
   "/skills/": typeof SkillsIndexRoute
@@ -75,13 +93,30 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    "/" | "/agents/" | "/runs/" | "/settings/" | "/skills/" | "/workflows/"
+    | "/"
+    | "/agents/"
+    | "/harnesses/"
+    | "/model-mappings/"
+    | "/runs/"
+    | "/settings/"
+    | "/skills/"
+    | "/workflows/"
   fileRoutesByTo: FileRoutesByTo
-  to: "/" | "/agents" | "/runs" | "/settings" | "/skills" | "/workflows"
+  to:
+    | "/"
+    | "/agents"
+    | "/harnesses"
+    | "/model-mappings"
+    | "/runs"
+    | "/settings"
+    | "/skills"
+    | "/workflows"
   id:
     | "__root__"
     | "/"
     | "/agents/"
+    | "/harnesses/"
+    | "/model-mappings/"
     | "/runs/"
     | "/settings/"
     | "/skills/"
@@ -91,6 +126,8 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AgentsIndexRoute: typeof AgentsIndexRoute
+  HarnessesIndexRoute: typeof HarnessesIndexRoute
+  ModelMappingsIndexRoute: typeof ModelMappingsIndexRoute
   RunsIndexRoute: typeof RunsIndexRoute
   SettingsIndexRoute: typeof SettingsIndexRoute
   SkillsIndexRoute: typeof SkillsIndexRoute
@@ -111,6 +148,20 @@ declare module "@tanstack/react-router" {
       path: "/agents"
       fullPath: "/agents/"
       preLoaderRoute: typeof AgentsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/harnesses/": {
+      id: "/harnesses/"
+      path: "/harnesses"
+      fullPath: "/harnesses/"
+      preLoaderRoute: typeof HarnessesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/model-mappings/": {
+      id: "/model-mappings/"
+      path: "/model-mappings"
+      fullPath: "/model-mappings/"
+      preLoaderRoute: typeof ModelMappingsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/runs/": {
@@ -147,6 +198,8 @@ declare module "@tanstack/react-router" {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgentsIndexRoute: AgentsIndexRoute,
+  HarnessesIndexRoute: HarnessesIndexRoute,
+  ModelMappingsIndexRoute: ModelMappingsIndexRoute,
   RunsIndexRoute: RunsIndexRoute,
   SettingsIndexRoute: SettingsIndexRoute,
   SkillsIndexRoute: SkillsIndexRoute,

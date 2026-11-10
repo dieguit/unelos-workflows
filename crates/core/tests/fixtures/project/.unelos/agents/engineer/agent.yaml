@@ -1,5 +1,5 @@
 instructions: Follow existing project conventions.
 skills: [rust]
-model: example-provider/example-model
+model: {harness: opencode, model: example-provider/example-model}
 mcps: [github]
 tools: [read-file, run-command]

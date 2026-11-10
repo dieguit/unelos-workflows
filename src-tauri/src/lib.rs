@@ -1,4 +1,6 @@
 mod projects;
+mod harnesses;
+mod model_mappings;
 
 use tauri::webview::PageLoadEvent;
 use tauri_plugin_log::{Target, TargetKind};
@@ -46,14 +48,30 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(external_navigation_plugin())
+        .setup(|_| {
+            tauri::async_runtime::spawn_blocking(harnesses::provision_bundled_cli);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
+            harnesses::list_harnesses,
+            model_mappings::list_model_mappings,
+            model_mappings::save_model_mapping,
+            model_mappings::delete_model_mapping,
+            model_mappings::harness_models,
+            model_mappings::agent_model_options,
+            projects::get_agent,
+            projects::save_agent,
+            harnesses::install_harness,
+            harnesses::uninstall_harness,
             projects::project_state,
             projects::open_project,
             projects::pick_project,
             projects::remove_recent,
             projects::list_workflows,
             projects::list_agents,
-            projects::list_skills
+            projects::list_skills,
+            projects::get_skill,
+            projects::save_skill
         ])
         .on_page_load(|webview, payload| {
             if webview.label() == "main" && matches!(payload.event(), PageLoadEvent::Finished) {

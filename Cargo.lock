@@ -4738,7 +4738,6 @@ dependencies = [
  "camino",
  "clap",
  "insta",
- "jsonc-parser",
  "miette",
  "serde",
  "serde_json",
@@ -4748,7 +4747,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "unelos-core",
- "url",
 ]
 
 [[package]]
@@ -4758,11 +4756,14 @@ dependencies = [
  "assert_fs",
  "camino",
  "config",
+ "jsonc-parser",
  "serde",
  "serde_json",
  "serde_yaml_ng",
+ "tempfile",
  "thiserror 2.0.21",
  "tracing",
+ "url",
 ]
 
 [[package]]

@@ -1,5 +1,5 @@
 instructions: Follow project conventions.
 skills: [rust, verification]
-model: vendor/model#variant
+model: {harness: opencode, model: vendor/model#variant}
 mcps: [github, local]
 tools: [read, shell]

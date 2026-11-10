@@ -55,7 +55,7 @@ fn summaries_isolate_bad_agents_and_preserve_metadata() {
     write(
         &root,
         ".unelos/agents/engineer/agent.yaml",
-        "instructions: Build\nmodel: provider/model\nskills: [rust]\nmcps: [github]\n",
+        "instructions: Build\nmodel: {harness: opencode, model: provider/model}\nskills: [rust]\nmcps: [github]\n",
     );
     write(
         &root,
@@ -71,7 +71,7 @@ fn summaries_isolate_bad_agents_and_preserve_metadata() {
             .collect::<Vec<_>>(),
         ["engineer", "zeta"]
     );
-    assert_eq!(result.agents[0].model.as_deref(), Some("provider/model"));
+    assert_eq!(result.agents[0].model, Some(unelos_core::AgentModel::Harness { harness: "opencode".into(), model: "provider/model".into() }));
     assert_eq!(result.agents[0].skills, ["rust"]);
     assert_eq!(result.agents[0].mcps, ["github"]);
     assert!(result.agents[1].model.is_none());
@@ -303,7 +303,7 @@ fn symlinked_agent_directory_is_isolated_and_not_read() {
     write(
         &outside_root,
         "agent/agent.yaml",
-        "instructions: Leak\nmodel: leaked/model\n",
+        "instructions: Leak\nmodel: {harness: opencode, model: leaked/model}\n",
     );
     write(
         &root,
@@ -339,7 +339,7 @@ fn symlinked_agent_file_is_isolated_and_not_read() {
     write(
         &outside_root,
         "agent.yaml",
-        "instructions: Leak\nmodel: leaked/model\n",
+        "instructions: Leak\nmodel: {harness: opencode, model: leaked/model}\n",
     );
     write(
         &root,

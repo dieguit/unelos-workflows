@@ -22,7 +22,13 @@ export function filterSkills(skills: SkillSummary[], query: string) {
   )
 }
 
-function SkillsTable({ skills }: { skills: SkillSummary[] }) {
+type Selection = { selected?: string; onSelect?: (name: string) => void }
+
+function SkillsTable({
+  skills,
+  selected,
+  onSelect,
+}: { skills: SkillSummary[] } & Selection) {
   return (
     <ListTable>
       <ListHeader>
@@ -31,7 +37,18 @@ function SkillsTable({ skills }: { skills: SkillSummary[] }) {
       </ListHeader>
       <ListBody>
         {skills.map((s) => (
-          <ListRow key={s.name}>
+          <ListRow
+            key={s.name}
+            aria-selected={s.name === selected}
+            className="cursor-pointer aria-selected:bg-primary-muted"
+            onClick={() => onSelect?.(s.name)}
+            onKeyDown={(e) => {
+              if (e.target !== e.currentTarget) return
+              if (e.key !== "Enter" && e.key !== " ") return
+              e.preventDefault()
+              onSelect?.(s.name)
+            }}
+          >
             <ListCell>
               <ListPrimary title={s.name} problem={s.problem} />
             </ListCell>
@@ -49,11 +66,12 @@ export function SkillsList({
   skills,
   query,
   onClear,
+  ...selection
 }: {
   skills: SkillSummary[]
   query: string
   onClear: () => void
-}) {
+} & Selection) {
   const shown = filterSkills(skills, query)
   return skills.length === 0 ? (
     <EmptyState
@@ -73,6 +91,6 @@ export function SkillsList({
       }
     />
   ) : (
-    <SkillsTable skills={shown} />
+    <SkillsTable skills={shown} {...selection} />
   )
 }

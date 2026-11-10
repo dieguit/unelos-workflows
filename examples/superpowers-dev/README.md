@@ -78,26 +78,27 @@ Unelos result for both is `FINISHED`. `NEEDS_CONTEXT` and `BLOCKED` are returned
 With the Unelos CLI installed, initialize the target project:
 
 ```sh
-unelos --project /absolute/project init --opencode v2
+unelos --project /absolute/project init
+unelos harness install opencode
 ```
 
-This bundles and configures the [OpenCode integration](../../integrations/opencode/README.md)
-automatically, preserving unrelated configuration and authored files. Rerun init
-to repair missing integration assets; it does not restore deleted runs or authoring.
+This scaffolds the project and installs the [OpenCode integration](../../integrations/opencode/README.md)
+globally, preserving unrelated configuration and authored files. Rerun the harness
+install command to refresh integration assets; init only manages project scaffold.
 
 Install the workflow and generate native OpenCode agents in one operation:
 
 ```sh
-unelos --project /absolute/project install superpowers-dev \
+unelos --project /absolute/project install superpowers-dev --opencode v2 \
   --source /absolute/unelos/examples/superpowers-dev --json
 ```
 
-Use `init --opencode v1` for V1. Install infers the initialized version.
+Global integration installation supports OpenCode v2 only.
 Existing differing authoring is not overwritten.
 To regenerate native profiles from your installed Unelos definitions:
 
 ```sh
-unelos --project /absolute/project install superpowers-dev --json
+unelos --project /absolute/project install superpowers-dev --opencode v2 --json
 ```
 
 Generated `.opencode/agents/unelos-*.md` profiles are overwritten on reinstall,

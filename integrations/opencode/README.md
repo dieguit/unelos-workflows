@@ -9,38 +9,28 @@ dispatches configured native workers; the plugin does not intercept subagents.
 Install the Unelos CLI on your machine, then run inside an existing project:
 
 ```sh
-unelos init --opencode v2
+unelos init
+unelos harness install opencode
 ```
 
-This creates missing authoring scaffold, writes the bundled plugin into
-`.unelos/opencode/unelos`, and updates the existing project OpenCode JSON/JSONC
-configuration without replacing unrelated settings or comments. With no config it
-creates `opencode.json`; multiple local config files require manual resolution.
-No npm, source checkout or network is required at initialization time.
-
-The plugin points to the absolute running CLI executable. Rerun `unelos init` to
-repair missing managed assets or refresh that path after moving the CLI. Reruns
-preserve authored workflows/skills/definitions, unrelated agents and run reports.
-Legacy local `thin-plugin`/`plugin` registrations migrate to `unelos`; their old
-directories are not deleted. Init does not install a sample workflow.
-
-Use `unelos init --opencode v1` for V1; it also installs the slash command.
-Without a flag, first init defaults to V2 and reruns retain the recorded version.
-Version switches remove only an unchanged generated V1 command, never an edited
-one. A differing command blocks V1 installation rather than being overwritten.
-V1 normally resolves `@opencode-ai/plugin/tool` from the native configuration's
-installed modules. For isolated installs, set `v1ToolModule` to the
-absolute harness-installed `@opencode-ai/plugin/dist/tool.js`. Missing native SDK
-fails explicitly; no custom schema shim or automatic/global installation.
+`init` creates missing authoring scaffold and removes legacy project registrations
+and known bundled assets (preserving custom files). It never installs a plugin.
+`harness install opencode` installs v2 assets under the Unelos user config directory
+and registers them in the OpenCode user `opencode.json` or `opencode.jsonc`, preserving
+foreign entries and comments. Both config filenames existing is an error.
+No npm, source checkout or network is required. The plugin uses a stable CLI copy
+under the Unelos config directory; reinstall refreshes it and the integration.
+Use `unelos harness uninstall opencode` to remove only our registration and recorded assets.
+The stable CLI remains available. V1 is not supported by global installation.
 
 ## Install Workflow and native agents
 
 ```sh
-unelos --project /absolute/project install superpowers-dev \
+unelos --project /absolute/project install superpowers-dev --opencode v2 \
   --source /absolute/unelos/examples/superpowers-dev --json
 ```
 
-After init, `install` infers the recorded OpenCode version. This imports referenced authoring/Skills and generates
+With `--opencode v2`, `install` imports referenced authoring/Skills and generates
 `.opencode/agents/unelos-<agent-id>.md`. Differing authored source collisions stop;
 generated native files overwrite on reinstall, including manual edits. Customize
 Unelos definitions, then regenerate without `--source`:
@@ -53,7 +43,7 @@ to their YAML file. Agent/task resource folders are copied; destination settings
 and package README files are not imported.
 
 ```sh
-unelos --project /absolute/project install superpowers-dev --json
+unelos --project /absolute/project install superpowers-dev --opencode v2 --json
 ```
 
 Unrelated native agents/configuration and existing run state remain untouched.

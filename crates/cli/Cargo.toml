@@ -19,8 +19,6 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 thiserror.workspace = true
 miette.workspace = true
-jsonc-parser = { version = "0.34", features = ["cst", "serde", "serde_json"] }
-url = "2"
 
 [dev-dependencies]
 assert_cmd.workspace = true

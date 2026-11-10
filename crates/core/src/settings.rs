@@ -34,7 +34,13 @@ impl Settings {
             builder = builder.add_source(File::from_str(contents, FileFormat::Toml));
         }
         finish(
-            builder.add_source(Environment::with_prefix("UNELOS")),
+            builder.add_source(Environment::with_prefix("UNELOS").source(Some(
+                std::env::vars_os().filter_map(|(key, value)| {
+                    let key = key.into_string().ok()?;
+                    if key.eq_ignore_ascii_case("UNELOS_CONFIG_DIR") { return None; }
+                    Some((key, value.into_string().ok()?))
+                }).collect(),
+            ))),
             log_level,
         )
     }

@@ -36,15 +36,17 @@ With `unelos` installed on your machine:
 
 ```sh
 cd /path/to/project
-unelos init --opencode v2
-unelos install my-workflow
+unelos init
+unelos harness install opencode
+unelos install my-workflow --opencode v2
 ```
 
-`init` creates missing `.unelos/project.yaml`, `workflows/`, `tasks/`, `agents/`, and `skills/`, bundles
-the plugin at `.unelos/opencode/unelos`, and registers it in project OpenCode
-configuration. No npm, network access, or source checkout is needed. It points to
-the current CLI executable; rerun after moving the CLI or deleting managed assets.
-V2 is the first-init default; `--opencode v1` selects V1.
+`init` creates missing `.unelos/project.yaml`, `workflows/`, `tasks/`, `agents/`, and `skills/`.
+It removes old Unelos project plugin registrations. `harness install opencode`
+installs the bundled v2 integration globally, preserving user JSONC comments and
+foreign plugins, and provisions a stable CLI copy under the Unelos config directory.
+No npm, network access, or source checkout is needed. Use `harness list` to rescan
+and `harness uninstall opencode` to remove the integration.
 
 Author reusable tasks in `.unelos/tasks/<id>/task.yaml`, agents in
 `.unelos/agents/<id>/agent.yaml`, and workflows in `.unelos/workflows/<name>.yaml`.
@@ -55,18 +57,19 @@ Workflow steps and parallel workers choose exactly one of `task: <id>` or an inl
 inside the authoring root. Agent/task folders can include templates and resources.
 
 `install` validates/imports authoring and generates
-required `.opencode/agents/unelos-*.md`, inferring the version recorded by `init`.
+required `.opencode/agents/unelos-*.md` when given `--opencode v2`.
 To import a workflow package or another project, add `--source /path/to/workflow-source`.
 Packages have `workflows/`, `agents/`, and any required `tasks/`/`skills/` directly
 at their root; installation copies selected authoring under the project's `.unelos`.
 See the sole [superpowers-dev example](examples/superpowers-dev/README.md).
-Explicit `install --opencode v1|v2` overrides generation only. Without initialization
-or an explicit version, `install` remains core-only.
+Explicit `install --opencode v1|v2` selects agent generation only (global installation
+supports v2 only). Without an explicit version or legacy integration metadata,
+`install` remains core-only.
 
 Reruns preserve authoring, unrelated configuration, and runs. Generated agents
-overwrite manual edits; customize authored definitions instead. If multiple
-project config files exist, initialization stops rather than guessing. Open a
-fresh OpenCode session after initialization, then enter `/unelos` once a workflow
+overwrite manual edits; customize authored definitions instead. If both user
+`opencode.json` and `opencode.jsonc` exist, global installation stops rather than guessing. Open a
+fresh OpenCode session after installation, then enter `/unelos` once a workflow
 is installed. Third-party skills, MCP servers, and credentials remain separate.
 Deleting `.unelos` loses authored customizations and run reports; `init` cannot
 recover them. See [integration instructions](integrations/opencode/README.md).

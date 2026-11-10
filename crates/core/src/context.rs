@@ -17,7 +17,7 @@ pub struct TaskContext {
     pub task_instructions: String,
     pub agent_instructions: String,
     pub skills: Vec<ResolvedSkill>,
-    pub model: Option<String>,
+    pub model: Option<crate::AgentModel>,
     pub mcps: Vec<String>,
     pub tools: Vec<String>,
     pub outcomes: Vec<String>,

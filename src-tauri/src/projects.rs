@@ -250,6 +250,42 @@ pub async fn list_skills(app: AppHandle, root: String) -> Result<Vec<unelos_core
     .map_err(|e| e.to_string())?
 }
 
+#[tauri::command]
+pub async fn get_skill(app: AppHandle, root: String, id: String) -> Result<unelos_core::SkillDocument, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = approved_root(&load_from(&store_file(&app)?), Path::new(&root))?;
+        let root = camino::Utf8Path::from_path(&root).ok_or("Project path is not UTF-8")?;
+        unelos_core::get_skill(root, &id)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn save_skill(app: AppHandle, root: String, id: String, name: String, description: String, body: String) -> Result<unelos_core::SaveSkillResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = approved_root(&load_from(&store_file(&app)?), Path::new(&root))?;
+        let root = camino::Utf8Path::from_path(&root).ok_or("Project path is not UTF-8")?;
+        unelos_core::save_skill(root, &id, &name, &description, &body)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn get_agent(app: AppHandle, root: String, id: String) -> Result<unelos_core::AgentDocument, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = approved_root(&load_from(&store_file(&app)?), Path::new(&root))?;
+        let root = camino::Utf8Path::from_path(&root).ok_or("Project path is not UTF-8")?;
+        unelos_core::get_agent(root, &id)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn save_agent(app: AppHandle, root: String, original_id: Option<String>, agent: unelos_core::AgentDocument) -> Result<unelos_core::AgentDocument, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = approved_root(&load_from(&store_file(&app)?), Path::new(&root))?;
+        let root = camino::Utf8Path::from_path(&root).ok_or("Project path is not UTF-8")?;
+        unelos_core::save_agent(root, original_id.as_deref(), agent)
+    }).await.map_err(|e| e.to_string())?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

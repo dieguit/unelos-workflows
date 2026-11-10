@@ -26,8 +26,8 @@ fn assert_fixture(loaded: &LoadedProject, root: &Utf8Path) {
         "Write a plan for the supplied request to its output path."
     );
     assert_eq!(
-        loaded.definitions.agents["engineer"].model.as_deref(),
-        Some("example-provider/example-model")
+        loaded.definitions.agents["engineer"].model,
+        Some(unelos_core::AgentModel::Harness { harness: "opencode".into(), model: "example-provider/example-model".into() })
     );
     assert_eq!(
         loaded.workflow,

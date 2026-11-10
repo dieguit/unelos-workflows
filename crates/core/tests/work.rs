@@ -17,7 +17,7 @@ fn project() -> (TempDir, unelos_core::LoadedProject) {
         ("tasks/backend/task.yaml", "instructions: Research backend.\nskills: [backend]\n"),
         ("tasks/frontend/task.yaml", "instructions: Research frontend.\nskills: [frontend]\n"),
         ("agents/planner/agent.yaml", "instructions: Plan carefully.\n"),
-        ("agents/backend-researcher/agent.yaml", "instructions: Backend context only.\nskills: [backend]\nmodel: example/backend\nmcps: [backend-mcp]\ntools: [read-file]\n"),
+        ("agents/backend-researcher/agent.yaml", "instructions: Backend context only.\nskills: [backend]\nmodel: {harness: opencode, model: example/backend}\nmcps: [backend-mcp]\ntools: [read-file]\n"),
         ("agents/frontend-researcher/agent.yaml", "instructions: Frontend context only.\ntools: [read-file]\n"),
     ] {
         let path = root.join(".unelos").join(path);

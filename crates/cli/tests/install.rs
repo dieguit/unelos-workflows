@@ -97,7 +97,7 @@ fn native_models_variants_and_tool_requirements_are_not_permission_grants() {
             .replace("\r\n", "\n")
             .replace(
                 "instructionsFile:",
-                "model: provider/vendor/model#high\ntools: [read-file]\ninstructionsFile:",
+                "model: {harness: opencode, model: provider/vendor/model#high}\ntools: [read-file]\ninstructionsFile:",
             );
         fs::write(path, text).unwrap();
         let output = install(&target, Some(&source), version);
@@ -223,7 +223,7 @@ fn profile_regeneration_preserves_authoring_and_active_run_bytes() {
 }
 
 #[test]
-fn initialized_install_infers_native_version_and_explicit_override_preserves_metadata() {
+fn initialized_install_uses_explicit_native_version_without_integration_metadata() {
     let target = TempDir::new().unwrap();
     let source = source();
     let authored = source.path().join("agents/simple-implementer/agent.yaml");
@@ -232,7 +232,7 @@ fn initialized_install_infers_native_version_and_explicit_override_preserves_met
         .replace("\r\n", "\n")
         .replace(
             "instructionsFile:",
-            "model: provider/model#high\ninstructionsFile:",
+            "model: {harness: opencode, model: provider/model#high}\ninstructionsFile:",
         );
     fs::write(authored, text).unwrap();
     cargo_bin_cmd!("unelos")
@@ -244,7 +244,13 @@ fn initialized_install_infers_native_version_and_explicit_override_preserves_met
     cargo_bin_cmd!("unelos")
         .arg("--project")
         .arg(target.path())
-        .args(["install", "simple-plan-execute-review", "--source"])
+        .args([
+            "install",
+            "simple-plan-execute-review",
+            "--opencode",
+            "v2",
+            "--source",
+        ])
         .arg(source.path())
         .assert()
         .success();
@@ -252,17 +258,14 @@ fn initialized_install_infers_native_version_and_explicit_override_preserves_met
         profile(&target, "simple-implementer").0["model"],
         "provider/model#high"
     );
-    let before = fs::read(target.path().join(".unelos/integration.json")).unwrap();
+    assert!(!target.path().join(".unelos/integration.json").exists());
     assert!(install(&target, None, "v1").status.success());
     assert_eq!(
         profile(&target, "simple-implementer").0["model"],
         "provider/model"
     );
     assert_eq!(profile(&target, "simple-implementer").0["variant"], "high");
-    assert_eq!(
-        fs::read(target.path().join(".unelos/integration.json")).unwrap(),
-        before
-    );
+    assert!(!target.path().join(".unelos/integration.json").exists());
 }
 
 #[test]
@@ -284,21 +287,21 @@ fn uninitialized_install_without_version_stays_core_only() {
 }
 
 #[test]
-fn broken_recorded_integration_fails_before_workflow_import() {
-    for missing in [
-        ".unelos/opencode/unelos/index.js",
-        "opencode.json",
-        ".opencode/commands/unelos.md",
-    ] {
+fn legacy_recorded_version_still_selects_native_agents() {
+    for version in ["v1", "v2"] {
         let target = TempDir::new().unwrap();
         let source = source();
         cargo_bin_cmd!("unelos")
             .arg("--project")
             .arg(target.path())
-            .args(["init", "--opencode", "v1"])
+            .arg("init")
             .assert()
             .success();
-        fs::remove_file(target.path().join(missing)).unwrap();
+        fs::write(
+            target.path().join(".unelos/integration.json"),
+            format!("{{\"opencode\":\"{version}\"}}"),
+        )
+        .unwrap();
         let output = cargo_bin_cmd!("unelos")
             .arg("--project")
             .arg(target.path())
@@ -307,13 +310,10 @@ fn broken_recorded_integration_fails_before_workflow_import() {
             .arg("--json")
             .output()
             .unwrap();
-        assert!(!output.status.success(), "accepted missing {missing}");
-        assert!(String::from_utf8(output.stderr)
-            .unwrap()
-            .contains("unelos init"));
-        assert!(!target
+        assert!(output.status.success(), "{output:?}");
+        assert!(target
             .path()
-            .join(".unelos/workflows/simple-plan-execute-review.yaml")
+            .join(".opencode/agents/unelos-simple-implementer.md")
             .exists());
     }
 }

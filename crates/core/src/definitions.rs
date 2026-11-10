@@ -53,7 +53,27 @@ pub struct AgentDefinition {
     pub skills: Vec<String>,
     pub mcps: Vec<String>,
     pub tools: Vec<String>,
-    pub model: Option<String>,
+    pub model: Option<AgentModel>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged, deny_unknown_fields)]
+pub enum AgentModel {
+    Alias(#[serde(deserialize_with = "nonempty_string")] String),
+    Harness {
+        #[serde(deserialize_with = "nonempty_string")]
+        harness: String,
+        #[serde(deserialize_with = "nonempty_string")]
+        model: String,
+    },
+}
+
+fn nonempty_string<'de, D: Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    let value = strict_string(deserializer)?;
+    if value.trim().is_empty() {
+        return Err(serde::de::Error::custom("expected a nonempty string"));
+    }
+    Ok(value)
 }
 
 #[derive(Deserialize, Serialize)]
@@ -72,14 +92,14 @@ struct AgentWire {
         skip_serializing_if = "Option::is_none"
     )]
     instructions_file: Option<String>,
-    #[serde(default, deserialize_with = "strict_strings")]
+    #[serde(default, deserialize_with = "strict_strings", skip_serializing_if = "Vec::is_empty")]
     skills: Vec<String>,
-    #[serde(default, deserialize_with = "strict_strings")]
+    #[serde(default, deserialize_with = "strict_strings", skip_serializing_if = "Vec::is_empty")]
     mcps: Vec<String>,
-    #[serde(default, deserialize_with = "strict_strings")]
+    #[serde(default, deserialize_with = "strict_strings", skip_serializing_if = "Vec::is_empty")]
     tools: Vec<String>,
-    #[serde(default, deserialize_with = "strict_option_string")]
-    model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    model: Option<AgentModel>,
 }
 
 fn instruction_source(

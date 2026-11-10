@@ -1,6 +1,15 @@
 //! Shared application logic for the CLI and desktop adapters.
 
 mod context;
+mod agent_document;
+pub use agent_document::{get_agent, save_agent, agent_model_options, AgentDocument, AgentModelOptions, HarnessModelOptions};
+mod model_mappings;
+pub use model_mappings::{delete_model_mapping, list_model_mappings, save_model_mapping, ModelMappings};
+pub mod global_config;
+pub mod harness;
+pub use harness::{
+    harness_models, install_harness, list_harnesses, provision_cli, uninstall_harness, HarnessStatus,
+};
 mod definitions;
 mod execution;
 mod graph;
@@ -9,6 +18,8 @@ mod project;
 mod runtime;
 mod settings;
 mod skills;
+mod skill_document;
+pub use skill_document::{get_skill, save_skill, SaveSkillResult, SkillDocument};
 mod validation;
 mod work;
 

@@ -11,6 +11,9 @@ serde_json.workspace = true
 serde_yaml_ng.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+jsonc-parser = { version = "0.34", features = ["cst", "serde", "serde_json"] }
+url = "2"
+tempfile = "3"
 
 [dev-dependencies]
 assert_fs.workspace = true

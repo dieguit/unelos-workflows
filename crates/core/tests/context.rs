@@ -78,7 +78,7 @@ fn resolves_the_selected_task_into_deterministic_inspection_json() {
     let agent = project.definitions.agents.get_mut("engineer").unwrap();
     agent.skills = vec!["rust".into(), "verification".into()];
     agent.instructions = "Agent text, separate.\n".into();
-    agent.model = Some("opaque-model".into());
+    agent.model = Some(unelos_core::AgentModel::Alias("opaque-model".into()));
     agent.mcps = vec!["opaque-mcp".into()];
     agent.tools = vec!["opaque-tool".into()];
 

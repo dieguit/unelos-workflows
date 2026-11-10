@@ -217,7 +217,7 @@ fn workflow_files(project_root: &Utf8Path) -> Result<(Utf8PathBuf, Vec<String>),
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AgentSummary {
     pub name: String,
-    pub model: Option<String>,
+    pub model: Option<crate::AgentModel>,
     pub skills: Vec<String>,
     pub mcps: Vec<String>,
     /// Why this agent's definition could not be read; other fields are then empty.
@@ -664,7 +664,7 @@ fn definition_sources(
     Ok(sources)
 }
 
-fn resolve_instructions(
+pub(crate) fn resolve_instructions(
     root: &Utf8Path,
     source: &Utf8Path,
     field: &str,

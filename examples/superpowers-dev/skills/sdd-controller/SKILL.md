@@ -1,6 +1,6 @@
 ---
 name: sdd-controller
-description: Controller rules for the task loop: preflight, fix-loop cap, rulings, and outcome selection.
+description: "Controller rules for the task loop: preflight, fix-loop cap, rulings, and outcome selection."
 ---
 
 > Adapted from superpowers' subagent-driven-development skill (MIT, Copyright (c) 2025 Jesse Vincent). License: LICENSE-superpowers in the superpowers-dev package.

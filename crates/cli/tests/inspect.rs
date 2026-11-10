@@ -253,7 +253,7 @@ fn inspect_resolves_one_task_context_deterministically_without_runtime_state() {
     );
     assert_eq!(value["inputs"], json!(["plan.md"]));
     assert_eq!(value["outputs"], json!(["implementation-report.md"]));
-    assert_eq!(value["model"], "example-provider/example-model");
+    assert_eq!(value["model"], json!({"harness": "opencode", "model": "example-provider/example-model"}));
     assert_eq!(value["mcps"], json!(["github"]));
     assert_eq!(value["tools"], json!(["read-file", "run-command"]));
     assert_eq!(value["skills"][0]["id"], "verification");

@@ -104,7 +104,7 @@ fn definitions_preserve_authored_values_and_defaults() {
     .unwrap();
     assert_eq!(agent.instructions, "Follow project conventions.");
     assert_eq!(agent.skills, ["rust", "verification"]);
-    assert_eq!(agent.model.as_deref(), Some("vendor/model#variant"));
+    assert_eq!(agent.model, Some(unelos_core::AgentModel::Harness { harness: "opencode".into(), model: "vendor/model#variant".into() }));
     assert_eq!(agent.mcps, ["github", "local"]);
     assert_eq!(agent.tools, ["read", "shell"]);
     let task = parse_task_definition("task.yaml", "instructions: Work.").unwrap();

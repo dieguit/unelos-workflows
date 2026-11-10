@@ -42,6 +42,16 @@ fn io_error(error: io::Error) -> InstallError {
     fail("install_io_failed", error.to_string())
 }
 
+pub(crate) fn resolve_agent_model(model: &crate::AgentModel) -> Result<String, InstallError> {
+    match model {
+        crate::AgentModel::Alias(alias) => crate::list_model_mappings()?
+            .get(alias).and_then(|models| models.get("opencode")).cloned()
+            .ok_or_else(|| fail("unmapped_model_alias", format!("No OpenCode model mapped for alias '{alias}'"))),
+        crate::AgentModel::Harness { harness, model } if harness == "opencode" => Ok(model.clone()),
+        crate::AgentModel::Harness { harness, .. } => Err(fail("model_harness_mismatch", format!("Model targets {harness}, expected opencode"))),
+    }
+}
+
 use crate::project::safe_id;
 
 fn references(project: &LoadedProject) -> (BTreeSet<String>, BTreeMap<String, (bool, bool)>) {
@@ -92,7 +102,8 @@ fn export(project: &LoadedProject) -> Result<Vec<AgentExport>, InstallError> {
                     ),
                 ));
             }
-            if let Some(model) = &agent.model {
+            let model = agent.model.as_ref().map(resolve_agent_model).transpose()?;
+            if let Some(model) = &model {
                 let (provider, rest) = model
                     .split_once('/')
                     .ok_or_else(|| fail("invalid_model", "Expected provider/model[#variant]"))?;
@@ -109,7 +120,7 @@ fn export(project: &LoadedProject) -> Result<Vec<AgentExport>, InstallError> {
             Ok(AgentExport {
                 id,
                 instructions: agent.instructions.clone(),
-                model: agent.model.clone(),
+                model,
                 tools: agent.tools.clone(),
                 mcps: agent.mcps.clone(),
                 main,

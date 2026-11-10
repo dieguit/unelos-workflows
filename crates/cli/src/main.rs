@@ -38,10 +38,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Initialize the project and install its bundled OpenCode integration.
-    Init {
-        #[arg(long, value_enum)]
-        opencode: Option<opencode::Version>,
+    /// Initialize the project scaffold (integrations are installed globally).
+    Init,
+    /// Detect harnesses and manage global integrations.
+    Harness {
+        #[command(subcommand)]
+        command: HarnessCommand,
     },
     /// Install a Workflow and optionally generate native OpenCode agents.
     Install {
@@ -120,6 +122,14 @@ enum Command {
 enum ConfigCommand {
     /// Show the effective settings.
     Show,
+}
+
+#[derive(Subcommand)]
+enum HarnessCommand {
+    List,
+    Install { id: String },
+    Uninstall { id: String },
+    Models { id: String },
 }
 
 #[derive(Subcommand)]
@@ -260,13 +270,31 @@ fn run(cli: &Cli) -> Result<(), Error> {
         subscriber.try_init().map_err(Error::Logging)?;
     }
     match &cli.command {
-        Command::Init { opencode } => {
-            let value = init::initialize(&cli.project, *opencode)?;
-            emit(
-                &value,
-                cli.json,
-                "Initialized Unelos. Open a fresh OpenCode session.".into(),
-            )?;
+        Command::Harness { command } => {
+            let value = match command {
+                HarnessCommand::List => serde_json::to_value(unelos_core::list_harnesses())?,
+                HarnessCommand::Install { id } => {
+                    let src =
+                        Utf8PathBuf::from_path_buf(std::env::current_exe()?).map_err(|_| {
+                            unelos_core::InstallError {
+                                code: "invalid_path",
+                                message: "CLI path must be UTF-8".into(),
+                            }
+                        })?;
+                    serde_json::to_value(unelos_core::install_harness(id, &src)?)?
+                }
+                HarnessCommand::Uninstall { id } => {
+                    serde_json::to_value(unelos_core::uninstall_harness(id)?)?
+                }
+                HarnessCommand::Models { id } => {
+                    serde_json::to_value(unelos_core::harness_models(id)?)?
+                }
+            };
+            emit(&value, cli.json, serde_json::to_string_pretty(&value)?)?;
+        }
+        Command::Init => {
+            let value = init::initialize(&cli.project)?;
+            emit(&value, cli.json, value["message"].as_str().unwrap().into())?;
         }
         Command::Install {
             workflow,
