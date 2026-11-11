@@ -74,5 +74,7 @@ pub fn build_graph(workflow: &WorkflowDefinition) -> WorkflowGraph {
             }
         }
     }
+    graph.nodes.sort_by(|a, b| a.id.cmp(&b.id));
+    graph.edges.sort_by(|a, b| (&a.from, &a.outcome).cmp(&(&b.from, &b.outcome)));
     graph
 }

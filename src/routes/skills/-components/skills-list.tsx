@@ -12,6 +12,7 @@ import {
   Truncated,
 } from "@/components/list-table"
 import type { SkillSummary } from "@/lib/projects"
+import type { ReactNode } from "react"
 
 export function filterSkills(skills: SkillSummary[], query: string) {
   const needle = query.trim().toLowerCase()
@@ -22,18 +23,28 @@ export function filterSkills(skills: SkillSummary[], query: string) {
   )
 }
 
-type Selection = { selected?: string; onSelect?: (name: string) => void }
+type Selection = {
+  selected?: string
+  onSelect?: (name: string) => void
+  actions?: (name: string) => ReactNode
+}
 
 function SkillsTable({
   skills,
   selected,
   onSelect,
+  actions,
 }: { skills: SkillSummary[] } & Selection) {
   return (
     <ListTable>
       <ListHeader>
         <ListHead className="w-65">Name</ListHead>
         <ListHead>Description</ListHead>
+        {actions && (
+          <ListHead className="w-14">
+            <span className="sr-only">Actions</span>
+          </ListHead>
+        )}
       </ListHeader>
       <ListBody>
         {skills.map((s) => (
@@ -55,6 +66,7 @@ function SkillsTable({
             <ListCell className="text-foreground-dim">
               {s.description ? <Truncated text={s.description} /> : "—"}
             </ListCell>
+            {actions && <ListCell>{actions(s.name)}</ListCell>}
           </ListRow>
         ))}
       </ListBody>

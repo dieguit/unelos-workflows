@@ -18,7 +18,7 @@ pub struct SaveSkillResult {
     pub updated_references: Vec<String>,
 }
 
-fn valid_id(id: &str) -> Result<(), String> {
+pub(crate) fn valid_id(id: &str) -> Result<(), String> {
     if id.is_empty()
         || id.trim() != id
         || matches!(id, "." | "..")

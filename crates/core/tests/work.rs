@@ -153,7 +153,7 @@ fn reports_invalid_node_worker_gate_and_selected_skill_context() {
     let (_temp, mut loaded) = project();
     if let NodeDefinition::HumanGate(gate) = loaded.workflow.nodes.get_mut("approve-plan").unwrap()
     {
-        gate.next.remove("rejected");
+        gate.next.shift_remove("rejected");
     }
     assert!(inspect_node(&loaded, "approve-plan")
         .unwrap_err()

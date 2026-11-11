@@ -4,8 +4,8 @@ import { Button } from "@/components/ui/button"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { agentModelOptions, type AgentModel } from "@/lib/projects"
-import { useLazy } from "../-hooks/use-lazy"
-import { PickerStatus } from "./picker-status"
+import { useLazy } from "@/hooks/use-lazy"
+import { PickerStatus } from "@/components/picker-status"
 
 export function AgentModelPicker({ value, onChange }: {
   value: AgentModel | null

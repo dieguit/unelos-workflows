@@ -2,7 +2,6 @@ import type { ReactNode } from "react"
 import { PanelRightCloseIcon, PencilIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { useStore } from "@tanstack/react-form"
 import {
   Field,
   FieldError,
@@ -30,9 +29,9 @@ function Shell({
   return (
     <aside
       aria-label={`Skill ${title}`}
-      className="flex w-105 shrink-0 flex-col border-l bg-background"
+      className="flex w-[380px] max-w-full shrink-0 flex-col border-l bg-background"
     >
-      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
+      <header className="flex h-16 shrink-0 items-center gap-2 px-4">
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-base font-semibold">{title}</h2>
           {dirty ? (
@@ -83,7 +82,6 @@ export function SkillInspector({
   saveError?: string
   editing: boolean
 }) {
-  const canSubmit = useStore(form.store, (s) => s.canSubmit)
   if (!doc)
     return (
       <Shell title={id} onClose={onClose}>
@@ -112,7 +110,7 @@ export function SkillInspector({
           size="sm"
           form="skill-form"
           type="submit"
-          disabled={!dirty || !canSubmit || saving || editing}
+          disabled={!dirty || saving || editing}
         >
           {saving ? "Saving…" : "Save"}
         </Button>
@@ -131,7 +129,7 @@ export function SkillInspector({
           disabled={saving || editing}
           className="flex min-w-0 flex-col gap-5 disabled:opacity-60"
         >
-          <FieldGroup>
+          <FieldGroup className="gap-4">
             <form.Field name="name">
               {(field) => {
                 const invalid =
@@ -139,7 +137,7 @@ export function SkillInspector({
                     form.state.submissionAttempts > 0) &&
                   !field.state.meta.isValid
                 return (
-                  <Field data-invalid={invalid}>
+                  <Field data-invalid={invalid} className="grid grid-cols-[76px_minmax(0,1fr)] items-center gap-x-2 [&>label]:text-foreground-dim [&>[data-slot=field-error]]:col-start-2">
                     <FieldLabel htmlFor="skill-name">Name</FieldLabel>
                     <Input
                       id="skill-name"
@@ -152,7 +150,10 @@ export function SkillInspector({
                         invalid ? "skill-name-error" : undefined
                       }
                       onBlur={field.handleBlur}
-                      onChange={(e) => field.handleChange(e.target.value)}
+                      onChange={(e) => {
+                        field.handleChange(e.target.value)
+                        if (field.state.meta.isBlurred) field.handleBlur()
+                      }}
                       className="h-9 font-normal"
                     />
                     {invalid ? (
@@ -167,7 +168,7 @@ export function SkillInspector({
             </form.Field>
             <form.Field name="description">
               {(field) => (
-                <Field>
+                <Field className="grid grid-cols-[76px_minmax(0,1fr)] items-center gap-x-2 [&>label]:text-foreground-dim">
                   <FieldLabel htmlFor="skill-description">
                     Description
                   </FieldLabel>
@@ -188,12 +189,10 @@ export function SkillInspector({
           </FieldGroup>
         </fieldset>
         {saveError ? (
-          <p
-            role="alert"
-            className="text-sm [overflow-wrap:anywhere] text-destructive"
-          >
-            Couldn’t save: {saveError}
-          </p>
+          <div role="alert" className="flex flex-col items-start gap-2 text-sm text-destructive">
+            <p className="[overflow-wrap:anywhere]">Couldn’t save: {saveError}</p>
+            <Button type="submit" variant="outline" size="sm" disabled={saving || editing}>Retry</Button>
+          </div>
         ) : null}
       </form>
       <form.Field name="body">

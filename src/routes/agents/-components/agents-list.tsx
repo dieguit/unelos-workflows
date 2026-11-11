@@ -12,6 +12,7 @@ import {
   Truncated,
 } from "@/components/list-table"
 import type { AgentModel, AgentSummary } from "@/lib/projects"
+import type { ReactNode } from "react"
 
 export function filterAgents(agents: AgentSummary[], query: string) {
   const needle = query.trim().toLowerCase()
@@ -36,12 +37,17 @@ export function ModelName({ model }: { model: AgentModel }) {
   )
 }
 
-type Selection = { selected?: string; onSelect?: (name: string) => void }
+type Selection = {
+  selected?: string
+  onSelect?: (name: string) => void
+  actions?: (name: string) => ReactNode
+}
 
 function AgentsTable({
   agents,
   selected,
   onSelect,
+  actions,
 }: { agents: AgentSummary[] } & Selection) {
   return (
     <ListTable>
@@ -50,6 +56,11 @@ function AgentsTable({
         <ListHead>Model</ListHead>
         <ListHead className="w-[22%]">Skills</ListHead>
         <ListHead className="w-[18%]">MCPs</ListHead>
+        {actions && (
+          <ListHead className="w-14">
+            <span className="sr-only">Actions</span>
+          </ListHead>
+        )}
       </ListHeader>
       <ListBody>
         {agents.map((a) => (
@@ -83,6 +94,7 @@ function AgentsTable({
             <ListCell className="text-foreground-dim">
               <List items={a.mcps} />
             </ListCell>
+            {actions && <ListCell>{actions(a.name)}</ListCell>}
           </ListRow>
         ))}
       </ListBody>

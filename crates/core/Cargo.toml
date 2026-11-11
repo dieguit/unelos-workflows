@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+indexmap = { version = "2", features = ["serde"] }
 camino.workspace = true
 config.workspace = true
 serde.workspace = true

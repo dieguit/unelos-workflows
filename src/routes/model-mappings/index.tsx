@@ -19,6 +19,7 @@ import { useHarnessModels } from "./-hooks/use-harness-models"
 import { filterMappings, usedBy } from "./-lib/model-mappings-list"
 import { useMappingForm } from "./-hooks/use-mapping-form"
 import { useDiscardChanges } from "@/hooks/use-discard-changes"
+import { useProjectDiscardGuard } from "@/hooks/use-project-discard-guard"
 
 export const Route = createFileRoute("/model-mappings/")({
   validateSearch: z.object({ alias: z.string().optional().catch(undefined) }),
@@ -112,8 +113,9 @@ function ModelMappingsHome() {
     })
     setError(undefined)
   }, [selected, creating, mappings, form])
+  const projectChangeApproved = useProjectDiscardGuard(busy, dirty, discard.ask)
   useBlocker({
-    shouldBlockFn: async () => busy || (dirty && !(await discard.ask())),
+    shouldBlockFn: async () => !projectChangeApproved.current && (busy || (dirty && !(await discard.ask()))),
     enableBeforeUnload: dirty || busy,
   })
 

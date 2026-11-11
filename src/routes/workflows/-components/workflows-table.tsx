@@ -1,8 +1,5 @@
-import {
-  ChevronRightIcon,
-  CopyIcon,
-  PlusIcon,
-} from "lucide-react"
+import { PlusIcon } from "lucide-react"
+import type { ReactNode } from "react"
 import { Button } from "@/components/ui/button"
 import {
   Tooltip,
@@ -36,8 +33,12 @@ export function NewWorkflowButton() {
 
 export function WorkflowsTable({
   workflows,
+  onOpen,
+  actions,
 }: {
   workflows: WorkflowSummary[]
+  onOpen: (file: string) => void
+  actions: (workflow: WorkflowSummary) => ReactNode
 }) {
   return (
     <ListTable>
@@ -45,15 +46,32 @@ export function WorkflowsTable({
         <ListHead className="w-70">Name</ListHead>
         <ListHead>Description</ListHead>
         <ListHead className="w-18 text-right">Steps</ListHead>
-        <ListHead className="w-32">
+        <ListHead className="w-14">
           <span className="sr-only">Actions</span>
         </ListHead>
       </ListHeader>
       <ListBody>
         {workflows.map((w) => (
-          <ListRow key={w.file}>
+          <ListRow
+            key={w.file}
+            className="cursor-pointer"
+            onClick={() => onOpen(w.file)}
+            onKeyDown={(e) => {
+              if (
+                e.target === e.currentTarget &&
+                (e.key === "Enter" || e.key === " ")
+              ) {
+                e.preventDefault()
+                onOpen(w.file)
+              }
+            }}
+          >
             <ListCell>
-              <ListPrimary title={w.name} subtitle={w.file} problem={w.problem} />
+              <ListPrimary
+                title={w.name}
+                subtitle={w.file}
+                problem={w.problem}
+              />
             </ListCell>
             <ListCell className="text-foreground-dim">
               {w.description ? <Truncated text={w.description} /> : "—"}
@@ -61,22 +79,7 @@ export function WorkflowsTable({
             <ListCell className="text-right text-foreground-dim tabular-nums">
               {w.steps ?? "—"}
             </ListCell>
-            <ListCell onKeyDown={(e) => e.stopPropagation()}>
-              <div className="flex items-center justify-end gap-1">
-                <Button
-                  variant="outline"
-                  size="icon-sm"
-                  className="disabled:pointer-events-auto hover:border-ring hover:bg-accent"
-                  aria-label={`Duplicate ${w.name}`}
-                  disabled
-                >
-                  <CopyIcon />
-                </Button>
-                <Button variant="ghost" size="sm" disabled>
-                  Open <ChevronRightIcon data-icon="inline-end" />
-                </Button>
-              </div>
-            </ListCell>
+            <ListCell>{actions(w)}</ListCell>
           </ListRow>
         ))}
       </ListBody>

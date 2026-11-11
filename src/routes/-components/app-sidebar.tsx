@@ -4,6 +4,7 @@ import {
   CableIcon,
   ArrowLeftRightIcon,
   HistoryIcon,
+  ListTodoIcon,
   MoonIcon,
   SettingsIcon,
   SunIcon,
@@ -21,11 +22,12 @@ import { cn } from "@/lib/utils"
 import { ProjectSelector } from "./project-selector"
 
 export const sections = [
+  { id: "settings", label: "Project settings", icon: SettingsIcon },
   { id: "workflows", label: "Workflows", icon: WorkflowIcon },
   { id: "agents", label: "Agents", icon: BotIcon },
   { id: "skills", label: "Skills", icon: BookOpenIcon },
+  { id: "tasks", label: "Tasks", icon: ListTodoIcon },
   { id: "runs", label: "Runs", icon: HistoryIcon },
-  { id: "settings", label: "Project settings", icon: SettingsIcon },
 ] as const
 
 const rowClass =
@@ -110,7 +112,7 @@ export function AppSidebar() {
       </div>
       <ProjectSelector />
       <nav aria-label="Project sections" className="flex flex-col gap-0.5">
-        {sections.slice(0, 4).map(renderSection)}
+        {sections.map(renderSection)}
       </nav>
       <nav aria-labelledby="sidebar-global" className="flex flex-col gap-0.5">
         <h2
@@ -131,6 +133,10 @@ export function AppSidebar() {
           <ArrowLeftRightIcon aria-hidden="true" className={iconClass} />
           Model mappings
         </Link>
+        <Link to="/global-tasks" data-section="global-tasks" className={linkClass}>
+          <ListTodoIcon aria-hidden="true" className={iconClass} />
+          Global tasks
+        </Link>
       </nav>
       <footer className="mt-auto flex flex-col gap-0.5 border-t pt-2">
         <button
@@ -150,7 +156,6 @@ export function AppSidebar() {
           <span className="dark:hidden">Dark mode</span>
           <span className="hidden dark:inline">Light mode</span>
         </button>
-        {renderSection(sections[4])}
       </footer>
     </aside>
   )

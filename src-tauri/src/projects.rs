@@ -10,6 +10,49 @@ use tauri_plugin_dialog::DialogExt;
 
 const MAX_RECENTS: usize = 10;
 
+#[tauri::command]
+pub async fn duplicate_agent(app: AppHandle, root: String, id: String, new_id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+    let root = approved_root(&load_from(&store_file(&app)?), Path::new(&root))?;
+    unelos_core::duplicate_agent(camino::Utf8Path::from_path(&root).ok_or("Project path is not UTF-8")?, &id, &new_id)
+    }).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub async fn duplicate_skill(app: AppHandle, root: String, id: String, new_id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+    let root = approved_root(&load_from(&store_file(&app)?), Path::new(&root))?;
+    unelos_core::duplicate_skill(camino::Utf8Path::from_path(&root).ok_or("Project path is not UTF-8")?, &id, &new_id)
+    }).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub async fn duplicate_workflow(app: AppHandle, root: String, id: String, new_id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+    let root = approved_root(&load_from(&store_file(&app)?), Path::new(&root))?;
+    unelos_core::duplicate_workflow(camino::Utf8Path::from_path(&root).ok_or("Project path is not UTF-8")?, &id, &new_id)
+    }).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub async fn remove_agent(app: AppHandle, root: String, id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+    let root = approved_root(&load_from(&store_file(&app)?), Path::new(&root))?;
+    unelos_core::remove_agent(camino::Utf8Path::from_path(&root).ok_or("Project path is not UTF-8")?, &id)
+    }).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub async fn remove_skill(app: AppHandle, root: String, id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+    let root = approved_root(&load_from(&store_file(&app)?), Path::new(&root))?;
+    unelos_core::remove_skill(camino::Utf8Path::from_path(&root).ok_or("Project path is not UTF-8")?, &id)
+    }).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub async fn remove_workflow(app: AppHandle, root: String, id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+    let root = approved_root(&load_from(&store_file(&app)?), Path::new(&root))?;
+    unelos_core::remove_workflow(camino::Utf8Path::from_path(&root).ok_or("Project path is not UTF-8")?, &id)
+    }).await.map_err(|e| e.to_string())?
+}
+
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Store {
     #[serde(default)]
@@ -240,6 +283,33 @@ pub async fn list_agents(app: AppHandle, root: String) -> Result<Vec<unelos_core
 }
 
 #[tauri::command]
+pub async fn get_workflow(app: AppHandle, root: String, id: String) -> Result<unelos_core::WorkflowDocument, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = approved_root(&load_from(&store_file(&app)?), Path::new(&root))?;
+        let root = camino::Utf8Path::from_path(&root).ok_or("Project path is not UTF-8")?;
+        unelos_core::get_workflow(root, &id)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn validate_workflow(app: AppHandle, root: String, id: String, draft: unelos_core::WorkflowDraft) -> Result<Vec<unelos_core::WorkflowIssue>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = approved_root(&load_from(&store_file(&app)?), Path::new(&root))?;
+        let root = camino::Utf8Path::from_path(&root).ok_or("Project path is not UTF-8")?;
+        unelos_core::validate_workflow(root, &id, &draft)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn save_workflow(app: AppHandle, root: String, id: String, draft: unelos_core::WorkflowDraft) -> Result<unelos_core::WorkflowDocument, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = approved_root(&load_from(&store_file(&app)?), Path::new(&root))?;
+        let root = camino::Utf8Path::from_path(&root).ok_or("Project path is not UTF-8")?;
+        unelos_core::save_workflow(root, &id, &draft)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn list_skills(app: AppHandle, root: String) -> Result<Vec<unelos_core::SkillSummary>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let root = approved_root(&load_from(&store_file(&app)?), Path::new(&root))?;
@@ -447,4 +517,70 @@ mod tests {
             ("gone", false)
         );
     }
+}
+
+#[tauri::command]
+pub async fn duplicate_task(app: AppHandle, root: String, id: String, new_id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+    let root = approved_root(&load_from(&store_file(&app)?), Path::new(&root))?;
+    unelos_core::duplicate_task(camino::Utf8Path::from_path(&root).ok_or("Project path is not UTF-8")?, &id, &new_id)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn remove_task(app: AppHandle, root: String, id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+    let root = approved_root(&load_from(&store_file(&app)?), Path::new(&root))?;
+    unelos_core::remove_task(camino::Utf8Path::from_path(&root).ok_or("Project path is not UTF-8")?, &id)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn list_tasks(app: AppHandle, root: String) -> Result<Vec<unelos_core::TaskSummary>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = approved_root(&load_from(&store_file(&app)?), Path::new(&root))?;
+        let root = camino::Utf8Path::from_path(&root).ok_or("Project path is not UTF-8")?;
+        unelos_core::task_summaries(root).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn get_task(app: AppHandle, root: String, id: String) -> Result<unelos_core::TaskDocument, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = approved_root(&load_from(&store_file(&app)?), Path::new(&root))?;
+        let root = camino::Utf8Path::from_path(&root).ok_or("Project path is not UTF-8")?;
+        unelos_core::get_task(root, &id)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn save_task(app: AppHandle, root: String, original_id: Option<String>, task: unelos_core::TaskDocument, outcome_renames: Option<std::collections::BTreeMap<String, String>>) -> Result<unelos_core::TaskDocument, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = approved_root(&load_from(&store_file(&app)?), Path::new(&root))?;
+        let root = camino::Utf8Path::from_path(&root).ok_or("Project path is not UTF-8")?;
+        unelos_core::save_task_with_outcome_renames(root, original_id.as_deref(), task, outcome_renames.unwrap_or_default())
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn list_global_tasks() -> Result<Vec<unelos_core::TaskSummary>, String> {
+    tauri::async_runtime::spawn_blocking(unelos_core::global_task_summaries).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub async fn get_global_task(id: String) -> Result<unelos_core::TaskDocument, String> {
+    tauri::async_runtime::spawn_blocking(move || unelos_core::get_global_task(&id)).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub async fn save_global_task(original_id: Option<String>, task: unelos_core::TaskDocument) -> Result<unelos_core::TaskDocument, String> {
+    tauri::async_runtime::spawn_blocking(move || unelos_core::save_global_task(original_id.as_deref(), task)).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub async fn duplicate_global_task(id: String, new_id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || unelos_core::duplicate_global_task(&id, &new_id)).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub async fn remove_global_task(id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || unelos_core::remove_global_task(&id)).await.map_err(|e| e.to_string())?
 }

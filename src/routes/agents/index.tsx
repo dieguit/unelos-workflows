@@ -5,18 +5,24 @@ import { useStore } from "@tanstack/react-form"
 import { BodyEditor } from "@/components/body-editor"
 import { Button } from "@/components/ui/button"
 import { useDiscardChanges } from "@/hooks/use-discard-changes"
+import { useProjectDiscardGuard } from "@/hooks/use-project-discard-guard"
+import { applyBodyDraft } from "@/lib/apply-body-draft"
 import { ListSearch } from "@/components/list-search"
 import { PageHeader } from "@/components/page-header"
+import { ListActions } from "@/components/list-actions"
 import {
   getAgent,
+  duplicateAgent,
   listAgents,
   requireProject,
   saveAgent,
+  removeAgent,
   type AgentDocument,
 } from "@/lib/projects"
 import { AgentInspector } from "./-components/agent-inspector"
 import { AgentsList, filterAgents } from "./-components/agents-list"
 import { emptyAgent, useAgentForm } from "./-hooks/use-agent-form"
+import { agentSchema } from "./-lib/agent-schema"
 
 export const Route = createFileRoute("/agents/")({
   beforeLoad: requireProject,
@@ -85,9 +91,10 @@ function AgentsHome() {
   const dirty = loaded && !isDefaultValue
   const editorDirty = editor !== null && editor !== draft?.instructions
   const askDiscard = discard.ask
+  const projectChangeApproved = useProjectDiscardGuard(saving, dirty || editorDirty, askDiscard)
   useBlocker({
     shouldBlockFn: async () =>
-      saving || ((dirty || editorDirty) && !(await askDiscard())),
+      !projectChangeApproved.current && (saving || ((dirty || editorDirty) && !(await askDiscard()))),
     enableBeforeUnload: dirty || editorDirty || saving,
   })
 
@@ -133,17 +140,6 @@ function AgentsHome() {
       <div className="min-w-0 flex-1 overflow-y-auto px-8 pt-6 pb-8">
         {editor !== null && draft ? (
           <div className="flex h-full flex-col gap-4">
-            {saveError ? (
-              <div role="alert" className="flex flex-col items-start gap-2">
-                <p className="text-sm text-destructive">
-                  Could not save Agent. Check the error below and try Save and
-                  close again.
-                </p>
-                <p className="text-xs [overflow-wrap:anywhere] text-muted-foreground">
-                  {saveError}
-                </p>
-              </div>
-            ) : null}
             <BodyEditor
               title={draft.id || "New Agent"}
               label="Instructions"
@@ -160,9 +156,9 @@ function AgentsHome() {
                     setEditor(null)
                 })()
               }}
-              onSave={() =>
-                form.handleSubmit({ instructions: editor, closeEditor: true })
-              }
+              onSave={async () => {
+                applyBodyDraft(editor, (body) => form.setFieldValue("instructions", body), () => setEditor(null))
+              }}
               onBlur={() => {
                 void form.validateField("instructions", "blur")
               }}
@@ -193,6 +189,35 @@ function AgentsHome() {
               selected={selected ?? undefined}
               onSelect={(id) => void select(id)}
               onCreate={() => void select(null)}
+              actions={(id) => (
+                <ListActions
+                  kind="Agent"
+                  name={id}
+                  nameSchema={agentSchema.shape.id}
+                  disabled={saving}
+                  beforeRemove={async () =>
+                    selected !== id ||
+                    (!saving &&
+                      (!(dirty || editorDirty) || (await askDiscard())))
+                  }
+                  duplicate={async (newId) => {
+                    await duplicateAgent(root, id, newId)
+                    void router.invalidate()
+                  }}
+                  remove={async () => {
+                    await removeAgent(root, id)
+                    if (selected === id) {
+                      ++request.current
+                      setSelected(undefined)
+                      setEditor(null)
+                      setLoaded(false)
+                      form.reset(emptyAgent)
+                      setBaseline(emptyAgent)
+                    }
+                    void router.invalidate()
+                  }}
+                />
+              )}
               query={query}
               onClear={() => {
                 setQuery("")

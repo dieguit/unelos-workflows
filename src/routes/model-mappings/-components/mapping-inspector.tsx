@@ -42,15 +42,14 @@ export function MappingInspector({
   onClose: () => void
 }) {
   const draft = useStore(form.store, (s) => s.values)
-  const canSubmit = useStore(form.store, (s) => s.canSubmit)
   const name = draft.alias || "this alias"
 
   return (
     <aside
       aria-label={original ? `Alias ${original}` : "New alias"}
-      className="flex w-105 shrink-0 flex-col border-l bg-background"
+      className="flex w-[380px] max-w-full shrink-0 flex-col border-l bg-background"
     >
-      <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
+      <header className="flex h-16 shrink-0 items-center gap-2 px-4">
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-base font-semibold">
             {original ?? "New alias"}
@@ -70,7 +69,7 @@ export function MappingInspector({
           size="sm"
           type="submit"
           form="mapping-form"
-          disabled={!dirty || busy || !canSubmit}
+          disabled={!dirty || busy}
         >
           {busy ? "Saving…" : original ? "Save" : "Create"}
         </Button>
@@ -125,7 +124,7 @@ export function MappingInspector({
                 return (
                   <Field
                     data-invalid={invalid}
-                    className="grid grid-cols-[6rem_1fr] items-start gap-x-3"
+                    className="grid grid-cols-[76px_minmax(0,1fr)] items-start gap-x-2"
                   >
                     <FieldLabel
                       htmlFor="mapping-alias"
@@ -154,7 +153,7 @@ export function MappingInspector({
                         }}
                         className="h-9 font-mono"
                       />
-                      <div className="min-h-10">
+                      <div>
                         {invalid ? (
                           <FieldError
                             id="mapping-alias-error"
@@ -170,7 +169,7 @@ export function MappingInspector({
 
             <section
               aria-labelledby="harness-models"
-              className="flex flex-col gap-3 border-t pt-4"
+              className="flex flex-col gap-3"
             >
               <div className="flex flex-col gap-0.5">
                 <h3 id="harness-models" className="text-sm font-medium">
@@ -186,7 +185,7 @@ export function MappingInspector({
                     {(field) => (
                       <Field
                         key={h.id}
-                        className="grid grid-cols-[6rem_1fr] items-start gap-x-3"
+                        className="grid grid-cols-[76px_minmax(0,1fr)] items-start gap-x-2"
                         onBlur={field.handleBlur}
                       >
                         <FieldLabel
@@ -246,7 +245,7 @@ export function MappingInspector({
         </fieldset>
 
         {original ? (
-          <div className="grid grid-cols-[6rem_1fr] gap-x-3 border-t pt-4 text-sm">
+          <div className="grid grid-cols-[76px_minmax(0,1fr)] gap-x-2 text-sm">
             <span>Used by</span>
             <span className="[overflow-wrap:anywhere] text-foreground-dim">
               {usedBy?.length ? usedBy.join(", ") : "—"}
@@ -255,12 +254,10 @@ export function MappingInspector({
         ) : null}
 
         {error ? (
-          <p
-            role="alert"
-            className="text-sm [overflow-wrap:anywhere] text-destructive"
-          >
-            {error}
-          </p>
+          <div role="alert" className="flex flex-col items-start gap-2 text-sm text-destructive">
+            <p className="[overflow-wrap:anywhere]">{error}</p>
+            <Button type="submit" variant="outline" size="sm" disabled={busy}>Retry</Button>
+          </div>
         ) : null}
       </form>
     </aside>

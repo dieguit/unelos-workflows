@@ -39,7 +39,7 @@ impl LoadedProject {
                 .ok_or_else(|| ProjectValidationError {
                     path: self.workflow_source.clone(),
                     field: format!("{field}.task"),
-                    cause: format!("unknown Task Definition {id:?}"),
+                    cause: match id.strip_prefix("global/") { Some(id) => format!("Global task {id:?} not found"), None => format!("unknown Task Definition {id:?}") },
                 }),
             crate::TaskSelection::Inline(task) => Ok((task, format!("{field}.taskDefinition"))),
         }
@@ -225,6 +225,15 @@ pub struct AgentSummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct TaskSummary {
+    pub name: String,
+    pub description: Option<String>,
+    pub skills: Vec<String>,
+    pub outcomes: Vec<String>,
+    pub problem: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct SkillSummary {
     pub name: String,
     pub description: Option<String>,
@@ -253,7 +262,16 @@ fn summarize_definitions<T>(
         "project",
     )?;
     parse_project_settings(settings.as_str(), &read(&settings)?)?;
-    let path = bounded_path(&authoring_root, Utf8Path::new(directory), &settings, directory)?;
+    summarize_authoring(&authoring_root, directory, summarize, broken)
+}
+
+fn summarize_authoring<T>(
+    authoring_root: &Utf8Path,
+    directory: &str,
+    summarize: impl Fn(&Utf8Path, &Utf8Path, &str) -> Result<T, ProjectLoadError>,
+    broken: impl Fn(String, String) -> T,
+) -> Result<Vec<T>, ProjectLoadError> {
+    let path = bounded_path(authoring_root, Utf8Path::new(directory), authoring_root, directory)?;
     let entries = match fs::read_dir(&path) {
         Ok(entries) => entries,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -332,6 +350,55 @@ pub fn agent_summaries(project_root: &Utf8Path) -> Result<Vec<AgentSummary>, Pro
             problem: Some(problem),
         },
     )
+}
+
+/// Summarize each `.unelos/tasks/<id>/task.yaml`; a broken task is a row with `problem`.
+pub fn task_summaries(project_root: &Utf8Path) -> Result<Vec<TaskSummary>, ProjectLoadError> {
+    summarize_definitions(project_root, "tasks", summarize_task, broken_task)
+}
+
+pub fn global_task_summaries() -> Result<Vec<TaskSummary>, String> {
+    summarize_authoring(&crate::task_document::global_root()?, "tasks", summarize_task, broken_task).map_err(|e| e.to_string())
+}
+
+fn summarize_task(authoring_root: &Utf8Path, directory: &Utf8Path, id: &str) -> Result<TaskSummary, ProjectLoadError> {
+    let relative = Utf8PathBuf::from("tasks").join(id);
+    let entry = bounded_path(authoring_root, &relative, directory, id)?;
+    if !safe_id(id) {
+        return Err(diagnostic(&entry, "id", "invalid definition ID"));
+    }
+    let source = bounded_path(
+        authoring_root,
+        &relative.join("task.yaml"),
+        &entry,
+        "task.yaml",
+    )?;
+    let mut task = parse_task_definition(source.as_str(), &read(&source)?)?;
+    resolve_instructions(
+        authoring_root,
+        &source,
+        "instructionsFile",
+        &task.instructions_file,
+        &mut task.instructions,
+        &mut BTreeMap::new(),
+    )?;
+    Ok(TaskSummary {
+        name: id.to_owned(),
+        description: task.description,
+        skills: task.skills,
+        outcomes: task.outcomes,
+        problem: None,
+    })
+}
+
+fn broken_task(name: String, problem: String) -> TaskSummary {
+    TaskSummary {
+    name,
+    description: None,
+    skills: Vec::new(),
+    outcomes: Vec::new(),
+    problem: Some(problem),
+        }
 }
 
 /// Summarize each `.unelos/skills/<id>/SKILL.md`; a broken skill is a row with `problem`.
@@ -447,6 +514,14 @@ pub fn load_project(
     project_root: &Utf8Path,
     workflow_name: &str,
 ) -> Result<LoadedProject, ProjectLoadError> {
+    load_project_candidate(project_root, workflow_name, None)
+}
+
+pub(crate) fn load_project_candidate(
+    project_root: &Utf8Path,
+    workflow_name: &str,
+    candidate: Option<&str>,
+) -> Result<LoadedProject, ProjectLoadError> {
     let project_root = absolute_root(project_root).map_err(|source| ProjectLoadError::Root {
         path: project_root.to_owned(),
         source,
@@ -459,7 +534,7 @@ pub fn load_project(
         "project",
     )?;
     parse_project_settings(settings.as_str(), &read(&settings)?)?;
-    let mut loaded = load_authoring(&authoring_root, workflow_name)?;
+    let mut loaded = load_authoring_candidate(&authoring_root, workflow_name, candidate)?;
     loaded.project_root = project_root;
     Ok(loaded)
 }
@@ -467,6 +542,14 @@ pub fn load_project(
 pub(crate) fn load_authoring(
     authoring_root: &Utf8Path,
     workflow_name: &str,
+) -> Result<LoadedProject, ProjectLoadError> {
+    load_authoring_candidate(authoring_root, workflow_name, None)
+}
+
+fn load_authoring_candidate(
+    authoring_root: &Utf8Path,
+    workflow_name: &str,
+    candidate: Option<&str>,
 ) -> Result<LoadedProject, ProjectLoadError> {
     if workflow_name.is_empty()
         || matches!(workflow_name, "." | "..")
@@ -522,8 +605,8 @@ pub(crate) fn load_authoring(
         agent_sources.insert(id.clone(), source);
         definitions.agents.insert(id, agent);
     }
-    let mut workflow =
-        parse_workflow_definition(workflow_source.as_str(), &read(&workflow_source)?)?;
+    let text = match candidate { Some(text) => text.to_owned(), None => read(&workflow_source)? };
+    let mut workflow = parse_workflow_definition(workflow_source.as_str(), &text)?;
     if workflow.name != workflow_name {
         return Err(ProjectLoadError::NameMismatch {
             path: workflow_source,
@@ -551,6 +634,26 @@ pub(crate) fn load_authoring(
             _ => Vec::new(),
         };
         for (field, selection) in selections {
+            if let TaskSelection::Named(name) = selection {
+                if let Some(id) = name.strip_prefix("global/") {
+                    if !safe_id(id) { return Err(diagnostic(&workflow_source, "task", "invalid global task ID")); }
+                    if !definitions.task_definitions.contains_key(name) {
+                        let root = crate::task_document::global_root().map_err(|e| diagnostic(&workflow_source, "task", e))?;
+                        let source = bounded_path(&root, &Utf8PathBuf::from("tasks").join(id).join("task.yaml"), &workflow_source, "task")?;
+                        match read(&source) {
+                            Ok(text) => {
+                                let mut task = parse_task_definition(source.as_str(), &text)?;
+                                // Global dependencies are not project-relative install inputs; runtime uses resolved text.
+                                resolve_instructions(&root, &source, "instructionsFile", &task.instructions_file, &mut task.instructions, &mut BTreeMap::new())?;
+                                definitions.task_definitions.insert(name.clone(), task);
+                                task_sources.insert(name.clone(), source);
+                            }
+                            Err(ProjectLoadError::Missing { .. }) => {}
+                            Err(error) => return Err(error),
+                        }
+                    }
+                }
+            }
             if let TaskSelection::Inline(task) = selection {
                 resolve_instructions(
                     &authoring_root,

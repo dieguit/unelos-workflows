@@ -1,6 +1,13 @@
 //! Shared application logic for the CLI and desktop adapters.
 
 mod context;
+mod authoring_actions;
+pub use authoring_actions::{duplicate_global_task, remove_global_task, duplicate_task, remove_task, duplicate_agent, duplicate_skill, duplicate_workflow, remove_agent, remove_skill, remove_workflow};
+mod workflow_document;
+pub use workflow_document::{get_workflow, validate_workflow, save_workflow, WorkflowDocument, WorkflowDraft, StepTask, WorkflowSettings, WorkflowStep, WorkflowRoute, WorkflowWorker, WorkflowIssue};
+mod task_document;
+pub use task_document::{get_global_task, save_global_task, get_task, save_task, save_task_with_outcome_renames, TaskDocument};
+
 mod agent_document;
 pub use agent_document::{get_agent, save_agent, agent_model_options, AgentDocument, AgentModelOptions, HarnessModelOptions};
 mod model_mappings;
@@ -40,7 +47,7 @@ pub use install::{
     install_workflow, write_install_file, AgentExport, InstallError, WorkflowInstall,
 };
 pub use project::{
-    agent_summaries, list_workflows, load_project, skill_summaries, workflow_summaries,
+    global_task_summaries, task_summaries, TaskSummary, agent_summaries, list_workflows, load_project, skill_summaries, workflow_summaries,
     AgentSummary, LoadedProject, ProjectLoadError, SkillSummary,
     WorkflowSummary,
 };

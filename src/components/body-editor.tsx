@@ -41,7 +41,7 @@ export function BodyEditor({
             void onSave().finally(() => setSaving(false))
           }}
         >
-          {saving ? "Saving…" : "Save and close"}
+          {saving ? "Applying…" : "Apply"}
         </Button>
       </header>
       <Field className="min-h-0 flex-1" onBlur={onBlur}>

@@ -1,5 +1,4 @@
 import { useCallback } from "react"
-import { useStore } from "@tanstack/react-form"
 import { PanelRightCloseIcon, PencilIcon, XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -12,9 +11,9 @@ import {
 } from "@/components/ui/field"
 import { listSkills, type AgentDocument } from "@/lib/projects"
 import type { AgentForm } from "../-hooks/use-agent-form"
-import { useLazy } from "../-hooks/use-lazy"
+import { useLazy } from "@/hooks/use-lazy"
 import { AgentModelPicker } from "./model-picker"
-import { SkillPicker } from "./skill-picker"
+import { SkillPicker } from "@/components/skill-picker"
 
 export function AgentInspector({
   root,
@@ -47,13 +46,12 @@ export function AgentInspector({
 }) {
   const fetchSkills = useCallback(() => listSkills(root), [root])
   const skills = useLazy(fetchSkills)
-  const canSubmit = useStore(form.store, (s) => s.canSubmit)
   return (
     <aside
       aria-label={originalId ? `Agent ${originalId}` : "New Agent"}
-      className="flex w-105 shrink-0 flex-col border-l bg-background"
+      className="flex w-[380px] max-w-full shrink-0 flex-col border-l bg-background"
     >
-      <header className="flex min-h-16 shrink-0 items-center gap-2 border-b px-4 py-3">
+      <header className="flex min-h-16 shrink-0 items-center gap-2 px-4 py-3">
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-base font-semibold">
             {originalId ?? "New Agent"}
@@ -71,7 +69,7 @@ export function AgentInspector({
           size="sm"
           type="submit"
           form="agent-form"
-          disabled={!dirty || !canSubmit || saving || editing}
+          disabled={!dirty || saving || editing}
         >
           {saving ? "Saving…" : "Save"}
         </Button>
@@ -115,7 +113,7 @@ export function AgentInspector({
               disabled={saving || editing}
               className="min-w-0 disabled:opacity-60"
             >
-              <FieldGroup>
+              <FieldGroup className="gap-4">
                 <form.Field name="id">
                   {(field) => {
                     const invalid =
@@ -124,7 +122,7 @@ export function AgentInspector({
                       (form.state.submissionAttempts > 0 &&
                         !field.state.meta.isValid)
                     return !originalId ? (
-                      <Field data-invalid={invalid}>
+                      <Field data-invalid={invalid} className="grid grid-cols-[76px_minmax(0,1fr)] items-center gap-x-2 [&>label]:text-foreground-dim [&>div]:col-start-2">
                         <FieldLabel htmlFor="agent-id">Name (id)</FieldLabel>
                         <Input
                           id="agent-id"
@@ -146,7 +144,7 @@ export function AgentInspector({
                           }
                           className="h-9 font-mono font-normal"
                         />
-                        <div className="min-h-5">
+                        <div>
                           {invalid ? (
                             <FieldError
                               id="agent-id-error"
@@ -176,14 +174,14 @@ export function AgentInspector({
                 </form.Field>
                 <form.Field name="skills" mode="array">
                   {(field) => (
-                    <Field className="border-t pt-4" onBlur={field.handleBlur}>
+                    <Field onBlur={field.handleBlur}>
                       <FieldTitle>Skills</FieldTitle>
                       {field.state.value.length ? (
-                        <ul className="flex flex-col gap-2">
+                        <ul className="flex flex-wrap gap-1.5">
                           {field.state.value.map((skill, i) => (
                             <li
                               key={`${i}-${skill}`}
-                              className="flex min-w-0 items-center gap-2 rounded-md border px-2 py-1"
+                              className="flex h-7 min-w-0 items-center gap-1 rounded-md border pr-0.5 pl-1.5 font-mono text-xs"
                             >
                               <span
                                 className="min-w-0 flex-1 truncate text-sm"
@@ -219,7 +217,7 @@ export function AgentInspector({
                 </form.Field>
                 <form.Field name="model">
                   {(field) => (
-                    <Field className="border-t pt-4" onBlur={field.handleBlur}>
+                    <Field onBlur={field.handleBlur} className="grid grid-cols-[76px_minmax(0,1fr)] items-center gap-x-2 [&>label]:text-foreground-dim">
                       <FieldLabel htmlFor="agent-model">Model</FieldLabel>
                       <AgentModelPicker
                         value={field.state.value}
@@ -228,7 +226,7 @@ export function AgentInspector({
                     </Field>
                   )}
                 </form.Field>
-                <Field className="border-t pt-4">
+                <Field>
                   <FieldTitle>MCPs</FieldTitle>
                   {draft.mcps.length ? (
                     <ul className="space-y-1 text-sm text-foreground-dim">

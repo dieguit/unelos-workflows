@@ -1,7 +1,7 @@
 import { mockIPC } from "@tauri-apps/api/mocks"
 import type { Harness } from "./harnesses"
 import type { ModelMappings } from "./model-mappings"
-import type { AgentDocument, AgentSummary, ProjectState, SkillDocument, SkillSummary, WorkflowSummary } from "./projects"
+import type { TaskDocument, AgentDocument, AgentSummary, ProjectState, SkillDocument, SkillSummary, WorkflowDocument, WorkflowDraft, WorkflowStep, WorkflowIssue, WorkflowSummary } from "./projects"
 
 const home = "/home/dieguit"
 const day = 86_400_000
@@ -36,6 +36,79 @@ const agents: AgentSummary[] = [
   { name: "reviewer", model: null, skills: [], mcps: [], problem: null },
 ]
 
+// Mock fixtures only: production validation remains in Rust.
+const workflowSteps: Record<string, Pick<WorkflowStep, "id" | "label" | "kind">[]> = {
+  "implement-feature": [
+    { id: "plan", label: "Plan", kind: "task" },
+    { id: "approve-plan", label: "Approve plan", kind: "human-gate" },
+    { id: "implement", label: "Implement", kind: "parallel" },
+    { id: "review", label: "Review", kind: "task" },
+    { id: "done", label: "Done", kind: "end" },
+  ],
+  "investigate-bug": [
+    { id: "reproduce", label: "Reproduce", kind: "task" },
+    { id: "investigate", label: "Investigate", kind: "task" },
+    { id: "approve", label: "Approve", kind: "human-gate" },
+    { id: "done", label: "Done", kind: "end" },
+  ],
+  "review-change": [
+    { id: "review", label: "Review", kind: "task" },
+    { id: "sign-off", label: "Sign off", kind: "human-gate" },
+    { id: "done", label: "Done", kind: "end" },
+  ],
+  "refactor-module": [
+    { id: "map", label: "Map", kind: "task" },
+    { id: "refactor", label: "Refactor", kind: "parallel" },
+    { id: "verify", label: "Verify", kind: "task" },
+    { id: "review", label: "Review", kind: "task" },
+    { id: "approve", label: "Approve", kind: "human-gate" },
+    { id: "done", label: "Done", kind: "end" },
+  ],
+}
+const projectWorkflows = new Map<string, { summary: WorkflowSummary; document: WorkflowDocument }[]>()
+function workflowsFor(root: string) {
+  if (!state.recents.some((r) => r.path === root && r.available)) throw "Project is not approved"
+  if (mode === "error") throw "missing file /x/.unelos/project.yaml"
+  if (!projectWorkflows.has(root)) {
+    const prefix = mode === "switch" ? `${root.split("/").pop()}-` : ""
+    projectWorkflows.set(root, workflows.map((summary) => {
+      const original = summary.file.replace(/\.yaml$/, "")
+      const id = prefix + original
+       const steps: WorkflowStep[] = (workflowSteps[original] ?? []).map((step, index, all) => ({
+         ...step, originalId: step.id, task: step.kind === "task" ? { source: "inline", id: null, description: null, instructions: `Perform ${step.id}`, skills: [], outcomes: [] } : null, label: step.id, title: step.kind === "task" ? step.id : null,
+         agent: step.kind === "task" ? "engineer" : null, execution: step.kind === "task" ? "main" : null,
+         routes: all[index + 1] ? [{ outcome: null, target: all[index + 1].id }] : [], workers: [], inputs: [], outputs: [],
+       }))
+       if (original === "implement-feature") {
+         Object.assign(steps[0], { title: "write-plan", agent: "planner" })
+         Object.assign(steps[1], { inputs: ["plan.md"], routes: [{ outcome: "approved", target: "implement" }, { outcome: "rejected", target: "plan" }] })
+         Object.assign(steps[2], { workers: [{ title: "implement-api", agent: "engineer" }, { title: "implement-ui", agent: "engineer" }], inputs: ["plan.md"], outputs: ["implementation-report.md"] })
+         Object.assign(steps[3], { title: "review-change", agent: "reviewer", execution: "subagent", routes: [{ outcome: "approved", target: "done" }, { outcome: "changes_requested", target: "implement" }] })
+       }
+       for (const step of steps) if (step.task) step.task.outcomes = step.routes.flatMap((route) => route.outcome ? [route.outcome] : [])
+       return {
+        summary: { ...summary, name: mode === "switch" ? `${root.split("/").pop()}: ${summary.name}` : summary.name, file: `${id}.yaml` },
+        document: { id, name: id, description: summary.description, start: steps[0]?.id ?? "", steps, issues: summary.problem ? [{ message: summary.problem, step: "review" }] : steps.length ? [] : [{ message: "Mock fixture has no step definitions", step: null }] },
+      }
+    }))
+  }
+  return projectWorkflows.get(root)!
+}
+function workflowFor(root: string, id: string) {
+  const workflow = workflowsFor(root).find((w) => w.document.id === id)
+  if (!workflow) throw `Workflow ${id} could not be loaded`
+  return workflow
+}
+function workflowIssues(root: string, id: string, settings: WorkflowDraft): WorkflowIssue[] {
+  const { document } = workflowFor(root, id)
+  if (settings.name !== id) {
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(settings.name)) return [{ message: "Name must contain 1–128 ASCII letters, digits, underscores or hyphens", step: null }]
+    if (workflowsFor(root).some((w) => w.document.id === settings.name)) return [{ message: `Workflow ${settings.name} already exists`, step: null }]
+  }
+  if (!settings.steps.some((step) => step.id === settings.start)) return [{ message: `start: unknown target ${JSON.stringify(settings.start)}`, step: null }]
+  return [...document.issues]
+}
+
 const agentDocuments: Record<string, AgentDocument> = Object.fromEntries(
   agents.filter((a) => !a.problem).map((a) => [a.name, {
     id: a.name, instructions: a.name === "reviewer" ? "Inspect requirements and actual changes independently." : "Implement the requested changes.",
@@ -56,6 +129,15 @@ const bodies: Record<string, string> = {
   rust: "# Rust\n\nFollow existing Rust conventions in this project.\n",
 }
 
+const globalTasks: Record<string, TaskDocument> = {}
+const projectTasks = new Map<string, Record<string, TaskDocument>>()
+
+const projectAuthoring = new Map<string, { agents: AgentSummary[]; agentDocuments: Record<string, AgentDocument>; skills: SkillSummary[]; bodies: Record<string, string> }>()
+function authoringFor(root: string) {
+  if (!projectAuthoring.has(root)) projectAuthoring.set(root, structuredClone({ agents, agentDocuments, skills, bodies }))
+  return projectAuthoring.get(root)!
+}
+
 const harness = (id: string, name: string, version: string | null = null): Harness => ({
   id, name, installable: id === "opencode", detected: version !== null, installed: false, updateAvailable: false,
   version, integrationVersion: null, binary: version ? `${home}/.local/bin/${id}` : null, configDir: version ? `${home}/.config/${id}` : null,
@@ -67,13 +149,6 @@ const harnesses: Harness[] = [
   harness("pi", "Pi", "0.9.3"),
   ...[["copilot", "Copilot"], ["cursor", "Cursor"], ["droid", "Droid"], ["kimi", "Kimi"], ["qwen", "Qwen Code"], ["gemini", "Gemini CLI"], ["amp", "Amp"], ["cline", "Cline"]].map(([id, name]) => harness(id, name)),
 ]
-
-const skillDoc = (id: string): SkillDocument => {
-  const s = skills.find((s) => s.name === id)
-  if (!s) throw `Skill ${id} not found`
-  if (s.problem) throw `${id}/SKILL.md: ${s.problem}`
-  return { name: s.name, description: s.description, body: bodies[id] ?? "" }
-}
 
 const modelMappings: ModelMappings = {
   smart: { opencode: "anthropic/claude-sonnet-4-5" },
@@ -93,7 +168,127 @@ const harnessModels = {
 export function installDevIpcMock() {
   mockIPC(async (cmd, args) => {
     const path = (args as { path?: string })?.path
+    const root = (args as { root?: string })?.root ?? state.recents[0]?.path ?? ""
+    const { agents, agentDocuments, skills, bodies } = authoringFor(root)
+    const skillDoc = (id: string): SkillDocument => {
+      const skill = skills.find((s) => s.name === id)
+      if (!skill) throw `Skill ${id} not found`
+      if (skill.problem) throw `${id}/SKILL.md: ${skill.problem}`
+      return { name: id, description: skill.description, body: bodies[id] ?? "" }
+    }
+    const tasks = cmd.includes("global_task") ? globalTasks : (projectTasks.get(root) ?? (() => {
+      const documents: Record<string, TaskDocument> = {}
+      projectTasks.set(root, documents)
+      return documents
+    })())
     switch (cmd) {
+      case "list_tasks":
+      case "list_global_tasks":
+        return Object.values(tasks).sort((a, b) => a.id.localeCompare(b.id)).map((task) => ({ name: task.id, description: task.description, skills: [...task.skills], outcomes: [...task.outcomes], problem: null }))
+      case "get_task":
+      case "get_global_task": {
+        const { id } = args as { id: string }
+        if (!Object.hasOwn(tasks, id)) throw `Task ${id} not found`
+        return structuredClone(tasks[id])
+      }
+      case "save_task":
+      case "save_global_task": {
+        const { originalId, task, outcomeRenames = {} } = args as { originalId: string | null; task: TaskDocument; outcomeRenames?: Record<string, string> }
+        if (!/^[A-Za-z0-9_-]{1,128}$/.test(task.id)) throw "Invalid Task ID"
+        if (originalId !== null && originalId !== task.id) throw "Task IDs are read-only"
+        if (originalId === null && Object.hasOwn(tasks, task.id)) throw "Already exists"
+        if (originalId !== null && !Object.hasOwn(tasks, originalId)) throw "Task not found"
+        if (cmd === "save_task") {
+          const old = originalId === null ? [] : tasks[originalId].outcomes
+          const oldSet = new Set(old), newSet = new Set(task.outcomes)
+          const renamed = (outcome: string) => Object.hasOwn(outcomeRenames, outcome) ? outcomeRenames[outcome] : outcome
+          if (oldSet.size !== old.length || newSet.size !== task.outcomes.length) throw "Duplicate task outcomes"
+          if (Object.entries(outcomeRenames).some(([from, to]) => !oldSet.has(from) || !newSet.has(to))) throw "Invalid outcome renames"
+          if (new Set(old.map(renamed)).size !== old.length) throw "Outcome renames collide"
+          const changed = oldSet.size !== newSet.size || [...oldSet].some((outcome) => !newSet.has(outcome) || renamed(outcome) !== outcome)
+          const steps = workflowsFor(root).flatMap((workflow) => workflow.document.steps).filter((step) => step.kind === "task" && step.task?.source === "named" && step.task.id === originalId)
+          if (changed) for (const step of steps) {
+            const routes = step.routes.flatMap((route) => route.outcome === null ? [] : [route.outcome])
+            const mapped = routes.map(renamed)
+            if (routes.length !== oldSet.size || routes.some((outcome) => !oldSet.has(outcome)) || new Set(mapped).size !== newSet.size || mapped.some((outcome) => !newSet.has(outcome)) || (task.outcomes.length === 0 && (step.routes.length !== 1 || step.routes[0].outcome !== null))) throw "Outcome changes require manual workflow route repair"
+          }
+          for (const step of steps) {
+            for (const route of step.routes) if (route.outcome !== null) route.outcome = renamed(route.outcome)
+            if (step.task) step.task.outcomes = [...task.outcomes]
+          }
+        }
+        tasks[task.id] = structuredClone(task)
+        return structuredClone(task)
+      }
+      case "duplicate_task":
+      case "duplicate_global_task": {
+        const { id, newId } = args as { id: string; newId: string }
+        if (!Object.hasOwn(tasks, id)) throw "Task not found"
+        if (!/^[A-Za-z0-9_-]{1,128}$/.test(newId)) throw "Invalid Task ID"
+        if (Object.hasOwn(tasks, newId)) throw "Already exists"
+        tasks[newId] = { ...structuredClone(tasks[id]), id: newId }
+        return
+      }
+      case "remove_task":
+      case "remove_global_task": {
+        const { id } = args as { id: string }
+        if (!Object.hasOwn(tasks, id)) throw "Task not found"
+        delete tasks[id]
+        return
+      }
+      case "duplicate_agent":
+      case "duplicate_skill":
+      case "duplicate_workflow": {
+        workflowsFor(root) // Same approved-root guard as the real commands.
+        const { id, newId } = args as { id: string; newId: string }
+        if (cmd === "duplicate_skill") {
+          if (!newId || newId.trim() !== newId || newId === "." || newId === ".." || /[/\\:\0]/.test(newId)) throw "Invalid Skill ID"
+          const skill = skills.find((s) => s.name === id)
+          if (!skill) throw `Skill ${id} not found`
+          if (skills.some((s) => s.name === newId)) throw "Already exists"
+          skills.push({ ...structuredClone(skill), name: newId })
+          bodies[newId] = bodies[id] ?? ""
+        } else {
+          if (!/^[A-Za-z0-9_-]{1,128}$/.test(newId)) throw "Name must contain 1–128 ASCII letters, digits, underscores or hyphens"
+          if (cmd === "duplicate_agent") {
+            const agent = agents.find((a) => a.name === id)
+            if (!agent) throw `Agent ${id} not found`
+            if (agents.some((a) => a.name === newId)) throw "Already exists"
+            agents.push({ ...structuredClone(agent), name: newId })
+            if (Object.hasOwn(agentDocuments, id)) agentDocuments[newId] = { ...structuredClone(agentDocuments[id]), id: newId }
+          } else {
+            const workflow = workflowFor(root, id)
+            if (workflowsFor(root).some((w) => w.document.id === newId)) throw "Already exists"
+            workflowsFor(root).push({ summary: { ...structuredClone(workflow.summary), name: newId, file: `${newId}.yaml` }, document: { ...structuredClone(workflow.document), name: newId, id: newId } })
+          }
+        }
+        return null
+      }
+      case "remove_agent":
+      case "remove_skill":
+      case "remove_workflow": {
+        const workflows = workflowsFor(root)
+        const { id } = args as { id: string }
+        if (cmd === "remove_workflow") {
+          const index = workflows.findIndex((w) => w.document.id === id)
+          if (index === -1) throw `Workflow ${id} not found`
+          if (id.endsWith("implement-feature")) throw "Cannot remove workflow: finish or remove its in-progress runs first (mock fixture)"
+          workflows.splice(index, 1)
+        } else if (cmd === "remove_agent") {
+          const index = agents.findIndex((a) => a.name === id)
+          if (index === -1) throw `Agent ${id} not found`
+          if (["engineer", "reviewer"].includes(id) && workflows.length) throw "Cannot remove Agent: referenced by workflows (mock fixture)"
+          agents.splice(index, 1)
+          delete agentDocuments[id]
+        } else {
+          const index = skills.findIndex((s) => s.name === id)
+          if (index === -1) throw `Skill ${id} not found`
+          if (agents.some((a) => a.skills.includes(id)) || (id === "planning" && workflows.length)) throw "Cannot remove Skill: referenced by agents or workflow tasks (mock fixture)"
+          skills.splice(index, 1)
+          delete bodies[id]
+        }
+        return null
+      }
       case "list_model_mappings":
         return structuredClone(modelMappings)
       case "save_model_mapping": {
@@ -138,14 +333,27 @@ export function installDevIpcMock() {
         return structuredClone(state)
       case "list_workflows": {
         const root = (args as { root: string }).root
-        if (!state.recents.some((r) => r.path === root && r.available)) throw "Project is not approved"
-        if (mode === "error") throw "missing file /x/.unelos/project.yaml"
-        if (mode === "switch") {
-          await new Promise((resolve) => setTimeout(resolve, 900))
-          const name = root.split("/").pop()!
-          return workflows.map((w) => ({ ...w, name: `${name}: ${w.name}`, file: `${name}-${w.file}` }))
-        }
-        return structuredClone(workflows)
+        if (mode === "switch") await new Promise((resolve) => setTimeout(resolve, 900))
+        return structuredClone(workflowsFor(root).map((w) => w.summary))
+      }
+      case "get_workflow": {
+        const { root, id } = args as { root: string; id: string }
+        return structuredClone(workflowFor(root, id).document)
+      }
+      case "validate_workflow": {
+        const { root, id, draft } = args as { root: string; id: string; draft: WorkflowDraft }
+        return workflowIssues(root, id, draft)
+      }
+      case "save_workflow": {
+        const { root, id, draft } = args as { root: string; id: string; draft: WorkflowDraft }
+        await new Promise((resolve) => setTimeout(resolve, 900))
+        if (mode === "save-error") throw "Project is read-only (mock save failure)"
+        const issues = workflowIssues(root, id, draft)
+        if (issues.length) throw issues.map((issue) => issue.message).join("\n")
+        const workflow = workflowFor(root, id)
+        Object.assign(workflow.document, structuredClone(draft), { id: draft.name, steps: structuredClone(draft.steps).map((step) => ({ ...step, originalId: step.id })), issues: [] })
+        Object.assign(workflow.summary, { name: draft.name, file: `${draft.name}.yaml`, description: draft.description, problem: null })
+        return structuredClone(workflow.document)
       }
       case "list_agents": {
         const root = (args as { root: string }).root

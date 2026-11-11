@@ -15,7 +15,42 @@ export type WorkflowSummary = {
   steps: number | null
   problem: string | null
 }
+export type WorkflowSettings = { name: string; description: string | null; start: string }
+export type WorkflowRoute = { outcome: string | null; target: string }
+export type WorkflowWorker = { title: string; agent: string }
+export type StepTask = { source: "inline" | "named"; id: string | null; description: string | null; instructions: string; skills: string[]; outcomes: string[] }
+export type WorkflowDraft = WorkflowSettings & { steps: WorkflowStep[] }
+export type WorkflowStep = {
+  id: string
+  originalId: string | null
+  task: StepTask | null
+  label: string
+  kind: "task" | "parallel" | "human-gate" | "end"
+  title: string | null
+  agent: string | null
+  execution: "main" | "subagent" | null
+  routes: WorkflowRoute[]
+  workers: WorkflowWorker[]
+  inputs: string[]
+  outputs: string[]
+}
+export type WorkflowIssue = { message: string; step: string | null }
+export type WorkflowDocument = WorkflowSettings & { id: string; steps: WorkflowStep[]; issues: WorkflowIssue[] }
+export const getWorkflow = (root: string, id: string) =>
+  trackedInvoke<WorkflowDocument>("get_workflow", { root, id })
+export const validateWorkflow = (root: string, id: string, draft: WorkflowDraft) =>
+  trackedInvoke<WorkflowIssue[]>("validate_workflow", { root, id, draft })
+export const saveWorkflow = (root: string, id: string, draft: WorkflowDraft) =>
+  trackedInvoke<WorkflowDocument>("save_workflow", { root, id, draft })
 /** An alias from the global config, or a model pinned to one harness. */
+export type TaskSummary = { name: string; description: string | null; skills: string[]; outcomes: string[]; problem: string | null }
+export type TaskDocument = { id: string; description: string | null; instructions: string; skills: string[]; outcomes: string[] }
+export const listTasks = (root: string) => trackedInvoke<TaskSummary[]>("list_tasks", { root })
+export const getTask = (root: string, id: string) => trackedInvoke<TaskDocument>("get_task", { root, id })
+export const saveTask = (root: string, originalId: string | null, task: TaskDocument, outcomeRenames: Record<string, string> = {}) => trackedInvoke<TaskDocument>("save_task", { root, originalId, task, outcomeRenames })
+export const duplicateTask = (root: string, id: string, newId: string) => trackedInvoke<void>("duplicate_task", { root, id, newId })
+export const removeTask = (root: string, id: string) => trackedInvoke<void>("remove_task", { root, id })
+
 export type AgentModel = string | { harness: string; model: string }
 export type AgentDocument = {
   id: string
@@ -57,6 +92,12 @@ export type SkillSaveResult = {
 }
 
 export const getProjectState = () => trackedInvoke<ProjectState>("project_state")
+export const duplicateAgent = (root: string, id: string, newId: string) => trackedInvoke<void>("duplicate_agent", { root, id, newId })
+export const duplicateSkill = (root: string, id: string, newId: string) => trackedInvoke<void>("duplicate_skill", { root, id, newId })
+export const duplicateWorkflow = (root: string, id: string, newId: string) => trackedInvoke<void>("duplicate_workflow", { root, id, newId })
+export const removeAgent = (root: string, id: string) => trackedInvoke<void>("remove_agent", { root, id })
+export const removeSkill = (root: string, id: string) => trackedInvoke<void>("remove_skill", { root, id })
+export const removeWorkflow = (root: string, id: string) => trackedInvoke<void>("remove_workflow", { root, id })
 export const openProject = (path: string) =>
   trackedInvoke<ProjectState>("open_project", { path })
 export const removeRecentProject = (path: string) =>
@@ -119,3 +160,9 @@ export function relativeTime(ms: number, now = Date.now()) {
   const text = rtf.format(value, unit)
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
+
+export const listGlobalTasks = () => trackedInvoke<TaskSummary[]>("list_global_tasks")
+export const getGlobalTask = (id: string) => trackedInvoke<TaskDocument>("get_global_task", { id })
+export const saveGlobalTask = (originalId: string | null, task: TaskDocument) => trackedInvoke<TaskDocument>("save_global_task", { originalId, task })
+export const duplicateGlobalTask = (id: string, newId: string) => trackedInvoke<void>("duplicate_global_task", { id, newId })
+export const removeGlobalTask = (id: string) => trackedInvoke<void>("remove_global_task", { id })

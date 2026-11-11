@@ -4756,6 +4756,7 @@ dependencies = [
  "assert_fs",
  "camino",
  "config",
+ "indexmap 2.14.2",
  "jsonc-parser",
  "serde",
  "serde_json",

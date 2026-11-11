@@ -15,7 +15,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import type { SkillSummary } from "@/lib/projects"
-import { PickerStatus } from "./picker-status"
+import { PickerStatus } from "@/components/picker-status"
 
 /** "Add skill" popover listing project skills not yet referenced. */
 export function SkillPicker({

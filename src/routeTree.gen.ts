@@ -11,11 +11,13 @@
 import { Route as rootRouteImport } from "./routes/__root"
 import { Route as IndexRouteImport } from "./routes/index"
 import { Route as AgentsIndexRouteImport } from "./routes/agents/index"
+import { Route as GlobalTasksIndexRouteImport } from "./routes/global-tasks/index"
 import { Route as HarnessesIndexRouteImport } from "./routes/harnesses/index"
 import { Route as ModelMappingsIndexRouteImport } from "./routes/model-mappings/index"
 import { Route as RunsIndexRouteImport } from "./routes/runs/index"
 import { Route as SettingsIndexRouteImport } from "./routes/settings/index"
 import { Route as SkillsIndexRouteImport } from "./routes/skills/index"
+import { Route as TasksIndexRouteImport } from "./routes/tasks/index"
 import { Route as WorkflowsIndexRouteImport } from "./routes/workflows/index"
 
 const IndexRoute = IndexRouteImport.update({
@@ -26,6 +28,11 @@ const IndexRoute = IndexRouteImport.update({
 const AgentsIndexRoute = AgentsIndexRouteImport.update({
   id: "/agents/",
   path: "/agents/",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GlobalTasksIndexRoute = GlobalTasksIndexRouteImport.update({
+  id: "/global-tasks/",
+  path: "/global-tasks/",
   getParentRoute: () => rootRouteImport,
 } as any)
 const HarnessesIndexRoute = HarnessesIndexRouteImport.update({
@@ -53,6 +60,11 @@ const SkillsIndexRoute = SkillsIndexRouteImport.update({
   path: "/skills/",
   getParentRoute: () => rootRouteImport,
 } as any)
+const TasksIndexRoute = TasksIndexRouteImport.update({
+  id: "/tasks/",
+  path: "/tasks/",
+  getParentRoute: () => rootRouteImport,
+} as any)
 const WorkflowsIndexRoute = WorkflowsIndexRouteImport.update({
   id: "/workflows/",
   path: "/workflows/",
@@ -62,32 +74,38 @@ const WorkflowsIndexRoute = WorkflowsIndexRouteImport.update({
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
   "/agents/": typeof AgentsIndexRoute
+  "/global-tasks/": typeof GlobalTasksIndexRoute
   "/harnesses/": typeof HarnessesIndexRoute
   "/model-mappings/": typeof ModelMappingsIndexRoute
   "/runs/": typeof RunsIndexRoute
   "/settings/": typeof SettingsIndexRoute
   "/skills/": typeof SkillsIndexRoute
+  "/tasks/": typeof TasksIndexRoute
   "/workflows/": typeof WorkflowsIndexRoute
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
   "/agents": typeof AgentsIndexRoute
+  "/global-tasks": typeof GlobalTasksIndexRoute
   "/harnesses": typeof HarnessesIndexRoute
   "/model-mappings": typeof ModelMappingsIndexRoute
   "/runs": typeof RunsIndexRoute
   "/settings": typeof SettingsIndexRoute
   "/skills": typeof SkillsIndexRoute
+  "/tasks": typeof TasksIndexRoute
   "/workflows": typeof WorkflowsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   "/": typeof IndexRoute
   "/agents/": typeof AgentsIndexRoute
+  "/global-tasks/": typeof GlobalTasksIndexRoute
   "/harnesses/": typeof HarnessesIndexRoute
   "/model-mappings/": typeof ModelMappingsIndexRoute
   "/runs/": typeof RunsIndexRoute
   "/settings/": typeof SettingsIndexRoute
   "/skills/": typeof SkillsIndexRoute
+  "/tasks/": typeof TasksIndexRoute
   "/workflows/": typeof WorkflowsIndexRoute
 }
 export interface FileRouteTypes {
@@ -95,42 +113,50 @@ export interface FileRouteTypes {
   fullPaths:
     | "/"
     | "/agents/"
+    | "/global-tasks/"
     | "/harnesses/"
     | "/model-mappings/"
     | "/runs/"
     | "/settings/"
     | "/skills/"
+    | "/tasks/"
     | "/workflows/"
   fileRoutesByTo: FileRoutesByTo
   to:
     | "/"
     | "/agents"
+    | "/global-tasks"
     | "/harnesses"
     | "/model-mappings"
     | "/runs"
     | "/settings"
     | "/skills"
+    | "/tasks"
     | "/workflows"
   id:
     | "__root__"
     | "/"
     | "/agents/"
+    | "/global-tasks/"
     | "/harnesses/"
     | "/model-mappings/"
     | "/runs/"
     | "/settings/"
     | "/skills/"
+    | "/tasks/"
     | "/workflows/"
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AgentsIndexRoute: typeof AgentsIndexRoute
+  GlobalTasksIndexRoute: typeof GlobalTasksIndexRoute
   HarnessesIndexRoute: typeof HarnessesIndexRoute
   ModelMappingsIndexRoute: typeof ModelMappingsIndexRoute
   RunsIndexRoute: typeof RunsIndexRoute
   SettingsIndexRoute: typeof SettingsIndexRoute
   SkillsIndexRoute: typeof SkillsIndexRoute
+  TasksIndexRoute: typeof TasksIndexRoute
   WorkflowsIndexRoute: typeof WorkflowsIndexRoute
 }
 
@@ -148,6 +174,13 @@ declare module "@tanstack/react-router" {
       path: "/agents"
       fullPath: "/agents/"
       preLoaderRoute: typeof AgentsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/global-tasks/": {
+      id: "/global-tasks/"
+      path: "/global-tasks"
+      fullPath: "/global-tasks/"
+      preLoaderRoute: typeof GlobalTasksIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/harnesses/": {
@@ -185,6 +218,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof SkillsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    "/tasks/": {
+      id: "/tasks/"
+      path: "/tasks"
+      fullPath: "/tasks/"
+      preLoaderRoute: typeof TasksIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     "/workflows/": {
       id: "/workflows/"
       path: "/workflows"
@@ -198,11 +238,13 @@ declare module "@tanstack/react-router" {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgentsIndexRoute: AgentsIndexRoute,
+  GlobalTasksIndexRoute: GlobalTasksIndexRoute,
   HarnessesIndexRoute: HarnessesIndexRoute,
   ModelMappingsIndexRoute: ModelMappingsIndexRoute,
   RunsIndexRoute: RunsIndexRoute,
   SettingsIndexRoute: SettingsIndexRoute,
   SkillsIndexRoute: SkillsIndexRoute,
+  TasksIndexRoute: TasksIndexRoute,
   WorkflowsIndexRoute: WorkflowsIndexRoute,
 }
 export const routeTree = rootRouteImport

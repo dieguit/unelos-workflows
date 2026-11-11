@@ -3,6 +3,7 @@ use serde::{
     Deserialize, Deserializer, Serialize,
 };
 use std::collections::BTreeMap;
+use indexmap::IndexMap;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -295,21 +296,21 @@ impl<'de> Deserialize<'de> for StrictStringValue {
     }
 }
 
-fn strict_map<'de, D, V>(deserializer: D) -> Result<BTreeMap<String, V>, D::Error>
+fn strict_map<'de, D, V>(deserializer: D) -> Result<IndexMap<String, V>, D::Error>
 where
     D: Deserializer<'de>,
     V: Deserialize<'de>,
 {
     struct StrictMap<V>(std::marker::PhantomData<V>);
     impl<'de, V: Deserialize<'de>> Visitor<'de> for StrictMap<V> {
-        type Value = BTreeMap<String, V>;
+        type Value = IndexMap<String, V>;
 
         fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
             formatter.write_str("a map with unique string keys")
         }
 
         fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
-            let mut values = BTreeMap::new();
+            let mut values = IndexMap::new();
             while let Some((StrictMapKey(key), value)) = map.next_entry::<StrictMapKey, V>()? {
                 if values.insert(key.clone(), value).is_some() {
                     return Err(serde::de::Error::custom(format!("duplicate key `{key}`")));
@@ -323,7 +324,7 @@ where
 
 fn strict_string_map<'de, D: Deserializer<'de>>(
     deserializer: D,
-) -> Result<BTreeMap<String, String>, D::Error> {
+) -> Result<IndexMap<String, String>, D::Error> {
     strict_map::<D, StrictStringValue>(deserializer).map(|values| {
         values
             .into_iter()
@@ -334,7 +335,7 @@ fn strict_string_map<'de, D: Deserializer<'de>>(
 
 fn strict_outcome_map<'de, D: Deserializer<'de>>(
     deserializer: D,
-) -> Result<BTreeMap<String, String>, D::Error> {
+) -> Result<IndexMap<String, String>, D::Error> {
     strict_string_map(deserializer)
         .map_err(|error| serde::de::Error::custom(format!("next outcome map: {error}")))
 }
@@ -367,7 +368,7 @@ pub struct WorkflowDefinition {
     #[serde(deserialize_with = "strict_string")]
     pub start: String,
     #[serde(deserialize_with = "strict_map")]
-    pub nodes: BTreeMap<String, NodeDefinition>,
+    pub nodes: IndexMap<String, NodeDefinition>,
 }
 
 /// How a task node runs. Parallel workers are implicitly subagents.
@@ -384,7 +385,7 @@ pub enum Execution {
 #[serde(untagged)]
 pub enum Transition {
     Single(String),
-    Outcomes(BTreeMap<String, String>),
+    Outcomes(IndexMap<String, String>),
 }
 
 impl<'de> Deserialize<'de> for Transition {
@@ -412,7 +413,7 @@ impl<'de> Deserialize<'de> for Transition {
             }
 
             fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
-                let mut outcomes = BTreeMap::new();
+                let mut outcomes = IndexMap::new();
                 while let Some(StrictMapKey(outcome)) = map.next_key()? {
                     let destination = map
                         .next_value::<StrictStringValue>()
@@ -567,7 +568,7 @@ pub struct HumanGateNode {
     #[serde(default, deserialize_with = "strict_strings")]
     pub inputs: Vec<String>,
     #[serde(deserialize_with = "strict_outcome_map")]
-    pub next: BTreeMap<String, String>,
+    pub next: IndexMap<String, String>,
 }
 
 /// One of the supported structural Workflow node forms.

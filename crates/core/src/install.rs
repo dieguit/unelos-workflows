@@ -195,6 +195,7 @@ pub fn install_workflow(
     let (tasks, agent_ids) = references(&project);
     let mut selected_sources = BTreeSet::from([project.workflow_source.clone()]);
     for id in &tasks {
+        if id.starts_with("global/") { continue; }
         collect_files(authoring, &Utf8PathBuf::from("tasks").join(id), &mut files)?;
         selected_sources.insert(project.task_sources[id].clone());
     }
