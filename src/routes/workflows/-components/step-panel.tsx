@@ -1,8 +1,17 @@
 import { useCallback } from "react"
 import { useStore } from "@tanstack/react-form"
-import { PanelRightCloseIcon, PencilIcon } from "lucide-react"
+import { PanelRightCloseIcon, PencilIcon, Trash2Icon } from "lucide-react"
 import { cn } from "cn"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
 import {
   Tooltip,
   TooltipContent,
@@ -39,6 +48,7 @@ export function StepPanel({
   nameDraft,
   onNameDraft,
   onClose,
+  onRemove,
 }: {
   root: string
   form: WorkflowForm
@@ -50,6 +60,7 @@ export function StepPanel({
   nameDraft?: { text: string; error: string }
   onNameDraft: (id: string, draft?: { text: string; error: string }) => void
   onClose: () => void
+  onRemove: () => void
 }) {
   const steps = useStore(form.store, (s) => s.values.steps)
   const fetchSkills = useCallback(() => listSkills(root), [root])
@@ -196,6 +207,29 @@ export function StepPanel({
           {step.kind === "task" && <OutputsSection form={form} index={index} />}
           <RoutesSection {...props} step={step} steps={steps} />
         </fieldset>
+        {step.kind !== "end" && (
+          <div className="border-t px-4 py-4">
+            <Dialog key={step.id}>
+              <DialogTrigger render={<Button variant="destructive" size="sm" disabled={disabled} />}>
+                <Trash2Icon aria-hidden="true" />
+                Remove step
+              </DialogTrigger>
+              <DialogContent>
+                <DialogTitle>Remove {humanize(step.id)}?</DialogTitle>
+                <DialogDescription>
+                  Removes this step and its references. You may need to fix the
+                  workflow before saving. The reusable task is kept.
+                </DialogDescription>
+                <DialogFooter>
+                  <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
+                  <Button variant="destructive" disabled={disabled} onClick={onRemove}>
+                    Remove step
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
+        )}
       </div>
     </>
   )

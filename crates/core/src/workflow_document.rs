@@ -200,6 +200,9 @@ fn candidate(root: &Utf8Path, id: &str, draft: &WorkflowDraft) -> Result<(Utf8Pa
             node.insert("type".into(), Value::String(step.kind.clone()));
             set_list(&mut node, "inputs", &step.inputs);
         }
+        if step.kind == "parallel" && loaded.as_ref().and_then(|doc| doc.steps.iter().find(|s| s.original_id == step.original_id)).is_none_or(|old| old.inputs != step.inputs) {
+            set_list(&mut node, "inputs", &step.inputs);
+        }
         if step.kind == "task" {
             set_optional(&mut node, "agent", step.agent.as_ref().map(|s| Value::String(s.clone())));
             set_optional(&mut node, "execution", step.execution.map(|e| serde_yaml_ng::to_value(e).unwrap()));

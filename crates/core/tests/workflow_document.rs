@@ -302,3 +302,23 @@ fn parallel_and_end_raw_yaml_are_preserved_except_next() {
     assert_eq!(after["nodes"]["workers"], expected);
     assert_eq!(after["nodes"]["finish"], before["nodes"]["done"]);
 }
+
+#[test]
+fn removed_producer_input_is_removed_from_parallel_on_save() {
+    let (_temp, root) = fixture();
+    let id = "implement-feature";
+    let path = root.join(format!(".unelos/workflows/{id}.yaml"));
+    fs::write(&path, "name: implement-feature\nstart: plan\nnodes:\n  plan:\n    task: create-plan\n    agent: planner\n    outputs: [plan.md]\n    next: workers\n  workers:\n    type: parallel\n    tasks:\n      - task: implement-plan\n        agent: engineer\n    inputs: [plan.md]\n    outputs: [report.md]\n    next: done\n  done:\n    type: end\n").unwrap();
+    let before: serde_yaml_ng::Value = serde_yaml_ng::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    let mut value = draft(get_workflow(&root, id).unwrap());
+    value.steps.remove(0);
+    value.settings.start = "workers".into();
+    value.steps[0].inputs.clear();
+    assert!(validate_workflow(&root, id, &value).unwrap().is_empty());
+    save_workflow(&root, id, &value).unwrap();
+    assert!(get_workflow(&root, id).unwrap().steps[0].inputs.is_empty());
+    let after: serde_yaml_ng::Value = serde_yaml_ng::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    let mut expected = before["nodes"]["workers"].clone();
+    expected.as_mapping_mut().unwrap().remove("inputs");
+    assert_eq!(after["nodes"]["workers"], expected);
+}

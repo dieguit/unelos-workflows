@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import { readFile } from "node:fs/promises"
-import { humanize, insertStep, producers, renameStep, routesForOutcomes, slugify, stepNameError, taskLabel, taskRef, withDerivedOutcomes } from "../src/routes/workflows/-lib/step-edit.ts"
+import { humanize, insertStep, producers, removeStep, renameStep, routesForOutcomes, slugify, stepNameError, taskLabel, taskRef, withDerivedOutcomes } from "../src/routes/workflows/-lib/step-edit.ts"
 import { workflowSettingsSchema } from "../src/routes/workflows/-lib/workflow-settings-schema.ts"
 
 const step = (id, kind, routes = [], extra = {}) => ({
@@ -65,6 +65,37 @@ test("rename updates references and start", () => {
   assert.equal(r.steps[0].routes[0].target, "build")
   assert.equal(r.steps[2].routes[1].target, "build")
   assert.equal(r.steps[1].originalId, "implement")
+})
+
+test("remove clears incoming routes and orphaned artifact inputs without reconnecting or mutating", () => {
+  const steps = [
+    step("source", "task", [[null, "gate"]], { outputs: ["gone", "shared"] }),
+    step("gate", "human-gate", [["approved", "source"], ["rejected", "done"]], { inputs: ["gone", "shared", "source"] }),
+    step("parallel", "parallel", [[null, "source"]], { inputs: ["gone", "shared"], outputs: ["shared"], workers: [{ title: "source", agent: "source" }] }),
+    step("done", "end"),
+  ]
+  const before = structuredClone(steps)
+  const result = removeStep(steps, "source", "source")
+  assert.equal(result.start, "")
+  assert.deepEqual(result.steps.map((s) => s.id), ["gate", "parallel", "done"])
+  assert.deepEqual(result.steps[0].routes, [{ outcome: "approved", target: "" }, { outcome: "rejected", target: "done" }])
+  assert.deepEqual(result.steps[0].inputs, ["shared", "source"])
+  assert.deepEqual(result.steps[1].inputs, ["shared"])
+  assert.deepEqual(result.steps[1].routes, [{ outcome: null, target: "" }])
+  assert.deepEqual(result.steps[1].workers, steps[2].workers)
+  assert.deepEqual(steps, before)
+  assert.equal(removeStep(steps, "source", "gate").start, "source")
+  assert.deepEqual(removeStep(steps, "source", "missing"), { steps, start: "source" })
+})
+
+test("removal exposes missing start and route destinations for repair", () => {
+  const removed = removeStep(flow, "implement", "implement")
+  const result = workflowSettingsSchema("x").safeParse({ name: "x", description: null, ...removed })
+  assert.equal(result.success, false)
+  const paths = result.error.issues.map((issue) => issue.path.join("."))
+  assert.ok(paths.includes("start"))
+  assert.ok(paths.includes("steps.0.routes.0.target"))
+  assert.ok(paths.includes("steps.1.routes.1.target"))
 })
 
 test("derived outcomes and producers", () => {

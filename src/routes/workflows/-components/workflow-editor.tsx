@@ -40,7 +40,7 @@ import {
 } from "@/lib/projects"
 import { BodyEditor } from "@/components/body-editor"
 import { applyBodyDraft } from "@/lib/apply-body-draft"
-import { humanize, insertStep, withDerivedOutcomes } from "../-lib/step-edit"
+import { humanize, insertStep, removeStep, withDerivedOutcomes } from "../-lib/step-edit"
 import { workflowSettingsSchema } from "../-lib/workflow-settings-schema"
 import { useWorkflowForm } from "../-hooks/use-workflow-form"
 import { FlowPane } from "./flow/flow-pane"
@@ -172,6 +172,19 @@ function WorkflowEditorForm({
     form.setFieldValue("steps", result.steps)
     select(result.index)
     setPristine(result.steps[result.index])
+  }
+  const removeSelectedStep = () => {
+    if (!step || saving) return
+    const result = removeStep(form.state.values.steps, form.state.values.start, step.id)
+    form.setFieldValue("steps", result.steps)
+    form.setFieldValue("start", result.start)
+    setNameDrafts((drafts) => {
+      const next = { ...drafts }
+      delete next[step.id]
+      return next
+    })
+    select(null)
+    setValidationAttempt((n) => n + 1)
   }
   useEffect(() => {
     let active = true
@@ -425,7 +438,7 @@ function WorkflowEditorForm({
                       onBlur={field.handleBlur}
                       disabled={saving}
                       invalid={
-                        field.state.meta.isBlurred && !field.state.meta.isValid
+                        (field.state.meta.isBlurred || validationAttempt > 0) && !field.state.meta.isValid
                       }
                     />
                   </div>
@@ -465,6 +478,7 @@ function WorkflowEditorForm({
                 return next
               })}
               onEditInstructions={() => setInstructions(step.task?.instructions ?? "")}
+              onRemove={removeSelectedStep}
               onClose={() => { if (instructions === null) select(null) }}
             />
           ) : (

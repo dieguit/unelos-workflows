@@ -84,6 +84,24 @@ export function renameStep(steps: WorkflowStep[], start: string, from: string, t
   }
 }
 
+/** Removes a step without reconnecting its incoming routes. */
+export function removeStep(steps: WorkflowStep[], start: string, id: string) {
+  const removed = steps.find((step) => step.id === id)
+  if (!removed) return { steps, start }
+  const remaining = steps.filter((step) => step.id !== id)
+  const orphaned = new Set(removed.outputs.filter((output) =>
+    !remaining.some((step) => step.outputs.includes(output))
+  ))
+  return {
+    steps: remaining.map((step) => ({
+      ...step,
+      routes: step.routes.map((route) => route.target === id ? { ...route, target: "" } : route),
+      inputs: step.inputs.filter((input) => !orphaned.has(input)),
+    })),
+    start: start === id ? "" : start,
+  }
+}
+
 /** Inline tasks keep outcome names in their routes while editing; the definition is derived on save. */
 export const withDerivedOutcomes = (steps: WorkflowStep[]) =>
   steps.map((s) =>
