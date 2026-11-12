@@ -1,3 +1,5 @@
+import { BusyContent } from "@/components/busy-content"
+import { useDelayedFlag } from "@/hooks/use-delayed-flag"
 import type { ReactNode } from "react"
 import { PanelRightCloseIcon, PencilIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -26,8 +28,9 @@ function Shell({
   onClose: () => void
   children: ReactNode
 }) {
+  const visualSaving = useDelayedFlag(!!saving)
   return (
-    <aside
+    <aside inert={saving}
       aria-label={`Skill ${title}`}
       className="flex w-[380px] max-w-full shrink-0 flex-col border-l bg-background"
     >
@@ -47,7 +50,7 @@ function Shell({
           aria-label="Close panel"
           title="Close panel"
           onClick={onClose}
-          disabled={saving}
+          disabled={visualSaving}
         >
           <PanelRightCloseIcon aria-hidden="true" />
         </Button>
@@ -82,6 +85,7 @@ export function SkillInspector({
   saveError?: string
   editing: boolean
 }) {
+  const visualSaving = useDelayedFlag(saving)
   if (!doc)
     return (
       <Shell title={id} onClose={onClose}>
@@ -110,9 +114,9 @@ export function SkillInspector({
           size="sm"
           form="skill-form"
           type="submit"
-          disabled={!dirty || saving || editing}
+          disabled={!dirty || visualSaving || editing}
         >
-          {saving ? "Saving…" : "Save"}
+          <BusyContent busy={visualSaving}>Save</BusyContent>
         </Button>
       }
     >
@@ -126,7 +130,7 @@ export function SkillInspector({
         }}
       >
         <fieldset
-          disabled={saving || editing}
+          disabled={visualSaving || editing}
           className="flex min-w-0 flex-col gap-5 disabled:opacity-60"
         >
           <FieldGroup className="gap-4">
@@ -191,7 +195,7 @@ export function SkillInspector({
         {saveError ? (
           <div role="alert" className="flex flex-col items-start gap-2 text-sm text-destructive">
             <p className="[overflow-wrap:anywhere]">Couldn’t save: {saveError}</p>
-            <Button type="submit" variant="outline" size="sm" disabled={saving || editing}>Retry</Button>
+            <Button type="submit" variant="outline" size="sm" disabled={visualSaving || editing}>Retry</Button>
           </div>
         ) : null}
       </form>
@@ -206,7 +210,7 @@ export function SkillInspector({
                 variant="outline"
                 size="sm"
                 onClick={onEdit}
-                disabled={saving || editing}
+                disabled={visualSaving || editing}
               >
                 <PencilIcon aria-hidden="true" />
                 Edit

@@ -17,7 +17,45 @@ fn project_copy() -> (TempDir, Utf8PathBuf) {
 }
 
 #[test]
-fn rename_rebases_history_gate_feedback_and_current_work_references() {
+fn human_names_slugify_and_collisions_are_clear() {
+    let (_temp, root) = project_copy();
+    let first = start_workflow(&root, "implement-feature", Some("API Cleanup!")).unwrap();
+    assert_eq!(first.name, "api-cleanup");
+    let second = start_workflow(&root, "implement-feature", None).unwrap();
+    let error = rename_run(&root, &second.run_id, "API Cleanup!").unwrap_err();
+    assert!(matches!(error, unelos_core::RuntimeError::Collision { name } if name == "api-cleanup"));
+    assert_eq!(rename_run(&root, &second.run_id, "CON").unwrap().name, "con-run");
+    let renamed = rename_run(&root, &second.run_id, "a".repeat(80).as_str()).unwrap();
+    assert_eq!(renamed.name.len(), 64);
+}
+
+#[test]
+fn rename_keeps_rendered_delegated_prompt_paths_valid() {
+    let (_temp, root) = project_copy();
+    let workflow = root.join(".unelos/workflows/implement-feature.yaml");
+    let yaml = fs::read_to_string(&workflow).unwrap().replace(
+        "    task: create-plan\n",
+        "    task: create-plan\n    execution: subagent\n",
+    );
+    fs::write(workflow, yaml).unwrap();
+    let package = unelos_core::execution_start(&root, "implement-feature", None).unwrap();
+    let run_id = package.run_id.as_deref().unwrap();
+    let prompt = package.worker_prompt.as_ref().unwrap();
+    let before = status(&root, run_id).unwrap();
+    let CurrentWork::Task(record) = &before.current else { panic!("task") };
+    let output = &record.outputs[0].path;
+    assert!(prompt.contains(output.as_str()));
+    let renamed = rename_run(&root, run_id, "API Cleanup!").unwrap();
+    assert_eq!(renamed.name, "api-cleanup");
+    assert_eq!(before.current, renamed.current);
+    fs::write(output, "Worker output after rename").unwrap();
+    assert_eq!(fs::read_to_string(output).unwrap(), "Worker output after rename");
+    assert!(root.join(".unelos/runs").join(run_id).is_dir());
+    assert!(!root.join(".unelos/rename.json").exists());
+}
+
+#[test]
+fn rename_preserves_history_gate_feedback_and_current_work_references() {
     let (_temp, root) = project_copy();
     let started = start_workflow(&root, "implement-feature", Some("review-feature")).unwrap();
     let CurrentWork::Task(plan) = &started.current else {
@@ -31,8 +69,8 @@ fn rename_rebases_history_gate_feedback_and_current_work_references() {
     assert_eq!(renamed.history.len(), rejected.history.len());
 
     let runs = root.join(".unelos").join("runs");
-    let old_prefix = runs.join("review-feature");
-    let new_prefix = runs.join("updated-feature");
+    let old_prefix = runs.join("updated-feature");
+    let new_prefix = runs.join(&started.run_id);
     let reference_paths = |work: &CurrentWork| {
         let (CurrentWork::Task(record)
         | CurrentWork::Parallel(record)
@@ -79,7 +117,7 @@ fn rename_rebases_history_gate_feedback_and_current_work_references() {
 }
 
 #[test]
-fn rename_rebases_every_repeated_parallel_worker_report() {
+fn rename_preserves_every_repeated_parallel_worker_report() {
     let (_temp, root) = project_copy();
     fs::write(
         root.join(".unelos/workflows/implement-feature.yaml"),
@@ -99,7 +137,7 @@ fn rename_rebases_every_repeated_parallel_worker_report() {
         assert!(report
             .report
             .path
-            .starts_with(root.join(".unelos/runs/parallel-run")));
+            .starts_with(root.join(".unelos/runs").join(&started.run_id)));
     }
     let packet = next(&root, &started.run_id).unwrap();
     let unelos_core::WorkPacket::Parallel(packet) = packet else {
@@ -120,12 +158,11 @@ fn rename_validates_name_id_collision_and_same_name_settlement() {
     let (_temp, root) = project_copy();
     let started = start_workflow(&root, "implement-feature", None).unwrap();
     assert!(rename_run(&root, "wrong-id", "safe-name").is_err());
-    for name in ["", "../escape", "Unsafe", "a--b", "con"] {
+    for name in ["", "!!!"] {
         assert!(rename_run(&root, &started.run_id, name).is_err());
     }
-    fs::create_dir(root.join(".unelos/runs/collision")).unwrap();
+    start_workflow(&root, "implement-feature", Some("collision")).unwrap();
     assert!(rename_run(&root, &started.run_id, "collision").is_err());
-    fs::remove_dir(root.join(".unelos/runs/collision")).unwrap();
     let settled = rename_run(&root, &started.run_id, &started.name).unwrap();
     assert!(!settled.naming_pending);
     assert_eq!(settled.run_id, started.run_id);
@@ -138,7 +175,7 @@ fn rename_validates_name_id_collision_and_same_name_settlement() {
 fn legacy_state_without_naming_metadata_can_be_renamed() {
     let (_temp, root) = project_copy();
     let started = start_workflow(&root, "implement-feature", Some("legacy-run")).unwrap();
-    let path = root.join(".unelos/runs/legacy-run/state.json");
+    let path = root.join(".unelos/runs").join(&started.run_id).join("state.json");
     let mut saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
     saved.as_object_mut().unwrap().remove("namingPending");
     fs::write(&path, serde_json::to_vec(&saved).unwrap()).unwrap();
@@ -167,14 +204,14 @@ fn renamed_finished_run_id_is_not_reused_after_sequence_reset() {
 }
 
 #[test]
-fn rename_moves_reports_preserves_id_and_refreshes_packet_paths() {
+fn rename_preserves_reports_id_and_packet_paths() {
     let (_temp, root) = project_copy();
     let started = start_workflow(&root, "implement-feature", None).unwrap();
     let CurrentWork::Task(record) = &started.current else {
         panic!("task");
     };
     fs::write(&record.outputs[0].path, "Keep these bytes").unwrap();
-    let old_directory = root.join(".unelos/runs").join(&started.name);
+    let old_directory = root.join(".unelos/runs").join(&started.run_id);
     fs::write(
         old_directory.join("ledger.md"),
         "Controller prose stays unchanged",
@@ -187,18 +224,18 @@ fn rename_moves_reports_preserves_id_and_refreshes_packet_paths() {
         started.next_execution_sequence
     );
     assert!(!renamed.naming_pending);
-    assert!(!old_directory.exists());
+    assert!(old_directory.exists());
     assert_eq!(status(&root, &started.run_id).unwrap(), renamed);
     let packet = serde_json::to_value(next(&root, &started.run_id).unwrap()).unwrap();
     let path = packet["outputs"][0]["path"].as_str().unwrap();
     assert!(std::path::Path::new(path).ends_with(
-        std::path::Path::new("fix-save-button")
+        std::path::Path::new(&started.run_id)
             .join("plan")
             .join("plan.md")
     ));
     assert_eq!(fs::read_to_string(path).unwrap(), "Keep these bytes");
     assert_eq!(
-        fs::read_to_string(root.join(".unelos/runs/fix-save-button/ledger.md")).unwrap(),
+        fs::read_to_string(old_directory.join("ledger.md")).unwrap(),
         "Controller prose stays unchanged"
     );
 }

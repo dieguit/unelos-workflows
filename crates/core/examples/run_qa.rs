@@ -287,6 +287,8 @@ mod tests {
         use unelos_core::{ArtifactReference, ExecutionRecord, RunState};
 
         RunState {
+            started_at: None,
+            updated_at: None,
             run_id: name.into(),
             name: name.into(),
             workflow_name: "implement-feature".into(),
@@ -301,6 +303,9 @@ mod tests {
                     path: output_path,
                 }],
                 worker_reports: vec![],
+                output_digests: Default::default(),
+                worker_receipts: Default::default(),
+                invalid_worker_results: 0,
                 feedback: None,
                 confirmed_execution_id: None,
             }),

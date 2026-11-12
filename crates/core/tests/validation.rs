@@ -98,6 +98,29 @@ fn parallel_project() -> LoadedProject {
 }
 
 #[test]
+fn parallel_next_requires_a_single_successor() {
+    let mut project = parallel_project();
+    let NodeDefinition::Parallel(parallel) = project.workflow.nodes.get_mut("implement").unwrap()
+    else {
+        unreachable!()
+    };
+    parallel.next = Transition::Outcomes([("done".into(), "review".into())].into());
+    assert_error(&project, "nodes.implement.next", "single successor");
+}
+
+#[test]
+fn parallel_workers_must_not_declare_outcomes() {
+    let mut project = parallel_project();
+    let selection = task(&mut project, "review").task.clone();
+    let NodeDefinition::Parallel(parallel) = project.workflow.nodes.get_mut("implement").unwrap()
+    else {
+        unreachable!()
+    };
+    parallel.tasks[0].task = selection;
+    assert_error(&project, "nodes.implement.tasks[0].task", "no outcomes");
+}
+
+#[test]
 fn parallel_workers_resolve_and_parent_artifacts_are_indexed() {
     let project = parallel_project();
     assert_eq!(
@@ -274,7 +297,6 @@ fn unused_definitions_do_not_resolve_skills_or_mcps() {
 #[test]
 fn loading_still_rejects_invalid_node_combinations() {
     for node in [
-        "{task: t, next: done}",
         "{task: t, agent: a}",
         "{type: parallel, next: done}",
         "{type: human-gate, execution: main, next: {approved: done, rejected: done}}",

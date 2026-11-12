@@ -1,7 +1,7 @@
 import { mockIPC } from "@tauri-apps/api/mocks"
 import type { Harness } from "./harnesses"
 import type { ModelMappings } from "./model-mappings"
-import type { TaskDocument, AgentDocument, AgentSummary, ProjectState, SkillDocument, SkillSummary, WorkflowDocument, WorkflowDraft, WorkflowStep, WorkflowIssue, WorkflowSummary } from "./projects"
+import type { McpDocument, TaskDocument, AgentDocument, AgentSummary, ProjectState, SkillDocument, SkillSummary, WorkflowDocument, WorkflowDraft, WorkflowStep, WorkflowIssue, WorkflowSummary } from "./projects"
 
 const home = "/home/dieguit"
 const day = 86_400_000
@@ -65,6 +65,7 @@ const workflowSteps: Record<string, Pick<WorkflowStep, "id" | "label" | "kind">[
     { id: "done", label: "Done", kind: "end" },
   ],
 }
+const projectSettings = new Map<string, boolean | null>()
 const projectWorkflows = new Map<string, { summary: WorkflowSummary; document: WorkflowDocument }[]>()
 function workflowsFor(root: string) {
   if (!state.recents.some((r) => r.path === root && r.available)) throw "Project is not approved"
@@ -82,10 +83,18 @@ function workflowsFor(root: string) {
        if (original === "implement-feature") {
          Object.assign(steps[0], { title: "write-plan", agent: "planner" })
          Object.assign(steps[1], { inputs: ["plan.md"], routes: [{ outcome: "approved", target: "implement" }, { outcome: "rejected", target: "plan" }] })
-         Object.assign(steps[2], { workers: [{ title: "implement-api", agent: "engineer" }, { title: "implement-ui", agent: "engineer" }], inputs: ["plan.md"], outputs: ["implementation-report.md"] })
+          steps[2].workers = [
+            { task: { source: "inline", id: null, description: "Implement API", instructions: "Implement and test the API described in plan.md.", skills: ["rust"], outcomes: [] }, agent: "engineer" },
+            { task: { source: "inline", id: null, description: "Implement UI", instructions: "Implement the UI from plan.md and verify the user flow.", skills: ["code-review"], outcomes: [] }, agent: "engineer" },
+          ]
+          Object.assign(steps[2], { inputs: ["plan.md"], outputs: ["implementation-report.md"] })
          Object.assign(steps[3], { title: "review-change", agent: "reviewer", execution: "subagent", routes: [{ outcome: "approved", target: "done" }, { outcome: "changes_requested", target: "implement" }] })
        }
-       for (const step of steps) if (step.task) step.task.outcomes = step.routes.flatMap((route) => route.outcome ? [route.outcome] : [])
+        if (original === "refactor-module") steps[1].workers = [
+          { task: { source: "inline", id: null, description: "Refactor module", instructions: "Refactor the module while preserving its public API.", skills: ["rust"], outcomes: [] }, agent: "engineer" },
+          { task: { source: "named", id: "review-change", description: "Review the refactor", instructions: "Review the refactor for regressions.", skills: ["code-review"], outcomes: [] }, agent: "reviewer" },
+        ]
+        for (const step of steps) if (step.task) step.task.outcomes = step.routes.flatMap((route) => route.outcome ? [route.outcome] : [])
        return {
         summary: { ...summary, name: mode === "switch" ? `${root.split("/").pop()}: ${summary.name}` : summary.name, file: `${id}.yaml` },
         document: { id, name: id, description: summary.description, start: steps[0]?.id ?? "", steps, issues: summary.problem ? [{ message: summary.problem, step: "review" }] : steps.length ? [] : [{ message: "Mock fixture has no step definitions", step: null }] },
@@ -106,7 +115,8 @@ function workflowIssues(root: string, id: string, settings: WorkflowDraft): Work
     if (workflowsFor(root).some((w) => w.document.id === settings.name)) return [{ message: `Workflow ${settings.name} already exists`, step: null }]
   }
   if (!settings.steps.some((step) => step.id === settings.start)) return [{ message: `start: unknown target ${JSON.stringify(settings.start)}`, step: null }]
-  return [...document.issues]
+   const missing = settings.steps.filter((step) => step.kind === "task" && !step.agent?.trim())
+   return [...document.issues.filter((issue) => issue.message !== "Pick an agent"), ...missing.map((step) => ({ message: "Pick an agent", step: step.id }))]
 }
 
 const agentDocuments: Record<string, AgentDocument> = Object.fromEntries(
@@ -121,6 +131,13 @@ const skills: SkillSummary[] = [
   { name: "code-review", description: "Review code for correctness and missing tests.", problem: null },
   { name: "planning", description: "Write a concrete implementation plan from the request.", problem: null },
   { name: "rust", description: null, problem: null },
+]
+
+const globalMcps: McpDocument[] = []
+
+const mcps: McpDocument[] = [
+  { id: "github", type: "remote", url: "https://api.githubcopilot.com/mcp/", headers: { Authorization: "Bearer {env:GITHUB_TOKEN}" } },
+  { id: "filesystem", type: "local", command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "."], environment: {} },
 ]
 
 const bodies: Record<string, string> = {
@@ -340,6 +357,22 @@ export function installDevIpcMock() {
         const { root, id } = args as { root: string; id: string }
         return structuredClone(workflowFor(root, id).document)
       }
+      case "create_workflow": {
+        const { root } = args as { root: string }
+        const workflows = workflowsFor(root)
+        let id = "new-workflow"
+        for (let n = 2; workflows.some((w) => w.document.id === id); n++) id = `new-workflow-${n}`
+        const document: WorkflowDocument = {
+          id, name: id, description: null, start: "new-task",
+          steps: [
+            { id: "new-task", originalId: "new-task", label: "new-task", kind: "task", title: "new-task", agent: "", execution: "main", task: { source: "inline", id: null, description: null, instructions: "Change me!", skills: [], outcomes: [] }, routes: [{ outcome: null, target: "end" }], workers: [], inputs: [], outputs: [] },
+            { id: "end", originalId: "end", label: "end", kind: "end", title: null, agent: null, execution: null, task: null, routes: [], workers: [], inputs: [], outputs: [] },
+          ],
+          issues: [{ message: "Pick an agent", step: "new-task" }],
+        }
+        workflows.push({ summary: { name: id, file: `${id}.yaml`, description: null, steps: 2, problem: null }, document })
+        return id
+      }
       case "validate_workflow": {
         const { root, id, draft } = args as { root: string; id: string; draft: WorkflowDraft }
         return workflowIssues(root, id, draft)
@@ -415,6 +448,69 @@ export function installDevIpcMock() {
         Object.assign(s, { name, description: description || null })
         skills.sort((a, b) => a.name.localeCompare(b.name))
         return { skill: skillDoc(name), updatedReferences }
+      }
+      case "list_mcps":
+      case "list_global_mcps":
+        return (cmd === "list_global_mcps" ? globalMcps : mcps).map((m) => ({
+          name: m.id,
+          kind: m.type,
+          target: m.type === "local" ? m.command.join(" ") : m.url,
+          problem: null,
+        }))
+      case "get_mcp":
+      case "get_global_mcp": {
+        const store = cmd === "get_global_mcp" ? globalMcps : mcps
+        const id = (args as { id: string }).id
+        const m = store.find((m) => m.id === id)
+        if (!m) throw `MCP ${id} not found`
+        return structuredClone(m)
+      }
+      case "save_mcp":
+      case "save_global_mcp": {
+        const store = cmd === "save_global_mcp" ? globalMcps : mcps
+        const prefix = cmd === "save_global_mcp" ? "global/" : ""
+        const { originalId, mcp } = args as { originalId: string | null; mcp: McpDocument }
+        if (!mcp.id || mcp.id.trim() !== mcp.id || /[/\\:\0.]/.test(mcp.id)) throw "Invalid MCP ID"
+        if (mcp.id !== originalId && store.some((m) => m.id === mcp.id)) throw `MCP ${mcp.id} already exists`
+        if (mcp.type === "local" ? !mcp.command.length : !mcp.url) throw "MCP needs a command or url"
+        const i = store.findIndex((m) => m.id === originalId)
+        if (originalId && i < 0) throw `MCP ${originalId} not found`
+        if (i >= 0) store[i] = structuredClone(mcp)
+        else store.push(structuredClone(mcp))
+        if (originalId && originalId !== mcp.id) {
+          const projects = prefix ? [...projectAuthoring.values()] : [{ agents, agentDocuments }]
+          for (const project of projects) {
+            for (const a of project.agents) a.mcps = a.mcps.map((k) => (k === prefix + originalId ? prefix + mcp.id : k))
+            for (const d of Object.values(project.agentDocuments)) d.mcps = d.mcps.map((k) => (k === prefix + originalId ? prefix + mcp.id : k))
+          }
+        }
+        store.sort((a, b) => a.id.localeCompare(b.id))
+        return structuredClone(mcp)
+      }
+      case "remove_mcp":
+      case "remove_global_mcp": {
+        const { id } = args as { id: string }
+        const store = cmd === "remove_global_mcp" ? globalMcps : mcps
+        const ref = cmd === "remove_global_mcp" ? `global/${id}` : id
+        const projects = cmd === "remove_global_mcp" ? [...projectAuthoring.values()] : [{ agents, agentDocuments }]
+        if (projects.some((p) => p.agents.some((a) => a.mcps.includes(ref)) || Object.values(p.agentDocuments).some((a) => a.mcps.includes(ref)))) throw `MCP ${ref} is referenced by an agent`
+        const i = store.findIndex((m) => m.id === id)
+        if (i < 0) throw `MCP ${id} not found`
+        store.splice(i, 1)
+        return null
+      }
+      case "get_project_settings":
+        return { autoBuildHarness: projectSettings.get(root) ?? null }
+      case "save_project_settings":
+        projectSettings.set(root, (args as { settings: { autoBuildHarness: boolean | null } }).settings.autoBuildHarness)
+        return null
+      case "build_harness_config":
+      case "auto_build_harness": {
+        if (cmd === "auto_build_harness" && projectSettings.get(root) === false) return null
+        await new Promise((resolve) => setTimeout(resolve, 400))
+        if (mode === "error") throw "permission denied: opencode.json"
+        const installed = harnesses.filter((h) => h.installed).map((h) => h.id)
+        return { harnesses: installed, written: installed.length ? [".opencode/agents/engineer.md", "opencode.json"] : [], removed: [], skipped: [] }
       }
       case "list_harnesses":
         return structuredClone(harnesses)

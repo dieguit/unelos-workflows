@@ -1,3 +1,4 @@
+import { useDelayedFlag } from "@/hooks/use-delayed-flag"
 import { useState } from "react"
 import { MarkdownEditor } from "@/components/markdown-editor"
 import { Button } from "@/components/ui/button"
@@ -12,18 +13,22 @@ export function BodyEditor({
   onCancel,
   onSave,
   onBlur,
+  readOnly,
 }: {
   title: string
   label: string
   body: string
-  onChange: (body: string) => void
+  onChange?: (body: string) => void
   onCancel: () => void
-  onSave: () => Promise<void>
+  onSave?: () => Promise<void>
   onBlur?: () => void
+  /** Viewing only: hides Save and relabels Cancel as Close. */
+  readOnly?: boolean
 }) {
   const [saving, setSaving] = useState(false)
+  const visualSaving = useDelayedFlag(saving)
   return (
-    <div className="flex h-full min-h-96 flex-col gap-4">
+    <div inert={saving} className="flex h-full min-h-96 flex-col gap-4">
       <header className="flex items-center gap-3">
         <h1 className="flex min-w-0 flex-1 items-baseline gap-2 text-xl font-semibold">
           <span className="truncate">{title}</span>
@@ -31,25 +36,29 @@ export function BodyEditor({
             {label}
           </span>
         </h1>
-        <Button variant="secondary" onClick={onCancel} disabled={saving}>
-          Cancel
+        <Button variant="secondary" onClick={onCancel} disabled={visualSaving}>
+          {readOnly ? "Close" : "Cancel"}
         </Button>
-        <Button
-          disabled={saving}
-          onClick={() => {
-            setSaving(true)
-            void onSave().finally(() => setSaving(false))
-          }}
-        >
-          {saving ? "Applying…" : "Apply"}
-        </Button>
+        {!readOnly && (
+          <Button
+            disabled={visualSaving}
+            onClick={() => {
+              if (saving || !onSave) return
+              setSaving(true)
+              void onSave().finally(() => setSaving(false))
+            }}
+          >
+            {visualSaving ? "Saving…" : "Save and close"}
+          </Button>
+        )}
       </header>
       <Field className="min-h-0 flex-1" onBlur={onBlur}>
         <FieldLabel className="sr-only">
           {title} {label}
         </FieldLabel>
         <MarkdownEditor
-          autoFocus
+          autoFocus={!readOnly}
+          readOnly={readOnly}
           aria-label={`${title} ${label}`}
           value={body}
           onChange={onChange}

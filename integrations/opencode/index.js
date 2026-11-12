@@ -7,13 +7,12 @@ const fail=(code,message)=>Object.assign(new Error(message),{code});
 const object=(properties={},required=[])=>({type:'object',properties,required,additionalProperties:false});
 const string={type:'string'};
 const identity=object({kind:{type:'string',enum:['task','human-gate','parallel']},runId:string,nodeId:string,taskId:string,activationId:string},['kind','runId','nodeId']);
-const descriptions={next:'Read the selected Unelos execution package',start:'Start a fresh Unelos workflow and bind this session',resume:'Bind the explicitly selected unfinished run and immediately continue using core resume context',complete:'Complete the expected Unelos Task after inspection',approve:'Record explicit approval of the expected human gate',reject:'Reject the expected human gate with actionable feedback',continue:'Prepare a same-Task worker continuation',status:'Read selected Unelos status',inspect:'Inspect a Unelos workflow or Node',rename:'Name the selected Unelos run'};
+const descriptions={next:'Read the selected Unelos execution package',start:'Start a fresh Unelos workflow and bind this session',resume:'Bind the explicitly selected unfinished run and immediately continue using core resume context',complete:'Complete the expected Unelos Task after inspection',approve:'Record explicit approval of the expected human gate',reject:'Reject the expected human gate with actionable feedback',status:'Read selected Unelos status',inspect:'Inspect a Unelos workflow or Node',rename:'Name the selected Unelos run'};
 
 export const toolSchemas={
   next:object(),start:object({workflow:string,name:string},['workflow']),resume:object({runId:string},['runId']),
-  complete:object({expected:identity,resultText:string,outcome:string},['expected','resultText']),
+  complete:object({expected:identity,resultText:{...string,description:"the worker's final message, verbatim (only newly finished workers for parallel; write aggregates before the last submission; empty once all receipts exist)"},summary:{...string,description:'One-paragraph summary for main Tasks'},outcome:{...string,description:'main Tasks only'}},['expected']),
   approve:object({expected:identity},['expected']),reject:object({expected:identity,reason:string},['expected','reason']),
-  continue:object({expected:identity,workerKey:string,answer:string,progress:{type:'array',items:string}},['expected','progress']),
   status:object(),inspect:object({workflow:string,node:string},['workflow']),rename:object({name:string,runId:string},['name','runId']),
 };
 
@@ -96,16 +95,24 @@ function bridge(binary,version,get,update,directory) {
   return {
     async command(id,text) {
       const words=text.trim().split(/\s+/).filter(Boolean);
-      if(words.length&&!(words.length===1&&['off','resume'].includes(words[0])))throw fail('invalid_command','Usage: /unelos [resume | off]');
+      const keyword=words.length===1?words[0]:null;
       const entry=await change(id,async()=>{
         const value=await session(id);const path=await realpath(directory(value));const metadata={...value.metadata};
-        if(words[0]==='off'){delete metadata[OWNER];await update(id,metadata);return null;}
-        const active={project:path,enabled:true,mode:words[0]==='resume'?'resume':'new',entryId:randomUUID()};
+        if(keyword==='off'){delete metadata[OWNER];await update(id,metadata);return null;}
+        const active={project:path,enabled:true,mode:keyword==='resume'?'resume':'new',entryId:randomUUID()};
         await update(id,{...metadata,[OWNER]:active});return {path,active};
       });
       if(!entry)return 'Unelos disabled for this session.';
       const {path,active}=entry;
-      const result=nativePackage(await callCli(binary,path,['execution',active.mode==='new'?'new':'runs','--json']),version);
+       const result=nativePackage(await callCli(binary,path,['execution',active.mode==='new'?'new':'runs','--json']),version);
+       if(version==='v1'&&active.mode==='new'){
+         result.unavailableWorkflows=[];
+         for(const workflow of result.workflows??[]){
+           const inspection=await callCli(binary,path,['inspect',workflow,'--json']);
+           if(inspection.nodes?.some(node=>node.kind==='parallel'))result.unavailableWorkflows.push({workflow,reason:'Parallel nodes require OpenCode V2'});
+         }
+         result.workflows=(result.workflows??[]).filter(workflow=>!result.unavailableWorkflows.some(item=>item.workflow===workflow));
+       }
       await current(id,active);
       return JSON.stringify({...result,requestedAction:text});
     },
@@ -114,17 +121,20 @@ function bridge(binary,version,get,update,directory) {
       const entry=['start','resume'].includes(name);
       if(entry){
         if(active.runId||active.mode!==(name==='start'?'new':'resume'))throw fail('invalid_entry','Use /unelos for a fresh start or /unelos resume to select an existing run');
-      }else if(name!=='inspect'){
+       }else if(name!=='inspect'){
         if(!active.runId)throw fail('run_unbound','Start or explicitly resume a run first');
         if(input.expected&&input.expected.runId!==active.runId||name==='rename'&&input.runId!==active.runId)throw fail('stale_execution','Input identity does not match this session\'s selected run');
-      }
+       }
+       if(version==='v1'&&name==='start'){
+         const inspection=await callCli(binary,path,['inspect',input.workflow,'--json'],undefined,context.signal??context.abort);
+         if(inspection.nodes?.some(node=>node.kind==='parallel'))throw fail('unsupported_workflow','Parallel nodes require OpenCode V2');
+       }
       switch(name){
         case 'next':argv=['execution','next','--run',active.runId];break;
         case 'start':argv=['execution','start',input.workflow,...(input.name?['--name',input.name]:[])];break;
         case 'resume':argv=['execution','resume','--run',input.runId];break;
         case 'complete':case 'approve':case 'reject':
-          argv=['execution',name,'--run',active.runId];control={expected:input.expected,resultText:input.resultText??null,outcome:input.outcome??null,reason:input.reason??null};break;
-        case 'continue':argv=['execution','continue','--run',active.runId];control={expected:input.expected,workerKey:input.workerKey??null,answer:input.answer??null,progress:input.progress};break;
+          argv=['execution',name,'--run',active.runId];control={expected:input.expected,resultText:input.resultText??null,summary:input.summary??null,outcome:input.outcome??null,reason:input.reason??null};break;
         case 'status':argv=['status','--run',active.runId];break;
         case 'inspect':argv=['inspect',input.workflow,...(input.node?['--node',input.node]:[])];break;
         case 'rename':argv=['rename',input.name,'--run',active.runId];break;

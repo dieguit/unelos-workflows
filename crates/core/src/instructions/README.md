@@ -3,33 +3,24 @@
 These Markdown files are the authoritative shared instruction bodies, embedded
 by Rust with `include_str!`. Edit here, then rebuild/reinstall the CLI. No runtime
 Markdown lookup, template engine, or duplicate editable copy is involved.
-This catalog extraction preserves existing instruction text and behavior.
 
 ## Native execution
 
 | Source | Audience / delivery |
 | --- | --- |
-| [controller.md](controller.md) | Coordinator policy in execution packages and the resume run catalog: entry, naming, delegation, completion, gates, recovery and finish announcement. |
+| [controller.md](controller.md) | Invariants in every execution package and resume run catalog. |
+| [controller-idle.md](controller-idle.md) | Idle workflow selection, requestedAction and naming. |
+| [controller-main-task.md](controller-main-task.md) | Main Task execution and completion. |
+| [controller-delegated.md](controller-delegated.md) | Delegation and worker result handling. |
+| [controller-parallel.md](controller-parallel.md) | Parallel dispatch and aggregation. |
+| [controller-gate.md](controller-gate.md) | Human gate presentation and decisions. |
+| [controller-finished.md](controller-finished.md) | Finished run announcement. |
+| [controller-resume.md](controller-resume.md) | Resume run catalog and resumed packages (alongside their state block). |
 | [task-outputs.md](task-outputs.md) | Main and delegated Tasks, including parallel workers: `completionInstructions` in resolved Task context. |
 | [worker-result.md](worker-result.md) | Delegated serial workers: appended to the exact generated `workerPrompt`; result frame and controller/worker boundaries. |
 | [parallel-worker-result.md](parallel-worker-result.md) | Parallel workers: appended to each generated `workerPrompts[].prompt`; frame grammar with `workerKey` and report-only ownership. |
 
-## Raw work packets and inspection
-
-These lower-level instructions also remain available to raw CLI consumers.
-Native execution packages carry the full coordinator policy above; their worker
-prompts exclude raw-packet controller metadata.
-
-| Source | Delivery |
-| --- | --- |
-| [ledger.md](ledger.md) | Every runtime work packet's coordinator instructions. |
-| [context-and-naming.md](context-and-naming.md) | Task, parallel and gate runtime packets. |
-| [output-confirmation.md](output-confirmation.md) | Task and parallel runtime packets; `complete NODE` refers to the raw CLI, not the native guarded `unelos_complete` tool. |
-| [parallel.md](parallel.md) | Additional parallel runtime packet instructions. |
-| [human-gate.md](human-gate.md) | Additional gate runtime packet instructions. |
-| [finished.md](finished.md) | Additional finished runtime packet instructions. |
-| [parallel-inspection.md](parallel-inspection.md) | Parallel Node inspection, before runtime bindings exist. |
-| [human-gate-inspection.md](human-gate-inspection.md) | Gate Node inspection, before runtime bindings exist. |
+Raw work packets and inspection carry no coordinator instructions.
 
 ## Project-owned instructions and runtime data
 
@@ -53,7 +44,7 @@ worker directories). Names and exact paths travel in `inputs` / `outputs`, not
 as placeholders inside these Markdown files. Other runtime data includes run/Task
 identity, feedback, the agreed Brief and continuation context.
 
-The generated serial worker prompt combines its JSON executor context, Brief,
-continuation context and worker-result instructions. Structural section labels
+The generated serial worker prompt combines Markdown assignment sections, optional Brief,
+feedback and worker-result instructions. Structural section labels
 remain in Rust; project-specific YAML and Skills remain project-owned. Mechanical
 validation does not prove report quality or model adherence.

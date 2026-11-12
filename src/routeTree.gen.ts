@@ -11,14 +11,17 @@
 import { Route as rootRouteImport } from "./routes/__root"
 import { Route as IndexRouteImport } from "./routes/index"
 import { Route as AgentsIndexRouteImport } from "./routes/agents/index"
+import { Route as GlobalMcpsIndexRouteImport } from "./routes/global-mcps/index"
 import { Route as GlobalTasksIndexRouteImport } from "./routes/global-tasks/index"
 import { Route as HarnessesIndexRouteImport } from "./routes/harnesses/index"
+import { Route as McpsIndexRouteImport } from "./routes/mcps/index"
 import { Route as ModelMappingsIndexRouteImport } from "./routes/model-mappings/index"
 import { Route as RunsIndexRouteImport } from "./routes/runs/index"
 import { Route as SettingsIndexRouteImport } from "./routes/settings/index"
 import { Route as SkillsIndexRouteImport } from "./routes/skills/index"
 import { Route as TasksIndexRouteImport } from "./routes/tasks/index"
 import { Route as WorkflowsIndexRouteImport } from "./routes/workflows/index"
+import { Route as RunsRunIdIndexRouteImport } from "./routes/runs/$runId/index"
 
 const IndexRoute = IndexRouteImport.update({
   id: "/",
@@ -30,6 +33,11 @@ const AgentsIndexRoute = AgentsIndexRouteImport.update({
   path: "/agents/",
   getParentRoute: () => rootRouteImport,
 } as any)
+const GlobalMcpsIndexRoute = GlobalMcpsIndexRouteImport.update({
+  id: "/global-mcps/",
+  path: "/global-mcps/",
+  getParentRoute: () => rootRouteImport,
+} as any)
 const GlobalTasksIndexRoute = GlobalTasksIndexRouteImport.update({
   id: "/global-tasks/",
   path: "/global-tasks/",
@@ -38,6 +46,11 @@ const GlobalTasksIndexRoute = GlobalTasksIndexRouteImport.update({
 const HarnessesIndexRoute = HarnessesIndexRouteImport.update({
   id: "/harnesses/",
   path: "/harnesses/",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const McpsIndexRoute = McpsIndexRouteImport.update({
+  id: "/mcps/",
+  path: "/mcps/",
   getParentRoute: () => rootRouteImport,
 } as any)
 const ModelMappingsIndexRoute = ModelMappingsIndexRouteImport.update({
@@ -70,94 +83,120 @@ const WorkflowsIndexRoute = WorkflowsIndexRouteImport.update({
   path: "/workflows/",
   getParentRoute: () => rootRouteImport,
 } as any)
+const RunsRunIdIndexRoute = RunsRunIdIndexRouteImport.update({
+  id: "/runs/$runId/",
+  path: "/runs/$runId/",
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
   "/agents/": typeof AgentsIndexRoute
+  "/global-mcps/": typeof GlobalMcpsIndexRoute
   "/global-tasks/": typeof GlobalTasksIndexRoute
   "/harnesses/": typeof HarnessesIndexRoute
+  "/mcps/": typeof McpsIndexRoute
   "/model-mappings/": typeof ModelMappingsIndexRoute
   "/runs/": typeof RunsIndexRoute
   "/settings/": typeof SettingsIndexRoute
   "/skills/": typeof SkillsIndexRoute
   "/tasks/": typeof TasksIndexRoute
   "/workflows/": typeof WorkflowsIndexRoute
+  "/runs/$runId/": typeof RunsRunIdIndexRoute
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
   "/agents": typeof AgentsIndexRoute
+  "/global-mcps": typeof GlobalMcpsIndexRoute
   "/global-tasks": typeof GlobalTasksIndexRoute
   "/harnesses": typeof HarnessesIndexRoute
+  "/mcps": typeof McpsIndexRoute
   "/model-mappings": typeof ModelMappingsIndexRoute
   "/runs": typeof RunsIndexRoute
   "/settings": typeof SettingsIndexRoute
   "/skills": typeof SkillsIndexRoute
   "/tasks": typeof TasksIndexRoute
   "/workflows": typeof WorkflowsIndexRoute
+  "/runs/$runId": typeof RunsRunIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   "/": typeof IndexRoute
   "/agents/": typeof AgentsIndexRoute
+  "/global-mcps/": typeof GlobalMcpsIndexRoute
   "/global-tasks/": typeof GlobalTasksIndexRoute
   "/harnesses/": typeof HarnessesIndexRoute
+  "/mcps/": typeof McpsIndexRoute
   "/model-mappings/": typeof ModelMappingsIndexRoute
   "/runs/": typeof RunsIndexRoute
   "/settings/": typeof SettingsIndexRoute
   "/skills/": typeof SkillsIndexRoute
   "/tasks/": typeof TasksIndexRoute
   "/workflows/": typeof WorkflowsIndexRoute
+  "/runs/$runId/": typeof RunsRunIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | "/"
     | "/agents/"
+    | "/global-mcps/"
     | "/global-tasks/"
     | "/harnesses/"
+    | "/mcps/"
     | "/model-mappings/"
     | "/runs/"
     | "/settings/"
     | "/skills/"
     | "/tasks/"
     | "/workflows/"
+    | "/runs/$runId/"
   fileRoutesByTo: FileRoutesByTo
   to:
     | "/"
     | "/agents"
+    | "/global-mcps"
     | "/global-tasks"
     | "/harnesses"
+    | "/mcps"
     | "/model-mappings"
     | "/runs"
     | "/settings"
     | "/skills"
     | "/tasks"
     | "/workflows"
+    | "/runs/$runId"
   id:
     | "__root__"
     | "/"
     | "/agents/"
+    | "/global-mcps/"
     | "/global-tasks/"
     | "/harnesses/"
+    | "/mcps/"
     | "/model-mappings/"
     | "/runs/"
     | "/settings/"
     | "/skills/"
     | "/tasks/"
     | "/workflows/"
+    | "/runs/$runId/"
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AgentsIndexRoute: typeof AgentsIndexRoute
+  GlobalMcpsIndexRoute: typeof GlobalMcpsIndexRoute
   GlobalTasksIndexRoute: typeof GlobalTasksIndexRoute
   HarnessesIndexRoute: typeof HarnessesIndexRoute
+  McpsIndexRoute: typeof McpsIndexRoute
   ModelMappingsIndexRoute: typeof ModelMappingsIndexRoute
   RunsIndexRoute: typeof RunsIndexRoute
   SettingsIndexRoute: typeof SettingsIndexRoute
   SkillsIndexRoute: typeof SkillsIndexRoute
   TasksIndexRoute: typeof TasksIndexRoute
   WorkflowsIndexRoute: typeof WorkflowsIndexRoute
+  RunsRunIdIndexRoute: typeof RunsRunIdIndexRoute
 }
 
 declare module "@tanstack/react-router" {
@@ -176,6 +215,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AgentsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    "/global-mcps/": {
+      id: "/global-mcps/"
+      path: "/global-mcps"
+      fullPath: "/global-mcps/"
+      preLoaderRoute: typeof GlobalMcpsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     "/global-tasks/": {
       id: "/global-tasks/"
       path: "/global-tasks"
@@ -188,6 +234,13 @@ declare module "@tanstack/react-router" {
       path: "/harnesses"
       fullPath: "/harnesses/"
       preLoaderRoute: typeof HarnessesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/mcps/": {
+      id: "/mcps/"
+      path: "/mcps"
+      fullPath: "/mcps/"
+      preLoaderRoute: typeof McpsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/model-mappings/": {
@@ -232,20 +285,30 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof WorkflowsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    "/runs/$runId/": {
+      id: "/runs/$runId/"
+      path: "/runs/$runId"
+      fullPath: "/runs/$runId/"
+      preLoaderRoute: typeof RunsRunIdIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgentsIndexRoute: AgentsIndexRoute,
+  GlobalMcpsIndexRoute: GlobalMcpsIndexRoute,
   GlobalTasksIndexRoute: GlobalTasksIndexRoute,
   HarnessesIndexRoute: HarnessesIndexRoute,
+  McpsIndexRoute: McpsIndexRoute,
   ModelMappingsIndexRoute: ModelMappingsIndexRoute,
   RunsIndexRoute: RunsIndexRoute,
   SettingsIndexRoute: SettingsIndexRoute,
   SkillsIndexRoute: SkillsIndexRoute,
   TasksIndexRoute: TasksIndexRoute,
   WorkflowsIndexRoute: WorkflowsIndexRoute,
+  RunsRunIdIndexRoute: RunsRunIdIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

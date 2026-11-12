@@ -417,7 +417,7 @@ fn sole_flat_example_installs_with_its_bundled_skills() {
     assert!(loaded.definitions.task_definitions.is_empty());
     assert_eq!(
         inspect_task(&loaded, "advance").unwrap().context.outcomes,
-        ["fix", "next_task", "all_done"]
+        ["fix", "escalate", "next_task", "all_done"]
     );
     assert_eq!(
         inspect_task(&loaded, "advance-final")

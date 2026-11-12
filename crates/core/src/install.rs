@@ -15,6 +15,8 @@ pub struct AgentExport {
     pub model: Option<String>,
     pub tools: Vec<String>,
     pub mcps: Vec<String>,
+    #[serde(skip)]
+    pub mcp_servers: BTreeMap<String, crate::McpServer>,
     pub main: bool,
     pub subagent: bool,
 }
@@ -45,10 +47,20 @@ fn io_error(error: io::Error) -> InstallError {
 pub(crate) fn resolve_agent_model(model: &crate::AgentModel) -> Result<String, InstallError> {
     match model {
         crate::AgentModel::Alias(alias) => crate::list_model_mappings()?
-            .get(alias).and_then(|models| models.get("opencode")).cloned()
-            .ok_or_else(|| fail("unmapped_model_alias", format!("No OpenCode model mapped for alias '{alias}'"))),
+            .get(alias)
+            .and_then(|models| models.get("opencode"))
+            .cloned()
+            .ok_or_else(|| {
+                fail(
+                    "unmapped_model_alias",
+                    format!("No OpenCode model mapped for alias '{alias}'"),
+                )
+            }),
         crate::AgentModel::Harness { harness, model } if harness == "opencode" => Ok(model.clone()),
-        crate::AgentModel::Harness { harness, .. } => Err(fail("model_harness_mismatch", format!("Model targets {harness}, expected opencode"))),
+        crate::AgentModel::Harness { harness, .. } => Err(fail(
+            "model_harness_mismatch",
+            format!("Model targets {harness}, expected opencode"),
+        )),
     }
 }
 
@@ -83,6 +95,7 @@ fn references(project: &LoadedProject) -> (BTreeSet<String>, BTreeMap<String, (b
 
 fn export(project: &LoadedProject) -> Result<Vec<AgentExport>, InstallError> {
     let (_, references) = references(project);
+    let mut scopes = BTreeMap::new();
     references
         .into_iter()
         .map(|(id, (main, subagent))| {
@@ -93,14 +106,26 @@ fn export(project: &LoadedProject) -> Result<Vec<AgentExport>, InstallError> {
                 ));
             }
             let agent = &project.definitions.agents[&id];
-            if !agent.mcps.is_empty() {
-                return Err(fail(
-                    "unsupported_mcp",
-                    format!(
-                        "MCP requirements need explicit harness support: {}",
-                        agent.mcps.join(", ")
-                    ),
-                ));
+            let mut mcp_servers = BTreeMap::new();
+            for mcp in &agent.mcps {
+                let bare = mcp.strip_prefix("global/").unwrap_or(mcp);
+                if let Some(previous) = scopes.insert(bare.to_owned(), mcp.clone()) {
+                    if previous != *mcp {
+                        return Err(fail("mcp_collision", format!("Project and global MCP share ID {bare:?}")));
+                    }
+                }
+                let document = if mcp.starts_with("global/") {
+                    crate::get_global_mcp(bare)
+                } else {
+                    crate::mcp_document::read_mcp(&project.authoring_root, mcp)
+                }
+                    .map_err(|e| {
+                        fail(
+                            "missing_mcp",
+                            format!("Cannot resolve MCP {mcp:?} for agent {id:?}: {e}"),
+                        )
+                    })?;
+                mcp_servers.insert(bare.to_owned(), document.server);
             }
             let model = agent.model.as_ref().map(resolve_agent_model).transpose()?;
             if let Some(model) = &model {
@@ -123,6 +148,7 @@ fn export(project: &LoadedProject) -> Result<Vec<AgentExport>, InstallError> {
                 model,
                 tools: agent.tools.clone(),
                 mcps: agent.mcps.clone(),
+                mcp_servers,
                 main,
                 subagent,
             })
@@ -192,10 +218,20 @@ pub fn install_workflow(
     check_project_init(root)?;
     let mut files = BTreeMap::new();
     let authoring = &project.authoring_root;
+    for agent in &agents {
+        for id in &agent.mcps {
+            if id.starts_with("global/") { continue; }
+            let relative = Utf8PathBuf::from(format!("mcps/{id}.yaml"));
+            let path = checked_path(authoring, &relative)?;
+            files.insert(relative, fs::read(path).map_err(io_error)?);
+        }
+    }
     let (tasks, agent_ids) = references(&project);
     let mut selected_sources = BTreeSet::from([project.workflow_source.clone()]);
     for id in &tasks {
-        if id.starts_with("global/") { continue; }
+        if id.starts_with("global/") {
+            continue;
+        }
         collect_files(authoring, &Utf8PathBuf::from("tasks").join(id), &mut files)?;
         selected_sources.insert(project.task_sources[id].clone());
     }

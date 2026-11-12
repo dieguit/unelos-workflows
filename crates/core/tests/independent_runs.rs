@@ -22,7 +22,7 @@ fn independent_unfinished_runs_do_not_redirect_reads_or_writes() {
     let (_temp, root) = fixture();
     let a = start_workflow(&root, "simple-plan-execute-review", Some("first-run")).unwrap();
     let b = start_workflow(&root, "simple-plan-execute-review", Some("second-run")).unwrap();
-    let b_path = root.join(".unelos/runs/second-run/state.json");
+    let b_path = root.join(".unelos/runs").join(&b.run_id).join("state.json");
     let before_b = std::fs::read(&b_path).unwrap();
     assert_eq!(status(&root, &a.run_id).unwrap(), a);
     assert_eq!(status(&root, &b.run_id).unwrap(), b);
@@ -63,12 +63,12 @@ fn rename_keeps_identity_and_ignores_obsolete_pointer() {
     let a = start_workflow(&root, "simple-plan-execute-review", Some("first-run")).unwrap();
     let b = start_workflow(&root, "simple-plan-execute-review", Some("second-run")).unwrap();
     std::fs::write(root.join(".unelos/active-run"), "../invalid-old-pointer").unwrap();
-    let before_b = std::fs::read(root.join(".unelos/runs/second-run/state.json")).unwrap();
+    let before_b = std::fs::read(root.join(".unelos/runs").join(&b.run_id).join("state.json")).unwrap();
     rename_run(&root, &a.run_id, "renamed-first").unwrap();
     assert_eq!(status(&root, &a.run_id).unwrap().name, "renamed-first");
     assert_eq!(status(&root, &b.run_id).unwrap(), b);
     assert_eq!(
-        std::fs::read(root.join(".unelos/runs/second-run/state.json")).unwrap(),
+        std::fs::read(root.join(".unelos/runs").join(&b.run_id).join("state.json")).unwrap(),
         before_b
     );
     assert_eq!(
@@ -82,25 +82,17 @@ fn cross_run_callback_with_same_task_label_never_writes_either_run() {
     let (_temp, root) = fixture();
     let a = execution_start(&root, "simple-plan-execute-review", Some("first-run")).unwrap();
     let b = execution_start(&root, "simple-plan-execute-review", Some("second-run")).unwrap();
-    let a_path = root.join(".unelos/runs/first-run/state.json");
-    let b_path = root.join(".unelos/runs/second-run/state.json");
+    let a_path = root.join(".unelos/runs").join(a.run_id.as_deref().unwrap()).join("state.json");
+    let b_path = root.join(".unelos/runs").join(b.run_id.as_deref().unwrap()).join("state.json");
     let before = (
         std::fs::read(&a_path).unwrap(),
         std::fs::read(&b_path).unwrap(),
     );
     let expected = a.expected.unwrap();
-    let mut result = serde_json::to_value(&expected).unwrap();
-    result["status"] = "FINISHED".into();
-    result["summary"] = "Inspected A".into();
-    for field in ["changedPaths", "verification", "progress"] {
-        result[field] = serde_json::json!([]);
-    }
-    result["outcome"] = serde_json::Value::Null;
-    let control = ExecutionControl {
+    let control = CompletionControl {
+        summary: Some("Inspected A".into()),
         expected,
-        result_text: Some(format!(
-            "<unelos-worker-result>{result}</unelos-worker-result>"
-        )),
+        result_text: None,
         outcome: None,
         reason: None,
     };
@@ -124,19 +116,19 @@ fn cross_run_callback_with_same_task_label_never_writes_either_run() {
 fn duplicate_persisted_ids_fail_lookup_and_discovery() {
     let (_temp, root) = fixture();
     let a = start_workflow(&root, "simple-plan-execute-review", Some("first-run")).unwrap();
-    start_workflow(&root, "simple-plan-execute-review", Some("second-run")).unwrap();
-    let path = root.join(".unelos/runs/second-run/state.json");
+    let b = start_workflow(&root, "simple-plan-execute-review", Some("second-run")).unwrap();
+    let path = root.join(".unelos/runs").join(&b.run_id).join("state.json");
     let mut saved: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     saved["runId"] = a.run_id.clone().into();
     std::fs::write(&path, serde_json::to_vec(&saved).unwrap()).unwrap();
     assert!(matches!(
         list_runs(&root),
-        Err(RuntimeError::DuplicateRunId { .. })
+        Err(RuntimeError::InvalidState(_))
     ));
     assert!(matches!(
         status(&root, &a.run_id),
-        Err(RuntimeError::DuplicateRunId { .. })
+        Err(RuntimeError::InvalidState(_))
     ));
 }
 
@@ -158,15 +150,15 @@ fn corrupted_sibling_is_not_silently_skipped_for_a_valid_target() {
     for corruption in ["missing", "json", "name"] {
         let (_temp, root) = fixture();
         let a = start_workflow(&root, "simple-plan-execute-review", Some("first-run")).unwrap();
-        start_workflow(&root, "simple-plan-execute-review", Some("second-run")).unwrap();
-        let path = root.join(".unelos/runs/second-run/state.json");
+        let b = start_workflow(&root, "simple-plan-execute-review", Some("second-run")).unwrap();
+        let path = root.join(".unelos/runs").join(&b.run_id).join("state.json");
         match corruption {
             "missing" => std::fs::remove_file(&path).unwrap(),
             "json" => std::fs::write(&path, "{").unwrap(),
             "name" => {
                 let mut saved: serde_json::Value =
                     serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-                saved["name"] = "wrong-directory".into();
+                saved["runId"] = "wrong-directory".into();
                 std::fs::write(&path, serde_json::to_vec(&saved).unwrap()).unwrap();
             }
             _ => unreachable!(),

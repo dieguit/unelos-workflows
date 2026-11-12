@@ -1,3 +1,4 @@
+import { useDelayedFlag } from "@/hooks/use-delayed-flag"
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { createFileRoute, useBlocker, useRouter } from "@tanstack/react-router"
 import { useStore } from "@tanstack/react-form"
@@ -105,6 +106,7 @@ function ModelMappingsHome() {
   const isDefaultValue = useStore(form.store, (s) => s.isDefaultValue)
   const submitting = useStore(form.store, (s) => s.isSubmitting)
   const busy = submitting || deleting
+  const visualBusy = useDelayedFlag(busy)
   const dirty = !isDefaultValue
   useEffect(() => {
     form.reset({
@@ -134,12 +136,12 @@ function ModelMappingsHome() {
 
   return (
     // Cancel <main>'s padding so the inspector sits flush right at full height.
-    <div className="-mx-8 -mt-6 -mb-8 flex h-[calc(100%+3.5rem)]">
+    <div inert={busy} className="-mx-8 -mt-6 -mb-8 flex h-[calc(100%+3.5rem)]">
       <div className="min-w-0 flex-1 overflow-y-auto px-8 pt-6 pb-8">
         <div className="flex flex-col gap-4">
           <Header
             action={
-              <Button onClick={() => void create()} disabled={busy}>
+              <Button onClick={() => void create()} disabled={visualBusy}>
                 <PlusIcon aria-hidden="true" />
                 New alias
               </Button>

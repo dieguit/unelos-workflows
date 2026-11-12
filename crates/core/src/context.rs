@@ -14,13 +14,17 @@ pub struct TaskContext {
     pub task_definition: String,
     pub agent: String,
     pub execution: Execution,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub task_instructions: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub agent_instructions: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub skills: Vec<ResolvedSkill>,
     pub model: Option<crate::AgentModel>,
     pub mcps: Vec<String>,
     pub tools: Vec<String>,
     pub outcomes: Vec<String>,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub completion_instructions: String,
 }
 

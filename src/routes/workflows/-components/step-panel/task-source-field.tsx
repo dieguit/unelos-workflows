@@ -33,8 +33,8 @@ import {
   type StepTask,
 } from "@/lib/projects"
 import type { WorkflowForm } from "../../-hooks/use-workflow-form"
-import { humanize, taskRef } from "../../-lib/step-edit"
-import { Row } from "./panel-ui"
+import { humanize, taskRef } from "@/lib/step-edit"
+import { Row } from "@/components/step-panel/panel-ui"
 
 const segment =
   "flex items-center justify-center gap-1.5 rounded-sm border border-transparent text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none"
@@ -51,12 +51,12 @@ const kinds = [
 export function TaskSourceField({
   root,
   form,
-  index,
+  path,
   task,
 }: {
   root: string
   form: WorkflowForm
-  index: number
+  path: `steps[${number}].task` | `steps[${number}].workers[${number}].task`
   task: StepTask
 }) {
   const fetchShared = useCallback(() => listTasks(root), [root])
@@ -88,7 +88,7 @@ export function TaskSourceField({
       current === "inline" &&
       (task.instructions.trim() || task.skills.length) &&
       !(await discard.ask(
-        `Replace this step’s inline instructions, skills and outcomes with the ${kind} task?`
+        `Replace this ${path.includes("workers") ? "task" : "step"}’s inline instructions, skills and outcomes with the ${kind} task?`
       ))
     )
       return
@@ -97,7 +97,7 @@ export function TaskSourceField({
         kind === "global"
           ? await getGlobalTask(name)
           : await getTask(root, name)
-      form.setFieldValue(`steps[${index}].task`, {
+      form.setFieldValue(path, {
         source: "named",
         id: kind === "global" ? `global/${doc.id}` : doc.id,
         description: doc.description,
@@ -117,7 +117,7 @@ export function TaskSourceField({
     } else if (ref) {
       // Fork: keep the task's content as editable inline content; routes already match its outcomes.
       setPicking(null)
-      form.setFieldValue(`steps[${index}].task`, {
+      form.setFieldValue(path, {
         ...task,
         source: "inline",
         id: null,

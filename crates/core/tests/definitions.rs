@@ -226,7 +226,6 @@ fn workflow_rejects_invalid_node_configuration() {
             "{task: t, agent: a, next: x, execution: background}",
             "background",
         ),
-        ("{task: t, next: x}", "agent"),
         ("{task: t, agent: a}", "next"),
         ("{task: t, agent: a, next: x, ouputs: []}", "ouputs"),
         ("{type: parallel, tasks: [{task: t}], next: x}", "agent"),

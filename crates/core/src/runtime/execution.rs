@@ -1,8 +1,8 @@
 use super::{artifacts, completion, gates, packet_for_state, store, CurrentWork, RunState};
 use crate::{
     parse_parallel_results, parse_worker_result, read_brief, render_execution_package,
-    ContinuationControl, ExecutionControl, ExecutionError, ExecutionIdentity, ExecutionOperation,
-    ExecutionPackage, LoadedProject, RuntimeError, WorkPacket, WorkerStatus,
+    CompletionControl, ExecutionError, ExecutionIdentity, ExecutionOperation, ExecutionPackage,
+    LoadedProject, RuntimeError, WorkPacket, WorkerStatus,
 };
 use camino::Utf8Path;
 
@@ -12,29 +12,30 @@ fn project_for(root: &Utf8Path, state: &RunState) -> Result<LoadedProject, Execu
     Ok(project)
 }
 
-fn package_from_state(
+pub(super) fn package_from_state(
     project: &LoadedProject,
     state: &RunState,
-    continuation: Option<&ContinuationControl>,
 ) -> Result<ExecutionPackage, ExecutionError> {
     let packet = packet_for_state(project, state)?;
-    let brief = if packet.requires_brief() {
-        let path = project
-            .project_root
-            .join(".unelos/runs")
-            .join(&state.name)
-            .join("ledger.md");
-        let text = std::fs::read_to_string(&path).map_err(|_| {
-            ExecutionError::protocol(
-                "missing_brief",
-                "Record one agreed Brief in the supplied ledger before delegation",
-            )
-        })?;
-        Some(read_brief(&text)?)
-    } else {
-        None
+    let path = project
+        .project_root
+        .join(".unelos/runs")
+        .join(&state.run_id)
+        .join("ledger.md");
+    let brief = match std::fs::read_to_string(&path) {
+        Ok(text) => read_brief(&text),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(super::path_error(&path, error).into()),
     };
-    render_execution_package(Some(packet), vec![], brief.as_deref(), continuation)
+    let mut package = render_execution_package(Some(packet), vec![], brief.as_deref())?;
+    filter_receipts(&mut package, state);
+    Ok(package)
+}
+
+pub(super) fn filter_receipts(package: &mut ExecutionPackage, state: &RunState) {
+    if let CurrentWork::Parallel(record) = &state.current {
+        package.worker_prompts.retain(|prompt| !record.worker_receipts.contains_key(&prompt.key));
+    }
 }
 
 fn assert_identity(state: &RunState, expected: &ExecutionIdentity) -> Result<(), ExecutionError> {
@@ -85,7 +86,7 @@ fn assert_identity(state: &RunState, expected: &ExecutionIdentity) -> Result<(),
 pub fn execution_next(root: &Utf8Path, run_id: &str) -> Result<ExecutionPackage, ExecutionError> {
     let store = store::RunStore::open(root)?;
     let state = store.run(run_id)?;
-    package_from_state(&project_for(root, &state)?, &state, None)
+    package_from_state(&project_for(root, &state)?, &state)
 }
 
 pub fn execution_start(
@@ -93,24 +94,20 @@ pub fn execution_start(
     workflow: &str,
     name: Option<&str>,
 ) -> Result<ExecutionPackage, ExecutionError> {
-    if let Some(name) = name {
-        if !super::valid_run_name(name) {
-            return Err(RuntimeError::InvalidName { name: name.into() }.into());
-        }
-    }
+    let name = name.map(super::slugify_run_name).transpose()?;
     let project = crate::load_project(root, workflow).map_err(RuntimeError::from)?;
     crate::validate_project(&project).map_err(RuntimeError::from)?;
     let store = store::RunStore::open(root)?;
-    store.ensure_start_available(name)?;
+    store.ensure_start_available(name.as_deref())?;
     let run_id = store.allocate_run_id()?;
     let state = super::prepare_start_state(
         &project,
         &run_id,
-        name.unwrap_or(&run_id),
+        name.as_deref().unwrap_or(&run_id),
         "",
         name.is_none(),
     )?;
-    let package = package_from_state(&project, &state, None)?;
+    let package = package_from_state(&project, &state)?;
     store
         .publish(&state, |run| {
             artifacts::prepare_work_directories(&state, run)
@@ -119,25 +116,14 @@ pub fn execution_start(
     Ok(package)
 }
 
-pub fn execution_continue(
-    root: &Utf8Path,
-    run_id: &str,
-    control: &ContinuationControl,
-) -> Result<ExecutionPackage, ExecutionError> {
-    let store = store::RunStore::open(root)?;
-    let state = store.run(run_id)?;
-    assert_identity(&state, &control.expected)?;
-    package_from_state(&project_for(root, &state)?, &state, Some(control))
-}
-
-pub fn execution_mutate(
+fn execution_mutate_inner(
     root: &Utf8Path,
     run_id: &str,
     operation: ExecutionOperation,
-    control: &ExecutionControl,
+    control: &CompletionControl,
 ) -> Result<ExecutionPackage, ExecutionError> {
     let store = store::RunStore::open(root)?;
-    let state = store.run(run_id)?;
+    let mut state = store.run(run_id)?;
     assert_identity(&state, &control.expected)?;
     let project = project_for(root, &state)?;
     let candidate = match operation {
@@ -154,33 +140,53 @@ pub fn execution_mutate(
                     "Task completion cannot carry gate feedback",
                 ));
             }
-            let text = control.result_text.as_deref().ok_or_else(|| {
-                ExecutionError::protocol(
-                    "invalid_worker_result",
-                    "Completion requires an inspected result",
-                )
-            })?;
-            match packet_for_state(&project, &state)? {
+            let text = || {
+                control.result_text.as_deref().ok_or_else(|| {
+                    ExecutionError::protocol(
+                        "invalid_worker_result",
+                        "Completion requires the worker's final message, verbatim",
+                    )
+                })
+            };
+            let outcome = match packet_for_state(&project, &state)? {
                 WorkPacket::Task(task) => {
-                    let result = parse_worker_result(text, &control.expected)?;
-                    if result.status != WorkerStatus::Finished {
-                        return Err(ExecutionError::protocol(
-                            "invalid_worker_result",
-                            "Only FINISHED work can complete",
-                        ));
-                    }
-                    let outcomes = &task.packet.context.outcomes;
-                    if result.outcome != control.outcome
-                        || match &control.outcome {
-                            Some(outcome) => !outcomes.contains(outcome),
-                            None => !outcomes.is_empty(),
+                    let outcome = if task.packet.context.execution == crate::Execution::Subagent {
+                        let result = parse_worker_result(text()?, &control.expected)?;
+                        if result.status != WorkerStatus::Finished {
+                            return Err(ExecutionError::protocol(
+                                "invalid_worker_result",
+                                "Only FINISHED work can complete",
+                            ));
                         }
-                    {
+                        result.outcome
+                    } else {
+                        if control.result_text.is_some() {
+                            return Err(ExecutionError::protocol(
+                                "invalid_control",
+                                "Main Tasks use summary, not resultText",
+                            ));
+                        }
+                        control.outcome.clone()
+                    };
+                    let outcomes = &task.packet.context.outcomes;
+                    if match &outcome {
+                        Some(outcome) => !outcomes.contains(outcome),
+                        None => !outcomes.is_empty(),
+                    } {
                         return Err(ExecutionError::protocol(
                             "invalid_outcome",
-                            "Select exactly one declared outcome, or none for ordinary work",
+                            format!(
+                                "outcome {:?} is not declared; allowed: {}",
+                                outcome,
+                                if outcomes.is_empty() {
+                                    "null".into()
+                                } else {
+                                    outcomes.join(", ")
+                                }
+                            ),
                         ));
                     }
+                    outcome
                 }
                 WorkPacket::Parallel(parallel) => {
                     if control.outcome.is_some() {
@@ -191,16 +197,42 @@ pub fn execution_mutate(
                     }
                     let keys: Vec<String> =
                         parallel.workers.iter().map(|w| w.key.clone()).collect();
-                    parse_parallel_results(text, &control.expected, &keys)?;
+                    let results = if control.result_text.as_deref().unwrap_or("").trim().is_empty()
+                        && record.worker_receipts.len() == keys.len() {
+                        vec![]
+                    } else {
+                        parse_parallel_results(text()?, &control.expected, &keys)?
+                    };
+                    for result in &results {
+                        let key = result.worker_key.as_ref().unwrap();
+                        if record.worker_receipts.contains_key(key) {
+                            return Err(ExecutionError::protocol("invalid_worker_result", format!("workerKey {key:?} already has a receipt")));
+                        }
+                        let report = record.worker_reports.iter().find(|r| &r.key == key).unwrap();
+                        artifacts::require_nonempty_file(&report.report.path).map_err(|cause| ExecutionError::protocol("missing_output", format!("{}: {cause}", report.report.path)))?;
+                    }
+                    let CurrentWork::Parallel(record) = &mut state.current else { unreachable!() };
+                    for result in results {
+                        record.worker_receipts.insert(result.worker_key.clone().unwrap(), result);
+                    }
+                    record.invalid_worker_results = 0;
+                    // Save receipts even when the aggregates still need writing.
+                    store.update(&state)?;
+                    let CurrentWork::Parallel(record) = &state.current else { unreachable!() };
+                    if record.worker_receipts.len() != keys.len() {
+                        return package_from_state(&project, &state);
+                    }
+                    None
                 }
                 _ => unreachable!(),
-            }
+            };
+            let record = match &state.current { CurrentWork::Task(r) | CurrentWork::Parallel(r) => r, _ => unreachable!() };
             for output in record
                 .outputs
                 .iter()
                 .chain(record.worker_reports.iter().map(|r| &r.report))
             {
-                artifacts::require_regular_file(&output.path).map_err(|cause| {
+                artifacts::require_nonempty_file(&output.path).map_err(|cause| {
                     ExecutionError::protocol(
                         "missing_output",
                         format!("Required output unavailable: {} ({cause})", output.path),
@@ -217,7 +249,7 @@ pub fn execution_mutate(
                 &project,
                 &confirmed,
                 &record.execution_id,
-                control.outcome.as_deref(),
+                outcome.as_deref(),
                 None,
             )?
         }
@@ -228,7 +260,10 @@ pub fn execution_mutate(
                     "Decision requires a human gate",
                 ));
             };
-            if control.result_text.is_some() || control.outcome.is_some() {
+            if control.result_text.is_some()
+                || control.outcome.is_some()
+                || control.summary.is_some()
+            {
                 return Err(ExecutionError::protocol(
                     "invalid_control",
                     "Gate decisions cannot carry Task results/outcomes",
@@ -263,16 +298,47 @@ pub fn execution_mutate(
         }
     };
     // Resolve before publication: missing Brief/context must not partially advance state.
-    let package = package_from_state(&project, &candidate, None)?;
+    let package = package_from_state(&project, &candidate)?;
     artifacts::prepare_work_directories(
         &candidate,
         &project
             .project_root
             .join(".unelos/runs")
-            .join(&candidate.name),
+            .join(&candidate.run_id),
     )?;
     store
         .update(&candidate)
         .map_err(|error| ExecutionError::after_commit(error.into()))?;
     Ok(package)
+}
+
+
+pub fn execution_mutate(root: &Utf8Path, run_id: &str, operation: ExecutionOperation, control: &CompletionControl) -> Result<ExecutionPackage, ExecutionError> {
+    let result = execution_mutate_inner(root, run_id, operation, control);
+    if let Err(ExecutionError::Protocol { code: "invalid_worker_result", message }) = &result {
+        let store = store::RunStore::open(root)?;
+        let mut state = store.run(run_id)?;
+        assert_identity(&state, &control.expected)?;
+        if let CurrentWork::Task(record) | CurrentWork::Parallel(record) = &mut state.current {
+            record.invalid_worker_results = record.invalid_worker_results.saturating_add(1);
+            let stop = record.invalid_worker_results >= 3;
+            store.update(&state)?;
+            if stop {
+                return Err(ExecutionError::protocol("invalid_worker_result", format!("{message}. Stop and tell the user.")));
+            }
+        }
+    }
+    if result.as_ref().err().is_some_and(|error| error.code() != "invalid_worker_result") {
+        let store = store::RunStore::open(root)?;
+        let mut state = store.run(run_id)?;
+        if assert_identity(&state, &control.expected).is_ok() {
+            if let CurrentWork::Task(record) | CurrentWork::Parallel(record) = &mut state.current {
+                if record.invalid_worker_results != 0 {
+                    record.invalid_worker_results = 0;
+                    store.update(&state)?;
+                }
+            }
+        }
+    }
+    result
 }

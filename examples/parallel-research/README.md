@@ -1,5 +1,7 @@
 # parallel-research example
 
+The research goal lives in the declared `brief.md` artifact, not a ledger `## Brief` section.
+
 Scope a question (main) → backend and frontend researchers run in parallel
 (subagents, separate Skills and reports) → controller writes
 `parallel-research/research-summary.md` → synthesis (main) → human gate.

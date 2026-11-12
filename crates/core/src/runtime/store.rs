@@ -30,17 +30,11 @@ impl RunStore {
             .map_err(|source| path_error(&lock_path, source))?;
         lock.lock()
             .map_err(|source| path_error(&lock_path, source))?;
-        let store = Self { root, lock };
-        store.recover_rename()?;
-        Ok(store)
+        Ok(Self { root, lock })
     }
 
     pub(super) fn root(&self) -> &Utf8Path {
         &self.root
-    }
-
-    pub(super) fn recover_rename(&self) -> Result<(), RuntimeError> {
-        super::rename::recover(self)
     }
 
     pub(super) fn runs(&self) -> Result<Vec<RunState>, RuntimeError> {
@@ -88,10 +82,10 @@ impl RunStore {
                 })?;
             validate_state(&state)?;
             validate_artifacts(&state, &path)?;
-            if state.name != name {
+            if state.run_id != name {
                 return Err(RuntimeError::InvalidState(format!(
-                    "run directory {name:?} does not match state name {:?}",
-                    state.name
+                    "run directory {name:?} does not match state run ID {:?}",
+                    state.run_id
                 )));
             }
             if !ids.insert(state.run_id.clone()) {
@@ -121,10 +115,9 @@ impl RunStore {
     }
 
     pub(super) fn ensure_start_available(&self, name: Option<&str>) -> Result<(), RuntimeError> {
-        self.runs()?;
+        let runs = self.runs()?;
         if let Some(name) = name {
-            let run_dir = self.root.join(".unelos/runs").join(name);
-            if fs::symlink_metadata(&run_dir).is_ok() {
+            if runs.iter().any(|state| state.name == name) {
                 return Err(RuntimeError::Collision { name: name.into() });
             }
         }
@@ -203,13 +196,16 @@ impl RunStore {
         write: impl Fn(&Utf8Path, &[u8]) -> Result<(), RuntimeError>,
     ) -> Result<(), RuntimeError> {
         let active = self.run(&state.run_id)?;
-        if state.name != active.name || state.run_id != active.run_id {
+        if state.run_id != active.run_id {
             return Err(RuntimeError::InvalidState(
                 "run update does not match selected run identity".into(),
             ));
         }
         validate_state(state)?;
-        let run_path = self.root.join(".unelos/runs").join(&state.name);
+        if state.name != active.name {
+            self.ensure_start_available(Some(&state.name))?;
+        }
+        let run_path = self.root.join(".unelos/runs").join(&state.run_id);
         validate_artifacts(state, &run_path)?;
         let state_path = run_path.join("state.json");
         reject_symlink(&state_path)?;
@@ -222,7 +218,15 @@ impl RunStore {
                 io::Error::new(io::ErrorKind::InvalidInput, "state is not a regular file"),
             ));
         }
-        let bytes = serde_json::to_vec(state).map_err(|source| RuntimeError::Json {
+        let mut state = state.clone();
+        state.started_at = active.started_at;
+        state.updated_at = active.updated_at;
+        // Idempotent replays must not bump updatedAt or rewrite state.
+        if state == active {
+            return Ok(());
+        }
+        state.updated_at = Some(now_millis());
+        let bytes = serde_json::to_vec(&state).map_err(|source| RuntimeError::Json {
             path: state_path.clone(),
             source,
         })?;
@@ -240,7 +244,8 @@ impl RunStore {
         ensure_directory(&runtime)?;
         let runs = runtime.join("runs");
         ensure_directory(&runs)?;
-        let run_dir = runs.join(&state.name);
+        self.ensure_start_available(Some(&state.name))?;
+        let run_dir = runs.join(&state.run_id);
         match fs::symlink_metadata(&run_dir) {
             Ok(_) => {
                 return Err(RuntimeError::Collision {
@@ -270,7 +275,11 @@ impl RunStore {
         })?;
         prepare(&run_dir)?;
         let state_path = run_dir.join("state.json");
-        let bytes = serde_json::to_vec(state).map_err(|source| RuntimeError::Json {
+        let mut state = state.clone();
+        let now = now_millis();
+        state.started_at = Some(now);
+        state.updated_at = Some(now);
+        let bytes = serde_json::to_vec(&state).map_err(|source| RuntimeError::Json {
             path: state_path.clone(),
             source,
         })?;
@@ -282,6 +291,13 @@ impl Drop for RunStore {
     fn drop(&mut self) {
         let _ = self.lock.unlock();
     }
+}
+
+fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 pub(super) fn validate_state(state: &RunState) -> Result<(), RuntimeError> {
@@ -331,6 +347,22 @@ pub(super) fn validate_state(state: &RunState) -> Result<(), RuntimeError> {
             }
             CurrentWork::Finished { .. } => return Ok(()),
         };
+        for (key, result) in &record.worker_receipts {
+            if !matches!(work, CurrentWork::Parallel(_))
+                || !record.worker_reports.iter().any(|report| &report.key == key)
+                || result.worker_key.as_ref() != Some(key)
+                || result.task_id != record.execution_id
+                || result.status != crate::WorkerStatus::Finished
+                || result.outcome.is_some()
+            {
+                return Err(RuntimeError::InvalidState(format!("invalid worker receipt for key {key:?}")));
+            }
+        }
+        for path in record.output_digests.keys() {
+            if !record.outputs.iter().chain(record.worker_reports.iter().map(|r| &r.report)).any(|output| &output.path == path) {
+                return Err(RuntimeError::InvalidState(format!("unexpected output snapshot path {path}")));
+            }
+        }
         if let Some(confirmed) = &record.confirmed_execution_id {
             if confirmed != &record.execution_id {
                 return Err(RuntimeError::InvalidState(format!(
@@ -565,6 +597,8 @@ mod tests {
 
     fn state(name: &str) -> RunState {
         RunState {
+            started_at: None,
+            updated_at: None,
             run_id: name.into(),
             name: name.into(),
             workflow_name: "flow".into(),
@@ -582,9 +616,12 @@ mod tests {
     fn publish_and_active_roundtrip() {
         let (_temp, root) = root();
         let store = RunStore::open(&root).unwrap();
-        let state = state("roundtrip");
+        let mut state = state("roundtrip");
         store.publish(&state, |_| Ok(())).unwrap();
-        assert_eq!(store.run("roundtrip").unwrap(), state);
+        let saved = store.run("roundtrip").unwrap();
+        state.started_at = saved.started_at;
+        state.updated_at = saved.updated_at;
+        assert_eq!(saved, state);
     }
 
     #[test]
@@ -676,6 +713,7 @@ mod tests {
         let store = RunStore::open(&root).unwrap();
         let original = state("update-run");
         store.publish(&original, |_| Ok(())).unwrap();
+        let original = store.run(&original.run_id).unwrap();
         let state_path = root.join(".unelos/runs/update-run/state.json");
         let before = fs::read(&state_path).unwrap();
         let mut changed = original.clone();
@@ -819,6 +857,9 @@ mod tests {
             inputs: vec![],
             outputs: vec![],
             worker_reports: vec![],
+            output_digests: Default::default(),
+            worker_receipts: Default::default(),
+            invalid_worker_results: 0,
             feedback: None,
             confirmed_execution_id: None,
         });

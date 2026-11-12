@@ -1,15 +1,17 @@
 import test from 'node:test';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import assert from 'node:assert/strict';
 import {mkdtempSync,writeFileSync,readFileSync,chmodSync,existsSync,rmSync} from 'node:fs';
 import * as module from '../index.js';
 import {setTimeout as delay} from 'node:timers/promises';
 
-const names=['unelos_next','unelos_start','unelos_resume','unelos_complete','unelos_approve','unelos_reject','unelos_continue','unelos_status','unelos_inspect','unelos_rename'];
+const names=['unelos_next','unelos_start','unelos_resume','unelos_complete','unelos_approve','unelos_reject','unelos_status','unelos_inspect','unelos_rename'];
 const expected={kind:'task',runId:'r-1',nodeId:'implement',taskId:'task-3'};
 const pkg={runId:'r-1',status:'running',workflows:[],expected,packet:{agent:'engineer'},workerPrompt:'Exact core prompt\nSELECTED BODY',controllerInstructions:'Shared controller policy'};
 
 async function fixture(t,version) {
-  const project=mkdtempSync('/tmp/opencode/unelos-thin-tools-');t.after(()=>rmSync(project,{recursive:true}));
+  const project=mkdtempSync(join(tmpdir(),'unelos-thin-tools-'));t.after(()=>rmSync(project,{recursive:true}));
   const binary=project+'/cli.cjs';
   writeFileSync(binary,`#!/usr/bin/env node
 const fs=require('node:fs');let input='';process.stdin.on('data',s=>input+=s);process.stdin.on('end',()=>{
@@ -18,7 +20,8 @@ const fs=require('node:fs');let input='';process.stdin.on('data',s=>input+=s);pr
   if(mode==='error'){console.error(JSON.stringify({error:{code:'stale_execution',message:'Read current state'}}));process.exit(2);}
   if(mode.startsWith('error:')){console.error(JSON.stringify({error:{code:mode.slice(6),message:'Select a valid unfinished run'}}));process.exit(2);}
  if(mode==='bad'){console.log('not JSON');return;}if(mode==='wait'){setInterval(()=>{},1000);return;}
- const output=fs.readFileSync(p+'/package','utf8');
+  const output=fs.readFileSync(p+'/package','utf8');
+  if(process.argv[4]==='inspect'){console.log(fs.existsSync(p+'/inspection')?fs.readFileSync(p+'/inspection','utf8'):JSON.stringify({name:'page-change',nodes:[{id:'implement',kind:'task'}],edges:[]}));return;}
  if(mode==='delay'&&['start','resume'].includes(process.argv[5])){const timer=setInterval(()=>{if(fs.existsSync(p+'/release')){clearInterval(timer);console.log(output);}},10);return;}
  console.log(output);
 });`);chmodSync(binary,0o755);writeFileSync(project+'/package',JSON.stringify(pkg));
@@ -43,6 +46,15 @@ const fs=require('node:fs');let input='';process.stdin.on('data',s=>input+=s);pr
 }
 
 for(const version of ['v1','v2']) {
+  test(`${version}: free text is forwarded and only single-word keywords are special`,{skip:version==='v1'&&!process.env.UNELOS_V1_TOOL_MODULE},async t=>{
+    const f=await fixture(t,version);
+    for(const text of ['build a dashboard','resume this idea','off the beaten path']){
+      await f.command(text);
+      const value=JSON.parse(version==='v2'?f.prompts.at(-1).text:f.prompts.at(-1).parts[0].text);
+      assert.equal(value.requestedAction,text);
+      assert.deepEqual(f.calls().at(-1).argv.slice(2),['execution','new','--json']);
+    }
+  });
   test(`${version}: off/new cannot be overwritten between binding check and metadata write`,{skip:version==='v1'&&!process.env.UNELOS_V1_TOOL_MODULE},async t=>{
     for(const command of ['off','']){
       const f=await fixture(t,version);await f.command('');
@@ -67,7 +79,7 @@ for(const version of ['v1','v2']) {
     await f.call('unelos_next');assert.deepEqual(f.calls().at(-1).argv.slice(2),['execution','next','--run','r-a','--json']);
     await f.call('unelos_next',{},'ses_other');assert.deepEqual(f.calls().at(-1).argv.slice(2),['execution','next','--run','r-b','--json']);
     const count=f.calls().length;
-    for(const name of ['complete','approve','reject','continue'])await assert.rejects(f.call('unelos_'+name,{expected:{...expected,runId:'r-b'},resultText:'frame',progress:[]}),{code:'stale_execution'});
+    for(const name of ['complete','approve','reject'])await assert.rejects(f.call('unelos_'+name,{expected:{...expected,runId:'r-b'},resultText:'frame',progress:[]}),{code:'stale_execution'});
     await assert.rejects(f.call('unelos_rename',{name:'renamed',runId:'r-b'}),{code:'stale_execution'});
     await assert.rejects(f.call('unelos_start',{workflow:'page-change'}),{code:'invalid_entry'});
     assert.equal(f.calls().length,count);assert.equal(f.sessions.get('ses_other').metadata['unelos.opencode'].runId,'r-b');
@@ -88,8 +100,9 @@ for(const version of ['v1','v2']) {
       const f=await fixture(t,version);await f.command(operation==='resume'?'resume':'');writeFileSync(f.project+'/mode','delay');
       const count=f.calls().length;const pending=f.call('unelos_'+operation,operation==='start'?{workflow:'page-change'}:{runId:'r-1'});
       const rejected=assert.rejects(pending,error=>error.code===(operation==='start'?'mutation_uncertain':'entry_superseded'));
-      for(let i=0;f.calls().length===count&&i<200;i++)await delay(10);
-      assert.equal(f.calls().length,count+1);await f.command(command);
+      const extra=version==='v1'&&operation==='start'?2:1;
+      for(let i=0;f.calls().length<count+extra&&i<200;i++)await delay(10);
+      assert.equal(f.calls().length,count+extra);await f.command(command);
       if(command===''){writeFileSync(f.project+'/mode','');writeFileSync(f.project+'/package',JSON.stringify({...pkg,runId:'r-new'}));await f.call('unelos_start',{workflow:'page-change'});}
       const metadata=structuredClone(f.sessions.get('ses_main').metadata);
       writeFileSync(f.project+'/release','');await rejected;assert.deepEqual(f.sessions.get('ses_main').metadata,metadata);
@@ -98,7 +111,7 @@ for(const version of ['v1','v2']) {
   test(`${version}: failed metadata binding after start is uncertain and never retries`,{skip:version==='v1'&&!process.env.UNELOS_V1_TOOL_MODULE},async t=>{
     const f=await fixture(t,version);await f.command('');f.failUpdates=true;const count=f.calls().length;
     await assert.rejects(f.call('unelos_start',{workflow:'page-change'}),error=>error.code==='mutation_uncertain'&&error.message.includes('r-1'));
-    assert.equal(f.calls().length,count+1);assert.equal(f.sessions.get('ses_main').metadata['unelos.opencode'].runId,undefined);
+    assert.equal(f.calls().length,count+(version==='v1'?2:1));assert.equal(f.sessions.get('ses_main').metadata['unelos.opencode'].runId,undefined);
   });
   test(`${version}: failed resume/entry never restores an old selection`,{skip:version==='v1'&&!process.env.UNELOS_V1_TOOL_MODULE},async t=>{
     const f=await fixture(t,version);await f.command('');await f.call('unelos_start',{workflow:'page-change'});
@@ -119,10 +132,12 @@ for(const version of ['v1','v2']) {
     const value=JSON.parse(version==='v2'?output.content:output);assert.equal(value.workerPrompt,pkg.workerPrompt);
     assert.equal(value.nativeAgent,'unelos-engineer');assert.equal(f.calls().length,before+1);
     assert.deepEqual(f.calls().at(-1).argv.slice(2),['execution','complete','--run','r-1','--json']);
-    assert.deepEqual(f.calls().at(-1).input,{expected,resultText:'Worker frame',outcome:null,reason:null});
+    assert.deepEqual(f.calls().at(-1).input,{expected,resultText:'Worker frame',summary:null,outcome:null,reason:null});
+    await f.call('unelos_complete',{expected,summary:'Main Task done',outcome:'fix'});
+    assert.deepEqual(f.calls().at(-1).input,{expected,resultText:null,summary:'Main Task done',outcome:'fix',reason:null});
     assert.ok(![...f.hooks.keys()].some(name=>/context|chat\.params|tool\.execute|messages\.transform/.test(name)));
     assert.equal(f.sessions.get('ses_main').metadata.keep,'user');
-    const cases=[['unelos_next',{},['execution','next','--run','r-1','--json']],['unelos_approve',{expected},['execution','approve','--run','r-1','--json']],['unelos_reject',{expected,reason:'Revise'},['execution','reject','--run','r-1','--json']],['unelos_continue',{expected,answer:'Yes',progress:[]},['execution','continue','--run','r-1','--json']],['unelos_status',{},['status','--run','r-1','--json']],['unelos_inspect',{workflow:'page-change',node:'plan'},['inspect','page-change','--node','plan','--json']],['unelos_rename',{name:'renamed',runId:'r-1'},['rename','renamed','--run','r-1','--json']]];
+    const cases=[['unelos_next',{},['execution','next','--run','r-1','--json']],['unelos_approve',{expected},['execution','approve','--run','r-1','--json']],['unelos_reject',{expected,reason:'Revise'},['execution','reject','--run','r-1','--json']],['unelos_status',{},['status','--run','r-1','--json']],['unelos_inspect',{workflow:'page-change',node:'plan'},['inspect','page-change','--node','plan','--json']],['unelos_rename',{name:'renamed',runId:'r-1'},['rename','renamed','--run','r-1','--json']]];
     for(const [name,args,argv] of cases){const count=f.calls().length;await f.call(name,args);assert.equal(f.calls().length,count+1);assert.deepEqual(f.calls().at(-1).argv.slice(2),argv);}
   });
   test(`${version}: ordinary/child/off sessions cannot progress and failures never retry`,{skip:version==='v1'&&!process.env.UNELOS_V1_TOOL_MODULE},async t=>{
@@ -136,6 +151,19 @@ for(const version of ['v1','v2']) {
   });
 }
 
+test('v1: parallel workflows are unavailable and rejected before start',{skip:!process.env.UNELOS_V1_TOOL_MODULE},async t=>{
+  const f=await fixture(t,'v1');
+  writeFileSync(f.project+'/inspection',JSON.stringify({name:'parallel-research',nodes:[{id:'research',kind:'parallel',tasks:[]}],edges:[]}));
+  writeFileSync(f.project+'/package',JSON.stringify({...pkg,workflows:['parallel-research']}));
+  await f.command('');
+  const menu=JSON.parse(f.prompts.at(-1).parts[0].text);
+  assert.deepEqual(menu.workflows,[]);
+  assert.equal(menu.unavailableWorkflows[0].workflow,'parallel-research');
+  await assert.rejects(f.call('unelos_start',{workflow:'parallel-research'}),{code:'unsupported_workflow'});
+  assert.ok(!f.calls().some(call=>call.argv.includes('start')));
+  assert.equal(f.sessions.get('ses_main').metadata['unelos.opencode'].runId,undefined);
+});
+
 test('transport preserves safe errors, invalid JSON and cancellation without retries',async t=>{
   const f=await fixture(t,'v2');
   writeFileSync(f.project+'/mode','bad');await assert.rejects(module.callCli(f.binary,f.project,['execution','next','--json']),{code:'invalid_cli_json'});
@@ -145,26 +173,29 @@ test('transport preserves safe errors, invalid JSON and cancellation without ret
 });
 
 test('V1 missing explicit native helper fails clearly instead of inventing schemas',async()=>{
-  await assert.rejects(module.default.server({client:{}},{v1ToolModule:'/tmp/opencode/nonexistent-native-helper.js'}),{code:'native_tool_sdk_unavailable'});
+  await assert.rejects(module.default.server({client:{}},{v1ToolModule:join(tmpdir(),'nonexistent-native-helper.js')}),{code:'native_tool_sdk_unavailable'});
 });
 
-test('transport times out a hung CLI without retrying',async t=>{
+test('transport times out a hung CLI without retrying',{timeout:15000},async t=>{
   const f=await fixture(t,'v2');writeFileSync(f.project+'/mode','wait');
   await assert.rejects(module.callCli(f.binary,f.project,['execution','next','--json']),{code:'cli_failed'});
   assert.equal(f.calls().length,1);
 });
 
-test('v2: parallel package maps every worker and forwards workerKey continuations',async t=>{
+test('v2: parallel package maps every worker without continuation tool',async t=>{
   const f=await fixture(t,'v2');
   const parallel={kind:'parallel',runId:'r-1',nodeId:'parallel-research',taskId:'task-4'};
   assert.ok(module.toolSchemas.complete.properties.expected.properties.kind.enum.includes('parallel'));
-  assert.deepEqual(module.toolSchemas.continue.properties.workerKey,{type:'string'});
+  assert.equal(module.toolSchemas.continue,undefined);
+  assert.deepEqual(module.toolSchemas.complete.required,['expected']);
+  assert.match(module.toolSchemas.complete.properties.resultText.description,/verbatim/);
+  assert.match(module.toolSchemas.complete.properties.outcome.description,/main Tasks only/);
   writeFileSync(f.project+'/package',JSON.stringify({...pkg,expected:parallel,packet:{kind:'parallel'},workerPrompt:null,
     workerPrompts:[{key:'worker-1',agent:'backend-researcher',prompt:'B'},{key:'worker-2',agent:'frontend-researcher',prompt:'F'}]}));
   await f.command('');await f.call('unelos_start',{workflow:'parallel-research'});
-  const value=JSON.parse((await f.call('unelos_continue',{expected:parallel,workerKey:'worker-2',answer:'Yes',progress:[]})).content);
+  const value=JSON.parse((await f.call('unelos_complete',{expected:parallel,resultText:'B final\nF final'})).content);
   assert.deepEqual(value.workerPrompts.map(w=>[w.key,w.prompt,w.nativeAgent]),[['worker-1','B','unelos-backend-researcher'],['worker-2','F','unelos-frontend-researcher']]);
   assert.equal(value.nativeAgent,undefined);
   assert.match(value.harnessInstructions,/background=true/);
-  assert.deepEqual(f.calls().at(-1).input,{expected:parallel,workerKey:'worker-2',answer:'Yes',progress:[]});
+  assert.deepEqual(f.calls().at(-1).input,{expected:parallel,resultText:'B final\nF final',summary:null,outcome:null,reason:null});
 });

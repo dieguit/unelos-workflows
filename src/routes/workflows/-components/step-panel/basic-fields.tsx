@@ -16,8 +16,8 @@ import { PickerStatus } from "@/components/picker-status"
 import { useLazy } from "@/hooks/use-lazy"
 import { listAgents, type WorkflowStep } from "@/lib/projects"
 import type { WorkflowForm } from "../../-hooks/use-workflow-form"
-import { humanize, renameStep, slugify, stepNameError } from "../../-lib/step-edit"
-import { Row, shown } from "./panel-ui"
+import { humanize, renameStep, slugify, stepNameError } from "@/lib/step-edit"
+import { Row, shown } from "@/components/step-panel/panel-ui"
 
 type Props = { form: WorkflowForm; index: number; showErrors: boolean }
 
@@ -78,12 +78,16 @@ export function NameField({ form, index, showErrors, step, nameDraft, onNameDraf
   )
 }
 
-export function AgentField({ root, form, index, showErrors }: Props & { root: string }) {
+export function useAgents(root: string) {
   const fetchAgents = useCallback(() => listAgents(root), [root])
-  const agents = useLazy(fetchAgents)
+  return useLazy(fetchAgents)
+}
+
+/** Agent of the step, or of one of its parallel tasks when `worker` is set. */
+export function AgentField({ agents, form, index, worker, showErrors }: Props & { agents: ReturnType<typeof useAgents>; worker?: number }) {
   const [open, setOpen] = useState(false)
   return (
-    <form.Field name={`steps[${index}].agent`}>
+    <form.Field name={worker === undefined ? `steps[${index}].agent` : `steps[${index}].workers[${worker}].agent`}>
       {(field) => {
         const errors = shown(field.state.meta, showErrors)
         const value = field.state.value

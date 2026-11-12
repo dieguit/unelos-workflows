@@ -1,35 +1,22 @@
 import { useCallback } from "react"
 import { useStore } from "@tanstack/react-form"
-import { PanelRightCloseIcon, PencilIcon, Trash2Icon } from "lucide-react"
-import { cn } from "cn"
+import { PencilIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
 import { SkillPicker } from "@/components/skill-picker"
 import { useLazy } from "@/hooks/use-lazy"
 import { listSkills } from "@/lib/projects"
 import type { WorkflowForm } from "../-hooks/use-workflow-form"
-import { humanize } from "../-lib/step-edit"
-import { StepIconBox } from "./flow/step-card"
+import { humanize } from "@/lib/step-edit"
+import { StepIconBox } from "@/components/flow/step-card"
 import { InputsSection, OutputsSection } from "./step-panel/artifact-sections"
 import {
   AgentField,
   ExecutionField,
   NameField,
+  useAgents,
 } from "./step-panel/basic-fields"
-import { RemoveButton, Section } from "./step-panel/panel-ui"
+import { PanelBody, PanelHeader, PanelTabs, RemoveStep } from "@/components/step-panel/panel-chrome"
+import { Section, SkillChips } from "@/components/step-panel/panel-ui"
 import { TaskSourceField } from "./step-panel/task-source-field"
 import {
   NamedOutcomes,
@@ -65,6 +52,7 @@ export function StepPanel({
   const steps = useStore(form.store, (s) => s.values.steps)
   const fetchSkills = useCallback(() => listSkills(root), [root])
   const skills = useLazy(fetchSkills)
+  const agents = useAgents(root)
   const step = steps[index]
   if (!step) return null
   const task = step.kind === "task" ? step.task : null
@@ -72,76 +60,24 @@ export function StepPanel({
   const props = { form, index, showErrors }
   return (
     <>
-      <header className="flex items-center gap-2.5 py-3 pr-2 pl-4">
-        <StepIconBox kind={step.kind} />
-        <div className="min-w-0 flex-1">
-          <h2 className="truncate text-lg font-semibold">
-            {humanize(step.id)}
-          </h2>
-          <p className="truncate font-mono text-xs text-muted-foreground">
-            {step.kind === "human-gate" ? "Human gate" : "Task step"} · id{" "}
-            {step.id}
-          </p>
-        </div>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Close step"
-          title="Close step"
-          onClick={onClose}
-        >
-          <PanelRightCloseIcon aria-hidden="true" />
-        </Button>
-      </header>
-      <div
-        role="tablist"
-        aria-label="Step views"
-        className="flex gap-4.5 border-b px-4 text-sm"
+      <PanelHeader
+        icon={<StepIconBox kind={step.kind} />}
+        title={humanize(step.id)}
+        subtitle={`${step.kind === "human-gate" ? "Human gate" : "Task step"} · id ${step.id}`}
+        onClose={onClose}
+      />
+      <PanelTabs />
+      <PanelBody
+        disabled={disabled}
+        footer={step.kind !== "end" && <RemoveStep step={step} disabled={disabled} onRemove={onRemove} />}
       >
-        <button
-          type="button"
-          role="tab"
-          id="step-tab-properties"
-          aria-selected="true"
-          aria-controls="step-tab-panel"
-          className="-mb-px h-8.5 border-b-2 border-primary font-medium"
-        >
-          Properties
-        </button>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <button
-                type="button"
-                role="tab"
-                aria-selected="false"
-                aria-disabled="true"
-                className="h-8.5 cursor-not-allowed text-muted-foreground"
-              />
-            }
-          >
-            Context preview
-          </TooltipTrigger>
-          <TooltipContent>Coming soon</TooltipContent>
-        </Tooltip>
-      </div>
-      <div
-        id="step-tab-panel"
-        role="tabpanel"
-        aria-labelledby="step-tab-properties"
-        className="min-h-0 flex-1 overflow-y-auto"
-      >
-        <fieldset
-          disabled={disabled}
-          className="flex min-w-0 flex-col gap-4 p-4 disabled:opacity-60"
-        >
           <NameField {...props} step={step} nameDraft={nameDraft} onNameDraft={onNameDraft} />
           {step.kind === "task" && (
             <>
-              <AgentField {...props} root={root} />
+              <AgentField {...props} agents={agents} />
               <ExecutionField {...props} />
               <div className="flex flex-col gap-4 border-y py-4">
-                {task && <TaskSourceField root={root} form={form} index={index} task={task} />}
+                {task && <TaskSourceField root={root} form={form} path={`steps[${index}].task`} task={task} />}
                 <Section
                   label="Task Instructions"
                   source={named}
@@ -157,27 +93,7 @@ export function StepPanel({
                     const list = field.state.value ?? [] // task is non-null for task steps
                     return (
                       <Section label="Skills" source={named}>
-                        {list.length > 0 && (
-                          <ul className="flex flex-wrap gap-1.5">
-                            {list.map((skill, i) => (
-                              <li
-                                key={skill}
-                                className={cn(
-                                  "flex h-7 items-center gap-1 rounded-md border border-input pr-0.5 pl-1.5 font-mono text-xs",
-                                  named && "pr-1.5"
-                                )}
-                              >
-                                {skill}
-                                {!named && (
-                                  <RemoveButton
-                                    label={`Remove ${skill}`}
-                                    onClick={() => field.removeValue(i)}
-                                  />
-                                )}
-                              </li>
-                            ))}
-                          </ul>
-                        )}
+                        <SkillChips skills={list} onRemove={named ? undefined : (i) => field.removeValue(i)} />
                         {named ? (
                           !list.length && (
                             <p className="text-sm text-muted-foreground">None</p>
@@ -206,31 +122,7 @@ export function StepPanel({
           <InputsSection form={form} index={index} steps={steps} />
           {step.kind === "task" && <OutputsSection form={form} index={index} />}
           <RoutesSection {...props} step={step} steps={steps} />
-        </fieldset>
-        {step.kind !== "end" && (
-          <div className="border-t px-4 py-4">
-            <Dialog key={step.id}>
-              <DialogTrigger render={<Button variant="destructive" size="sm" disabled={disabled} />}>
-                <Trash2Icon aria-hidden="true" />
-                Remove step
-              </DialogTrigger>
-              <DialogContent>
-                <DialogTitle>Remove {humanize(step.id)}?</DialogTitle>
-                <DialogDescription>
-                  Removes this step and its references. You may need to fix the
-                  workflow before saving. The reusable task is kept.
-                </DialogDescription>
-                <DialogFooter>
-                  <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
-                  <Button variant="destructive" disabled={disabled} onClick={onRemove}>
-                    Remove step
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          </div>
-        )}
-      </div>
+      </PanelBody>
     </>
   )
 }

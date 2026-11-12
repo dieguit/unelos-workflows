@@ -1,3 +1,5 @@
+import { BusyContent } from "@/components/busy-content"
+import { useDelayedFlag } from "@/hooks/use-delayed-flag"
 import { useEffect, useRef, useState } from "react"
 import { useStore } from "@tanstack/react-form"
 import { useBlocker, useRouter } from "@tanstack/react-router"
@@ -40,13 +42,14 @@ import {
 } from "@/lib/projects"
 import { BodyEditor } from "@/components/body-editor"
 import { applyBodyDraft } from "@/lib/apply-body-draft"
-import { humanize, insertStep, removeStep, withDerivedOutcomes } from "../-lib/step-edit"
+import { addWorker, humanize, insertStep, removeStep, withDerivedOutcomes, workerTitle } from "@/lib/step-edit"
 import { workflowSettingsSchema } from "../-lib/workflow-settings-schema"
 import { useWorkflowForm } from "../-hooks/use-workflow-form"
-import { FlowPane } from "./flow/flow-pane"
-import { FlowToolbar } from "./flow/flow-toolbar"
+import { FlowPane } from "@/components/flow/flow-pane"
+import { FlowToolbar } from "@/components/flow/flow-toolbar"
 import { StepPicker } from "./step-picker"
 import { StepPanel } from "./step-panel"
+import { ParallelPanel, WorkerPanel } from "./step-panel/parallel-panel"
 
 export function WorkflowEditor({
   root,
@@ -128,6 +131,7 @@ function WorkflowEditorForm({
   }>()
   const [validationAttempt, setValidationAttempt] = useState(0)
   const [selected, setSelected] = useState<number | null>(null)
+  const [selectedWorker, setSelectedWorker] = useState<number | null>(null)
   // Remounts the step panel per selection so its local name text and autofocus start fresh.
   const [selection, setSelection] = useState(0)
   // Instructions editor buffer for the selected step; replaces the flow while open.
@@ -147,6 +151,7 @@ function WorkflowEditorForm({
     } catch (err) {
       setSaveError(String(err))
       setSelected(null)
+      setSelectedWorker(null)
       setInstructions(null)
       setPanel(true)
     }
@@ -154,25 +159,56 @@ function WorkflowEditorForm({
   const draft = useStore(form.store, (s) => s.values)
   const dirty = !useStore(form.store, (s) => s.isDefaultValue) || Object.keys(nameDrafts).length > 0
   const saving = useStore(form.store, (s) => s.isSubmitting)
+  const visualSaving = useDelayedFlag(saving)
   const localResult = schema.safeParse(draft)
   const localValid = localResult.success
   const step = selected === null ? undefined : draft.steps[selected]
-  const instructionsDirty = instructions !== null && instructions !== (step?.task?.instructions ?? "")
+  const worker = selectedWorker === null ? undefined : step?.workers[selectedWorker]
+  const selectedTask = selectedWorker === null ? step?.task : worker?.task
+  const instructionsDirty = instructions !== null && instructions !== (selectedTask?.instructions ?? "")
   // Just-inserted step: its issues stay hidden until it is edited, left, or validated.
   const [pristine, setPristine] = useState<WorkflowStep | null>(null)
   const select = (index: number | null) => {
     setPristine(null)
     setSelected(index)
+    setSelectedWorker(null)
     setSelection((n) => n + 1)
     setInstructions(null)
     if (index !== null) setPanel(true)
   }
+  const closeStep = () => {
+    if (instructions !== null) return
+    select(null)
+    setPanel(false)
+  }
+  const selectWorker = (stepIndex: number, workerIndex: number | null) => {
+    select(stepIndex)
+    setSelectedWorker(workerIndex)
+  }
+  const addTask = (stepIndex: number) => {
+    const target = form.state.values.steps[stepIndex]
+    form.setFieldValue(`steps[${stepIndex}]`, addWorker(target))
+    selectWorker(stepIndex, target.workers.length)
+  }
+  const removeSelectedWorker = () => {
+    if (selected === null || selectedWorker === null) return
+    form.setFieldValue(`steps[${selected}].workers`, form.state.values.steps[selected].workers.filter((_, i) => i !== selectedWorker))
+    select(selected)
+  }
+  const editInstructions = () => setInstructions(selectedTask?.instructions ?? "")
   const addStep = (index: number, kind: "task" | "human-gate") => {
     const result = insertStep(form.state.values.steps, index, kind)
     form.setFieldValue("steps", result.steps)
     select(result.index)
     setPristine(result.steps[result.index])
   }
+  const onNameDraft = (id: string, value?: { text: string; error: string }) =>
+    setNameDrafts((drafts) => {
+      const next = { ...drafts }
+      if (value) next[id] = value
+      else delete next[id]
+      return next
+    })
   const removeSelectedStep = () => {
     if (!step || saving) return
     const result = removeStep(form.state.values.steps, form.state.values.start, step.id)
@@ -288,13 +324,13 @@ function WorkflowEditorForm({
     if (!saving && (!(dirty || instructionsDirty) || (await askDiscard()))) onBack()
   }
   return (
-    <div className="-mx-8 -mt-6 -mb-8 flex h-[calc(100%+3.5rem)] min-h-0 flex-col">
+    <div inert={saving} className="-mx-8 -mt-6 -mb-8 flex h-[calc(100%+3.5rem)] min-h-0 flex-col">
       <header className="flex min-h-14 shrink-0 items-center gap-3 overflow-x-auto border-b px-3 py-2">
         <Button
           variant="ghost"
           size="sm"
           onClick={() => void back()}
-          disabled={saving}
+          disabled={visualSaving}
         >
           <ArrowLeftIcon /> Workflows
         </Button>
@@ -378,7 +414,7 @@ function WorkflowEditorForm({
             setValidationAttempt((n) => n + 1)
             setPristine(null)
           }}
-          disabled={saving}
+          disabled={visualSaving}
         >
           <ListChecksIcon /> Validate
         </Button>
@@ -392,16 +428,16 @@ function WorkflowEditorForm({
               setPristine(null)
             }
           }}
-          disabled={!dirty || saving || instructions !== null}
+          disabled={!dirty || visualSaving || instructions !== null}
         >
-          <SaveIcon /> {saving ? "Saving…" : "Save"}
+          <BusyContent busy={visualSaving}><SaveIcon /> Save</BusyContent>
         </Button>
       </header>
       <div className="relative flex min-h-0 flex-1">
         {step && instructions !== null ? (
           <div className="flex min-w-0 flex-1 flex-col p-4">
             <BodyEditor
-              title={`${humanize(step.id)} instructions`}
+              title={`${worker ? workerTitle(worker) : humanize(step.id)} instructions`}
               label="Instructions"
               body={instructions}
               onChange={setInstructions}
@@ -412,7 +448,10 @@ function WorkflowEditorForm({
                 })()
               }}
               onSave={async () => {
-                applyBodyDraft(instructions, (body) => form.setFieldValue(`steps[${selected!}].task.instructions`, body), () => setInstructions(null))
+                applyBodyDraft(instructions, (body) => {
+                  if (selectedWorker === null) form.setFieldValue(`steps[${selected!}].task.instructions`, body)
+                  else form.setFieldValue(`steps[${selected!}].workers[${selectedWorker}].task.instructions`, body)
+                }, () => setInstructions(null))
               }}
             />
           </div>
@@ -436,7 +475,7 @@ function WorkflowEditorForm({
                       value={field.state.value}
                       onChange={field.handleChange}
                       onBlur={field.handleBlur}
-                      disabled={saving}
+                      disabled={visualSaving}
                       invalid={
                         (field.state.meta.isBlurred || validationAttempt > 0) && !field.state.meta.isValid
                       }
@@ -452,8 +491,11 @@ function WorkflowEditorForm({
             issueCounts={issueCounts}
             highlight={highlight}
             selected={step?.id}
+            selectedWorker={selectedWorker}
+            onAddTask={visualSaving ? undefined : addTask}
             onSelect={(id) => select(draft.steps.findIndex((s) => s.id === id))}
-            onAdd={saving ? undefined : addStep}
+            onSelectWorker={selectWorker}
+            onAdd={visualSaving ? undefined : addStep}
           />
         </div>
         )}
@@ -462,24 +504,48 @@ function WorkflowEditorForm({
           hidden={!panel}
           className="hidden:!hidden absolute inset-y-0 right-0 z-10 flex w-[380px] max-w-full flex-col border-l bg-background shadow-lg min-[1280px]:relative min-[1280px]:shrink-0 min-[1280px]:shadow-none"
         >
-          {step && selected !== null ? (
+          {step && selected !== null && step.kind === "parallel" ? (
+            selectedWorker === null ? (
+              <ParallelPanel
+                key={selection}
+                form={form}
+                index={selected}
+                showErrors={validationAttempt > 0}
+                disabled={visualSaving}
+                nameDraft={nameDrafts[step.id]}
+                onNameDraft={onNameDraft}
+                onSelectWorker={selectWorker}
+                onRemove={removeSelectedStep}
+                onClose={closeStep}
+              />
+            ) : (
+              <WorkerPanel
+                key={selection}
+                root={root}
+                form={form}
+                index={selected}
+                worker={selectedWorker}
+                showErrors={validationAttempt > 0}
+                disabled={visualSaving}
+                onEditInstructions={editInstructions}
+                onBack={() => { if (instructions === null) select(selected) }}
+                onRemove={removeSelectedWorker}
+                onClose={closeStep}
+              />
+            )
+          ) : step && selected !== null ? (
             <StepPanel
               key={selection}
               root={root}
               form={form}
               index={selected}
               showErrors={validationAttempt > 0}
-              disabled={saving}
+              disabled={visualSaving}
               nameDraft={nameDrafts[step.id]}
-              onNameDraft={(id, value) => setNameDrafts((drafts) => {
-                const next = { ...drafts }
-                if (value) next[id] = value
-                else delete next[id]
-                return next
-              })}
-              onEditInstructions={() => setInstructions(step.task?.instructions ?? "")}
+              onNameDraft={onNameDraft}
+              onEditInstructions={editInstructions}
               onRemove={removeSelectedStep}
-              onClose={() => { if (instructions === null) select(null) }}
+              onClose={closeStep}
             />
           ) : (
           <>
@@ -507,7 +573,7 @@ function WorkflowEditorForm({
               }}
             >
               <fieldset
-                disabled={saving}
+                disabled={visualSaving}
                 className="min-w-0 disabled:opacity-60"
               >
                 <FieldGroup className="gap-4">

@@ -95,8 +95,8 @@ fn cross_run_stdin_is_rejected_and_only_the_selected_run_advances() {
     );
     let a_id = a["runId"].as_str().unwrap();
     let b_id = b["runId"].as_str().unwrap();
-    let a_path = root.join(".unelos/runs/first-run/state.json");
-    let b_path = root.join(".unelos/runs/second-run/state.json");
+    let a_path = root.join(format!(".unelos/runs/{a_id}/state.json"));
+    let b_path = root.join(format!(".unelos/runs/{b_id}/state.json"));
     let before = (
         std::fs::read(&a_path).unwrap(),
         std::fs::read(&b_path).unwrap(),
@@ -106,14 +106,8 @@ fn cross_run_stdin_is_rejected_and_only_the_selected_run_advances() {
         "Plan A",
     )
     .unwrap();
-    let mut frame = a["expected"].clone();
-    frame["status"] = "FINISHED".into();
-    frame["summary"] = "Inspected plan A".into();
-    for field in ["changedPaths", "verification", "progress"] {
-        frame[field] = serde_json::json!([]);
-    }
-    frame["outcome"] = Value::Null;
-    let control = serde_json::json!({"expected":a["expected"],"resultText":format!("<unelos-worker-result>{frame}</unelos-worker-result>")}).to_string();
+    let control =
+        serde_json::json!({"expected":a["expected"],"summary":"Inspected plan A"}).to_string();
     let output = command(root)
         .args(["execution", "complete", "--run", b_id])
         .write_stdin(control.as_str())

@@ -1,21 +1,43 @@
 //! Shared application logic for the CLI and desktop adapters.
 
-mod context;
 mod authoring_actions;
-pub use authoring_actions::{duplicate_global_task, remove_global_task, duplicate_task, remove_task, duplicate_agent, duplicate_skill, duplicate_workflow, remove_agent, remove_skill, remove_workflow};
+mod context;
+pub use authoring_actions::{
+    duplicate_agent, duplicate_global_task, duplicate_skill, duplicate_task, duplicate_workflow,
+    remove_agent, remove_global_task, remove_skill, remove_task, remove_workflow,
+};
 mod workflow_document;
-pub use workflow_document::{get_workflow, validate_workflow, save_workflow, WorkflowDocument, WorkflowDraft, StepTask, WorkflowSettings, WorkflowStep, WorkflowRoute, WorkflowWorker, WorkflowIssue};
+pub use workflow_document::{
+    create_workflow, get_workflow, save_workflow, validate_workflow, StepTask, WorkflowDocument, WorkflowDraft,
+    WorkflowIssue, WorkflowRoute, WorkflowSettings, WorkflowStep, WorkflowWorker,
+};
 mod task_document;
-pub use task_document::{get_global_task, save_global_task, get_task, save_task, save_task_with_outcome_renames, TaskDocument};
+pub use task_document::{
+    get_global_task, get_task, save_global_task, save_task, save_task_with_outcome_renames,
+    TaskDocument,
+};
 
 mod agent_document;
-pub use agent_document::{get_agent, save_agent, agent_model_options, AgentDocument, AgentModelOptions, HarnessModelOptions};
+mod mcp_document;
+mod mcp_install;
+pub mod opencode_agents;
+mod harness_build;
+pub use harness_build::{get_project_settings, save_project_settings, build_harness_config, auto_build_harness, HarnessBuild};
+pub use agent_document::{
+    agent_model_options, get_agent, save_agent, AgentDocument, AgentModelOptions,
+    HarnessModelOptions,
+};
+pub use mcp_document::{get_mcp, mcp_summaries, save_mcp, get_global_mcp, global_mcp_summaries, save_global_mcp, remove_mcp, remove_global_mcp, McpDocument, McpServer, McpSummary};
+pub use mcp_install::{check_opencode_mcps, uninstall_opencode_mcps, write_opencode_mcps, replace_opencode_mcps};
 mod model_mappings;
-pub use model_mappings::{delete_model_mapping, list_model_mappings, save_model_mapping, ModelMappings};
+pub use model_mappings::{
+    delete_model_mapping, list_model_mappings, save_model_mapping, ModelMappings,
+};
 pub mod global_config;
 pub mod harness;
 pub use harness::{
-    harness_models, install_harness, list_harnesses, provision_cli, uninstall_harness, HarnessStatus,
+    harness_models, install_harness, list_harnesses, provision_cli, uninstall_harness,
+    HarnessStatus,
 };
 mod definitions;
 mod execution;
@@ -24,8 +46,8 @@ mod install;
 mod project;
 mod runtime;
 mod settings;
-mod skills;
 mod skill_document;
+mod skills;
 pub use skill_document::{get_skill, save_skill, SaveSkillResult, SkillDocument};
 mod validation;
 mod work;
@@ -37,9 +59,9 @@ pub use context::{
 pub use definitions::*;
 pub use execution::{
     parse_parallel_results, parse_worker_result, read_brief, render_execution_package,
-    ContinuationControl, ExecutionControl, ExecutionEntry, ExecutionError, ExecutionIdentity,
-    ExecutionOperation, ExecutionPackage, ResumeContext, ResumeFile, RunCatalog, RunSummary,
-    WorkerPrompt, WorkerResult, WorkerStatus,
+    CompletionControl, ExecutionEntry, ExecutionError, ExecutionIdentity, ExecutionOperation,
+    ExecutionPackage, ResumeContext, ResumeFile, RunCatalog, RunSummary, WorkerPrompt,
+    WorkerResult, WorkerStatus,
 };
 pub use graph::{build_graph, GraphEdge, GraphNode, NodeKind, WorkflowGraph};
 pub use install::{
@@ -47,16 +69,16 @@ pub use install::{
     install_workflow, write_install_file, AgentExport, InstallError, WorkflowInstall,
 };
 pub use project::{
-    global_task_summaries, task_summaries, TaskSummary, agent_summaries, list_workflows, load_project, skill_summaries, workflow_summaries,
-    AgentSummary, LoadedProject, ProjectLoadError, SkillSummary,
-    WorkflowSummary,
+    agent_summaries, global_task_summaries, list_workflows, load_project, skill_summaries,
+    task_summaries, workflow_summaries, AgentSummary, LoadedProject, ProjectLoadError,
+    SkillSummary, TaskSummary, WorkflowSummary,
 };
 pub use runtime::{
-    approve, approve_node, complete, complete_node, confirm_outputs, execution_continue,
-    execution_mutate, execution_new, execution_next, execution_resume, execution_runs,
-    execution_start, list_runs, next, prepare_work, reject, reject_node, rename_run, start,
-    start_workflow, status, verify_outputs, verify_work_outputs, CompletedExecution, CurrentWork,
-    ExecutionRecord, RunState, RuntimeError,
+    approve, approve_node, complete, complete_node, confirm_outputs, execution_mutate,
+    execution_new, execution_next, execution_resume, execution_runs, execution_start, list_runs,
+    next, prepare_work, reject, reject_node, rename_run, start, start_workflow, status,
+    verify_outputs, verify_work_outputs, CompletedExecution, CurrentWork, ExecutionRecord,
+    RunState, RuntimeError, RunDetails, RunListItem, get_run, delete_run, read_run_artifact,
 };
 pub use settings::{Settings, SettingsError};
 pub use skills::{resolve_skills, ResolvedSkill, SkillResolveError};

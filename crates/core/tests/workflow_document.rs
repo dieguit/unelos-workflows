@@ -11,6 +11,117 @@ fn fixture() -> (TempDir, Utf8PathBuf) {
 }
 
 #[test]
+fn creates_workflows_with_free_ids_and_requires_an_agent_before_save() {
+    let (_temp, root) = fixture();
+    let id = unelos_core::create_workflow(&root).unwrap();
+    assert_eq!(id, "new-workflow");
+    let text = fs::read_to_string(root.join(".unelos/workflows/new-workflow.yaml")).unwrap();
+    unelos_core::parse_workflow_definition(&id, &text).unwrap();
+    let document = get_workflow(&root, &id).unwrap();
+    assert_eq!(document.issues.len(), 1);
+    assert!(document.issues[0].message.contains("Pick an agent"));
+    assert_eq!(document.issues[0].step.as_deref(), Some("new-task"));
+    let project = unelos_core::load_project(&root, &id).unwrap();
+    assert!(unelos_core::validate_project(&project).is_err());
+    assert!(unelos_core::workflow_summaries(&root).is_ok());
+    let mut value = draft(document);
+    assert!(save_workflow(&root, &id, &value).is_err());
+    value.steps.iter_mut().find(|step| step.id == "new-task").unwrap().agent = Some("engineer".into());
+    assert!(save_workflow(&root, &id, &value).unwrap().issues.is_empty());
+    assert_eq!(unelos_core::create_workflow(&root).unwrap(), "new-workflow-2");
+    assert_eq!(unelos_core::create_workflow(&root).unwrap(), "new-workflow-3");
+    assert_eq!(fs::read_to_string(root.join(".unelos/workflows/new-workflow-2.yaml")).unwrap().lines().next(), Some("name: new-workflow-2"));
+}
+
+fn parallel_fixture() -> (TempDir, Utf8PathBuf) {
+    let (temp, root) = fixture();
+    fs::write(root.join(".unelos/workflows/implement-feature.yaml"), r#"name: implement-feature
+description: null
+start: workers
+nodes:
+  workers:
+    type: parallel
+    tasks:
+      - task: implement-plan
+        agent: engineer
+      - taskDefinition:
+          description: Review work
+          instructions: Review carefully
+          skills: [code-review]
+        agent: reviewer
+    outputs: [report.md]
+    next: done
+  done:
+    type: end
+"#).unwrap();
+    (temp, root)
+}
+
+#[test]
+fn parallel_roundtrip_preserves_yaml() {
+    let (_temp, root) = parallel_fixture();
+    let path = root.join(".unelos/workflows/implement-feature.yaml");
+    let before: serde_yaml_ng::Value = serde_yaml_ng::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    let doc = get_workflow(&root, "implement-feature").unwrap();
+    assert!(!doc.steps[0].workers[0].task.instructions.is_empty());
+    save_workflow(&root, "implement-feature", &draft(doc)).unwrap();
+    let after: serde_yaml_ng::Value = serde_yaml_ng::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(before, after);
+}
+
+#[test]
+fn parallel_worker_edits_and_outputs_persist() {
+    let (_temp, root) = parallel_fixture();
+    let mut value = draft(get_workflow(&root, "implement-feature").unwrap());
+    let worker = &mut value.steps[0].workers[1];
+    worker.task.description = Some("Changed description".into());
+    worker.task.instructions = "Changed instructions".into();
+    worker.task.skills = vec!["rust".into()];
+    worker.agent = "engineer".into();
+    value.steps[0].outputs = vec!["changed.md".into()];
+    save_workflow(&root, "implement-feature", &value).unwrap();
+    let loaded = get_workflow(&root, "implement-feature").unwrap();
+    assert_eq!(serde_json::to_value(&loaded.steps[0].workers).unwrap(), serde_json::to_value(&value.steps[0].workers).unwrap());
+    assert_eq!(loaded.steps[0].outputs, ["changed.md"]);
+}
+
+#[test]
+fn parallel_worker_instructions_file_is_preserved_until_edited() {
+    let (_temp, root) = parallel_fixture();
+    let path = root.join(".unelos/workflows/implement-feature.yaml");
+    fs::write(root.join(".unelos/workflows/review.md"), "Review carefully").unwrap();
+    fs::write(&path, fs::read_to_string(&path).unwrap().replace("instructions: Review carefully", "instructionsFile: review.md")).unwrap();
+    let mut value = draft(get_workflow(&root, "implement-feature").unwrap());
+    value.steps[0].workers[1].task.description = Some("Updated".into());
+    save_workflow(&root, "implement-feature", &value).unwrap();
+    assert!(fs::read_to_string(&path).unwrap().contains("instructionsFile: review.md"));
+    value.steps[0].workers[1].task.instructions = "New instructions".into();
+    save_workflow(&root, "implement-feature", &value).unwrap();
+    assert!(!fs::read_to_string(&path).unwrap().contains("instructionsFile"));
+    assert_eq!(get_workflow(&root, "implement-feature").unwrap().steps[0].workers[1].task.instructions, "New instructions");
+}
+
+#[test]
+fn parallel_workers_can_switch_to_named_and_be_added_or_removed() {
+    let (_temp, root) = parallel_fixture();
+    let mut value = draft(get_workflow(&root, "implement-feature").unwrap());
+    value.steps[0].workers[1].task.source = "named".into();
+    value.steps[0].workers[1].task.id = Some("implement-plan".into());
+    let saved = save_workflow(&root, "implement-feature", &value).unwrap();
+    assert_eq!(saved.steps[0].workers[1].task.id.as_deref(), Some("implement-plan"));
+    let text = fs::read_to_string(root.join(".unelos/workflows/implement-feature.yaml")).unwrap();
+    assert!(!text.contains("taskDefinition"));
+    let mut value = draft(saved);
+    value.steps[0].workers.push(unelos_core::WorkflowWorker {
+        task: unelos_core::StepTask { source: "inline".into(), id: None, description: None, instructions: "Another task".into(), skills: vec![], outcomes: vec![] },
+        agent: "engineer".into(),
+    });
+    assert_eq!(save_workflow(&root, "implement-feature", &value).unwrap().steps[0].workers.len(), 3);
+    value.steps[0].workers.remove(0);
+    assert_eq!(save_workflow(&root, "implement-feature", &value).unwrap().steps[0].workers.len(), 2);
+}
+
+#[test]
 fn rich_steps_preserve_authored_order_through_save() {
     let (_temp, root) = fixture();
     let path = root.join(".unelos/workflows/implement-feature.yaml");
@@ -60,8 +171,8 @@ nodes:
 "#).unwrap();
     let doc = get_workflow(&root, "implement-feature").unwrap();
     assert_eq!(doc.steps[0].title.as_deref(), Some("Inline description"));
-    assert_eq!(doc.steps[1].workers[0].title, "implement-plan");
-    assert_eq!(doc.steps[1].workers[1].title, "Inline task");
+    assert_eq!(doc.steps[1].workers[0].task.id.as_deref(), Some("implement-plan"));
+    assert_eq!(doc.steps[1].workers[1].task.source, "inline");
     assert_eq!(doc.steps[1].workers[1].agent, "planner");
     assert_eq!(doc.steps[1].inputs, ["plan.md"]);
     assert_eq!(doc.steps[1].outputs, ["report.md"]);

@@ -16,7 +16,7 @@ async function nativeTool(options) {
 export async function registerV1(options,descriptions,execute) {
   const tool=await nativeTool(options);const z=tool.schema;
   const expected=z.object({kind:z.enum(['task','human-gate']),runId:z.string(),nodeId:z.string(),taskId:z.string().optional(),activationId:z.string().optional()});
-  const schemas={next:{},start:{workflow:z.string(),name:z.string().optional()},resume:{runId:z.string()},complete:{expected,resultText:z.string(),outcome:z.string().optional()},approve:{expected},reject:{expected,reason:z.string()},continue:{expected,answer:z.string().optional(),progress:z.array(z.string())},status:{},inspect:{workflow:z.string(),node:z.string().optional()},rename:{name:z.string(),runId:z.string()}};
+  const schemas={next:{},start:{workflow:z.string(),name:z.string().optional()},resume:{runId:z.string()},complete:{expected,resultText:z.string().describe("the worker's final message, verbatim (all workers' final messages for parallel)").optional(),summary:z.string().describe('One-paragraph summary for main Tasks').optional(),outcome:z.string().describe('main Tasks only').optional()},approve:{expected},reject:{expected,reason:z.string()},status:{},inspect:{workflow:z.string(),node:z.string().optional()},rename:{name:z.string(),runId:z.string()}};
   return Object.fromEntries(Object.entries(schemas).map(([name,args])=>['unelos_'+name,tool({description:descriptions[name],args,
     execute:async(input,context)=>JSON.stringify(await execute(name,input,context))})]));
 }

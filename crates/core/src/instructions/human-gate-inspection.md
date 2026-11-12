@@ -1,1 +1,0 @@
-Present the declared logical artifacts for the human decision. Require a reason when rejected, record the explicit decision through Unelos, and record progress in the supplied ledger as controller-only notes. Ledger notes never authorize progression.

@@ -1,3 +1,4 @@
+import { useDelayedFlag } from "@/hooks/use-delayed-flag"
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { useBlocker, useRouter } from "@tanstack/react-router"
 import { PlusIcon } from "lucide-react"
@@ -75,6 +76,7 @@ export function TasksPage({
   )
   const draft = useStore(form.store, (s) => s.values)
   const saving = useStore(form.store, (s) => s.isSubmitting)
+  const visualSaving = useDelayedFlag(saving)
   const isDefaultValue = useStore(form.store, (s) => s.isDefaultValue)
   const request = useRef(0)
   const dirty = loaded && !isDefaultValue
@@ -125,7 +127,7 @@ export function TasksPage({
   }
 
   return (
-    <div className="-mx-8 -mt-6 -mb-8 flex h-[calc(100%+3.5rem)]">
+    <div inert={saving} className="-mx-8 -mt-6 -mb-8 flex h-[calc(100%+3.5rem)]">
       <div className="min-w-0 flex-1 overflow-y-auto px-8 pt-6 pb-8">
         {editor !== null && draft ? (
           <div className="flex h-full flex-col gap-4">
@@ -157,7 +159,7 @@ export function TasksPage({
           <div className="flex flex-col gap-4">
             <Header
               action={
-                <Button onClick={() => void select(null)} disabled={saving}>
+                <Button onClick={() => void select(null)} disabled={visualSaving}>
                   <PlusIcon aria-hidden="true" />
                   New Task
                 </Button>
@@ -183,7 +185,7 @@ export function TasksPage({
                   kind="Task"
                   name={id}
                   nameSchema={taskSchema.shape.id}
-                  disabled={saving}
+                  disabled={visualSaving}
                   beforeRemove={async () =>
                     selected !== id ||
                     (!saving &&

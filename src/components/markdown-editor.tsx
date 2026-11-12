@@ -1,4 +1,6 @@
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
+import Markdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 import {
   EditorSelection,
   EditorState,
@@ -16,11 +18,13 @@ import { tags } from "@lezer/highlight"
 import {
   BoldIcon,
   CodeIcon,
+  EyeIcon,
   HeadingIcon,
   ItalicIcon,
   LinkIcon,
   ListIcon,
   type LucideIcon,
+  PencilIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -198,15 +202,18 @@ export function MarkdownEditor({
   className,
   autoFocus,
   placeholder,
+  readOnly,
   "aria-label": ariaLabel,
 }: {
   value: string
-  onChange: (value: string) => void
+  onChange?: (value: string) => void
+  readOnly?: boolean
   className?: string
   autoFocus?: boolean
   placeholder?: string
   "aria-label": string
 }) {
+  const [preview, setPreview] = useState(!!readOnly)
   const host = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView>(null)
   const latest = useRef({ onChange })
@@ -237,9 +244,11 @@ export function MarkdownEditor({
             "aria-multiline": "true",
           }),
           placeholder ? cmPlaceholder(placeholder) : [],
+          EditorState.readOnly.of(!!readOnly),
+          EditorView.editable.of(!readOnly),
           theme,
           EditorView.updateListener.of((u) => {
-            if (u.docChanged) latest.current.onChange(u.state.doc.toString())
+            if (u.docChanged) latest.current.onChange?.(u.state.doc.toString())
           }),
         ],
       }),
@@ -268,28 +277,56 @@ export function MarkdownEditor({
         aria-label="Formatting"
         className="flex flex-wrap items-center gap-1 border-b px-2 py-1.5"
       >
-        {actions.map(({ label, icon: Icon, run, keys }) => (
+        {!readOnly &&
+          actions.map(({ label, icon: Icon, run, keys }) => (
+            <Button
+              key={label}
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={preview}
+              title={keys ? `${label} (${keys.replace("Mod", "Ctrl")})` : label}
+              // keep the editor's selection/focus when clicking
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                const v = view.current
+                if (!v) return
+                run(v)
+                v.focus()
+              }}
+            >
+              <Icon aria-hidden="true" />
+              {label}
+            </Button>
+          ))}
+        {!readOnly && (
           <Button
-            key={label}
             type="button"
             variant="ghost"
             size="sm"
-            title={keys ? `${label} (${keys.replace("Mod", "Ctrl")})` : label}
-            // keep the editor's selection/focus when clicking
-            onMouseDown={(e) => e.preventDefault()}
+            className="ml-auto"
+            aria-pressed={preview}
             onClick={() => {
-              const v = view.current
-              if (!v) return
-              run(v)
-              v.focus()
+              setPreview(!preview)
+              if (preview) requestAnimationFrame(() => view.current?.focus())
             }}
           >
-            <Icon aria-hidden="true" />
-            {label}
+            {preview ? (
+              <PencilIcon aria-hidden="true" />
+            ) : (
+              <EyeIcon aria-hidden="true" />
+            )}
+            {preview ? "Edit" : "Preview"}
           </Button>
-        ))}
+        )}
       </div>
-      <div ref={host} className="min-h-0 flex-1" />
+      {/* hidden, not unmounted, so undo history and selection survive */}
+      <div ref={host} hidden={preview} className="min-h-0 flex-1" />
+      {preview && (
+        <div className="min-h-0 flex-1 overflow-auto p-4 text-sm leading-relaxed [&_a]:text-primary [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_code]:font-mono [&_code]:text-primary [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:font-semibold [&_ol]:list-decimal [&_ol]:pl-6 [&_pre]:overflow-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_table]:border-collapse [&_td]:border [&_td]:px-2 [&_th]:border [&_th]:px-2 [&_ul]:list-disc [&_ul]:pl-6 [&>*+*]:mt-3">
+          <Markdown remarkPlugins={[remarkGfm]}>{value}</Markdown>
+        </div>
+      )}
     </div>
   )
 }

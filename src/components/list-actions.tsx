@@ -1,3 +1,4 @@
+import { useDelayedFlag } from "@/hooks/use-delayed-flag"
 import { useId, useState } from "react"
 import { useForm, useStore } from "@tanstack/react-form"
 import { CopyIcon, EllipsisIcon, Trash2Icon } from "lucide-react"
@@ -32,7 +33,7 @@ export function ListActions({
   kind: string
   name: string
   nameSchema: z.ZodType<string, string>
-  duplicate: (name: string) => Promise<void>
+  duplicate?: (name: string) => Promise<void>
   remove: () => Promise<void>
   beforeRemove?: () => Promise<boolean>
   disabled?: boolean
@@ -48,7 +49,7 @@ export function ListActions({
     onSubmit: async ({ value }) => {
       setError(undefined)
       try {
-        await duplicate(value.name)
+        await duplicate?.(value.name)
         setMode(undefined)
         toast.success(`${kind} duplicated`)
       } catch (err) {
@@ -58,6 +59,7 @@ export function ListActions({
   })
   const saving = useStore(form.store, (s) => s.isSubmitting)
   const pending = saving || removing
+  const visualPending = useDelayedFlag(pending)
   const open = async (next: "duplicate" | "remove") => {
     if (next === "remove" && beforeRemove && !(await beforeRemove())) return
     setError(undefined)
@@ -97,9 +99,9 @@ export function ListActions({
           <EllipsisIcon />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={() => void open("duplicate")}>
+          {duplicate && <DropdownMenuItem onClick={() => void open("duplicate")}>
             <CopyIcon /> Duplicate
-          </DropdownMenuItem>
+          </DropdownMenuItem>}
           <DropdownMenuItem
             variant="destructive"
             onClick={() => void open("remove")}
@@ -114,7 +116,7 @@ export function ListActions({
           if (!open && !pending) setMode(undefined)
         }}
       >
-        <DialogContent showCloseButton={!pending}>
+        <DialogContent inert={pending} showCloseButton={!visualPending}>
           <DialogTitle>
             {mode === "duplicate" ? `Duplicate ${kind}` : `Remove ${kind}?`}
           </DialogTitle>
@@ -146,7 +148,7 @@ export function ListActions({
                         name={field.name}
                         required
                         autoFocus
-                        disabled={pending}
+                        disabled={visualPending}
                         value={field.state.value}
                         onBlur={field.handleBlur}
                         onChange={(e) => field.handleChange(e.target.value)}
@@ -174,22 +176,22 @@ export function ListActions({
           <DialogFooter>
             <Button
               variant="outline"
-              disabled={pending}
+              disabled={visualPending}
               onClick={() => setMode(undefined)}
             >
               Cancel
             </Button>
             {mode === "duplicate" ? (
-              <Button type="submit" form={`${id}-form`} disabled={pending}>
-                {saving ? "Duplicating…" : "Duplicate"}
+              <Button type="submit" form={`${id}-form`} disabled={visualPending}>
+                {visualPending && saving ? "Duplicating…" : "Duplicate"}
               </Button>
             ) : (
               <Button
                 variant="destructive"
-                disabled={pending}
+                disabled={visualPending}
                 onClick={() => void confirmRemove()}
               >
-                {removing ? "Removing…" : "Remove"}
+                {visualPending && removing ? "Removing…" : "Remove"}
               </Button>
             )}
           </DialogFooter>

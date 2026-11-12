@@ -111,7 +111,7 @@ fn task_reference(authoring: &Utf8Path, source: &Utf8Path, task: &crate::TaskDef
 
 fn references(root: &Utf8Path, kind: &str, id: &str, removed: &Utf8Path) -> Result<(), String> {
     // shortcut: run creation is not locked with authoring, add a shared lock before supporting concurrent edits/execution.
-    let runs = crate::list_runs(root).map_err(|e| format!("Cannot inspect stored runs: {e}"))?;
+    let runs = crate::runtime::stored_runs(root).map_err(|e| format!("Cannot inspect stored runs: {e}"))?;
     if kind == "workflows" && runs.iter().any(|run| run.workflow_name == id && !run.is_finished()) { return Err("Cannot remove workflow: finish or remove its in-progress runs first".into()); }
     let authoring = crate::project::absolute_root(root).map_err(|e| e.to_string())?.join(".unelos");
     for directory in ["agents", "tasks", "workflows"] {

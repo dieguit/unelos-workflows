@@ -63,45 +63,17 @@ fn parallel_packet(root: &Utf8Path) -> WorkPacket {
     .unwrap()
 }
 
-/// The `scope` Task packet (main execution), used to prove Tasks reject workerKey.
-fn scope_packet(root: &Utf8Path) -> WorkPacket {
-    let project = load_project(root, WORKFLOW).unwrap();
-    let state = start(&project, "scope-check", "").unwrap();
-    let CurrentWork::Task(record) = &state.current else {
-        panic!("expected Task")
-    };
-    build_work_packet(
-        &project,
-        WorkRuntimeInput::Task {
-            input: TaskRuntimeInput {
-                run_id: state.run_id.clone(),
-                task_id: record.execution_id.clone(),
-                node_id: record.node_id.clone(),
-                request: state.request.clone(),
-                inputs: record.inputs.clone(),
-                outputs: record.outputs.clone(),
-                feedback: record.feedback.clone(),
-            },
-            ledger_path: root.join(".unelos/runs/scope-check/ledger.md"),
-        },
-    )
-    .unwrap()
-}
-
 fn worker_json(expected: &ExecutionIdentity, key: &str, status: &str) -> serde_json::Value {
-    let mut value = serde_json::to_value(expected).unwrap();
-    value["kind"] = "parallel-worker".into();
+    let mut value = serde_json::json!({"taskId": serde_json::to_value(expected).unwrap()["taskId"], "outcome": null});
     value["workerKey"] = key.into();
     value["status"] = status.into();
     value["summary"] = "Researched".into();
     value["changedPaths"] = serde_json::json!([]);
     value["verification"] = serde_json::json!(["Read code"]);
-    value["progress"] = serde_json::json!([]);
     match status {
         "FINISHED" => value["outcome"] = serde_json::Value::Null,
         "NEEDS_CONTEXT" => {
             value["question"] = "Which API?".into();
-            value["dependsOn"] = "Scope".into();
         }
         _ => value["reason"] = "Cannot read".into(),
     }
@@ -117,6 +89,26 @@ fn frames(values: &[serde_json::Value]) -> String {
 }
 
 #[test]
+fn parallel_first_start_renders_worker_prompts_without_brief() {
+    let (_temp, root) = fixture();
+    let path = root.join(".unelos/workflows/parallel-research.yaml");
+    let yaml = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("start: scope", "start: parallel-research")
+        .replace("    inputs: [brief.md]\n", "");
+    std::fs::write(path, yaml).unwrap();
+    let package = execution_start(&root, WORKFLOW, None).unwrap();
+    assert_eq!(package.worker_prompts.len(), 2);
+    assert!(package
+        .worker_prompts
+        .iter()
+        .all(|p| !p.prompt.contains("\n\nBrief:")));
+    let serialized = serde_json::to_value(&package).unwrap();
+    assert!(serialized["packet"].get("controllerInstructions").is_none());
+    assert!(!serialized.to_string().contains("complete NODE"));
+}
+
+#[test]
 fn parallel_package_has_one_isolated_prompt_per_worker() {
     let (_temp, root) = fixture();
     let packet = parallel_packet(&root);
@@ -129,10 +121,14 @@ fn parallel_package_has_one_isolated_prompt_per_worker() {
         .map(|w| w.outputs[0].path.to_string())
         .collect();
     let aggregate = parallel.outputs[0].path.to_string();
-    let error = render_execution_package(Some(packet.clone()), vec![], None, None).unwrap_err();
-    assert_eq!(error.code(), "missing_brief");
+    let without_brief = render_execution_package(Some(packet.clone()), vec![], None).unwrap();
+    assert_eq!(without_brief.worker_prompts.len(), 2);
+    assert!(without_brief
+        .worker_prompts
+        .iter()
+        .all(|p| !p.prompt.contains("\n\nBrief:")));
     let package =
-        render_execution_package(Some(packet), vec![], Some("Persistence question"), None).unwrap();
+        render_execution_package(Some(packet), vec![], Some("Persistence question")).unwrap();
     assert!(matches!(
         package.expected,
         Some(ExecutionIdentity::Parallel { .. })
@@ -149,7 +145,7 @@ fn parallel_package_has_one_isolated_prompt_per_worker() {
         assert!(!prompt.prompt.contains(&aggregate));
         assert!(!prompt.prompt.contains("ledgerPath"));
         assert!(!prompt.prompt.contains("controllerInstructions"));
-        assert!(prompt.prompt.contains("parallel-worker"));
+        assert!(prompt.prompt.contains("Write only your report"));
         assert!(prompt.prompt.contains("Persistence question"));
     }
     assert!(package.worker_prompts[0]
@@ -167,57 +163,7 @@ fn parallel_package_has_one_isolated_prompt_per_worker() {
 }
 
 #[test]
-fn parallel_continuation_selects_one_worker() {
-    let (_temp, root) = fixture();
-    let packet = parallel_packet(&root);
-    let expected = ExecutionIdentity::from_packet(&packet).unwrap();
-    let control = |key: Option<&str>| ContinuationControl {
-        expected: expected.clone(),
-        worker_key: key.map(Into::into),
-        answer: Some("Use the run list view".into()),
-        progress: vec!["Read routes".into()],
-    };
-    let package = render_execution_package(
-        Some(packet.clone()),
-        vec![],
-        Some("Persistence question"),
-        Some(&control(Some("worker-2"))),
-    )
-    .unwrap();
-    assert_eq!(package.worker_prompts.len(), 1);
-    assert_eq!(package.worker_prompts[0].key, "worker-2");
-    assert!(package.worker_prompts[0]
-        .prompt
-        .contains("Use the run list view"));
-    for key in [None, Some("worker-9")] {
-        let error = render_execution_package(
-            Some(packet.clone()),
-            vec![],
-            Some("Persistence question"),
-            Some(&control(key)),
-        )
-        .unwrap_err();
-        assert_eq!(error.code(), "invalid_control");
-    }
-    let task = scope_packet(&root);
-    let with_key = ContinuationControl {
-        expected: ExecutionIdentity::from_packet(&task).unwrap(),
-        worker_key: Some("worker-1".into()),
-        answer: None,
-        progress: vec![],
-    };
-    let error = render_execution_package(
-        Some(task),
-        vec![],
-        Some("Persistence question"),
-        Some(&with_key),
-    )
-    .unwrap_err();
-    assert_eq!(error.code(), "invalid_control");
-}
-
-#[test]
-fn parallel_result_parser_requires_one_finished_frame_per_key() {
+fn parallel_result_parser_accepts_finished_subsets() {
     let expected = ExecutionIdentity::Parallel {
         run_id: "r-1".into(),
         node_id: "fan-out".into(),
@@ -230,6 +176,13 @@ fn parallel_result_parser_requires_one_finished_frame_per_key() {
         parse_parallel_results(&frames(&[two.clone(), one.clone()]), &expected, &keys).unwrap();
     assert_eq!(results[0].worker_key.as_deref(), Some("worker-1"));
     assert_eq!(results.len(), 2);
+    assert_eq!(parse_parallel_results(&frames(std::slice::from_ref(&one)), &expected, &keys).unwrap().len(), 1);
+    assert!(
+        parse_parallel_results(&frames(&[one.clone(), one.clone()]), &expected, &keys)
+            .unwrap_err()
+            .to_string()
+            .contains("two result frames for workerKey \"worker-1\"; send only the final one")
+    );
     let mut outcome = two.clone();
     outcome["outcome"] = "passed".into();
     let mut serial = two.clone();
@@ -237,7 +190,6 @@ fn parallel_result_parser_requires_one_finished_frame_per_key() {
     let mut stale = two.clone();
     stale["taskId"] = "task-3".into();
     for text in [
-        frames(std::slice::from_ref(&one)),
         frames(&[one.clone(), one.clone()]),
         frames(&[one.clone(), worker_json(&expected, "worker-3", "FINISHED")]),
         frames(&[
@@ -267,34 +219,37 @@ fn write_outputs(package: &ExecutionPackage) {
     }
 }
 
-fn task_frame(package: &ExecutionPackage) -> ExecutionControl {
+fn task_frame(package: &ExecutionPackage) -> CompletionControl {
     let expected = package.expected.clone().unwrap();
-    let mut value = serde_json::to_value(&expected).unwrap();
+    let mut value =
+        serde_json::json!({"taskId": serde_json::to_value(&expected).unwrap()["taskId"]});
     for (k, v) in [("status", "FINISHED"), ("summary", "Done")] {
         value[k] = v.into();
     }
     value["changedPaths"] = serde_json::json!([]);
     value["verification"] = serde_json::json!(["Read"]);
-    value["progress"] = serde_json::json!([]);
     value["outcome"] = serde_json::Value::Null;
-    ExecutionControl {
+    CompletionControl {
+        summary: Some("Done".into()),
         expected,
-        result_text: Some(format!(
-            "<unelos-worker-result>{value}</unelos-worker-result>"
-        )),
+        result_text: package
+            .worker_prompt
+            .as_ref()
+            .map(|_| format!("<unelos-worker-result>{value}</unelos-worker-result>")),
         outcome: None,
         reason: None,
     }
 }
 
-fn parent_control(package: &ExecutionPackage, statuses: &[(&str, &str)]) -> ExecutionControl {
+fn parent_control(package: &ExecutionPackage, statuses: &[(&str, &str)]) -> CompletionControl {
     let expected = package.expected.clone().unwrap();
     let values: Vec<_> = statuses
         .iter()
         .map(|(key, status)| worker_json(&expected, key, status))
         .collect();
     let text = frames(&values);
-    ExecutionControl {
+    CompletionControl {
+        summary: None,
         expected,
         result_text: Some(text),
         outcome: None,
@@ -304,14 +259,11 @@ fn parent_control(package: &ExecutionPackage, statuses: &[(&str, &str)]) -> Exec
 
 fn complete(
     root: &Utf8Path,
-    control: &ExecutionControl,
+    control: &CompletionControl,
 ) -> Result<ExecutionPackage, ExecutionError> {
     execution_mutate(root, "r-000001", ExecutionOperation::Complete, control)
 }
 
-fn state_bytes(root: &Utf8Path) -> Vec<u8> {
-    std::fs::read(root.join(".unelos/runs/research-check/state.json")).unwrap()
-}
 
 /// Starts the run and completes `scope`, returning the parallel package.
 fn parallel(root: &Utf8Path) -> ExecutionPackage {
@@ -321,10 +273,6 @@ fn parallel(root: &Utf8Path) -> ExecutionPackage {
         .as_str()
         .unwrap()
         .to_owned();
-    assert_eq!(
-        complete(root, &task_frame(&scope)).unwrap_err().code(),
-        "missing_brief"
-    );
     std::fs::write(&ledger, "## Brief\nHow is a run persisted?\n").unwrap();
     complete(root, &task_frame(&scope)).unwrap()
 }
@@ -340,9 +288,19 @@ fn parallel_package_binds_flat_readable_paths() {
     let (_temp, root) = fixture();
     let package = parallel(&root);
     let packet = packet_json(&package);
+    for worker in packet["workers"].as_array().unwrap() {
+        for field in [
+            "taskInstructions",
+            "agentInstructions",
+            "skills",
+            "completionInstructions",
+        ] {
+            assert!(worker.get(field).is_none(), "{field}");
+        }
+    }
     assert_eq!(packet["kind"], "parallel");
     assert_eq!(package.worker_prompts.len(), 2);
-    let run = root.join(".unelos/runs/research-check/parallel-research");
+    let run = root.join(".unelos/runs/r-000001/parallel-research");
     assert_eq!(
         packet["outputs"][0]["path"],
         run.join("research-summary.md").as_str()
@@ -358,54 +316,26 @@ fn parallel_package_binds_flat_readable_paths() {
 }
 
 #[test]
-fn worker_question_continues_without_new_parent_identity() {
-    let (_temp, root) = fixture();
-    let package = parallel(&root);
-    let control = ContinuationControl {
-        expected: package.expected.clone().unwrap(),
-        worker_key: Some("worker-2".into()),
-        answer: Some("Focus on the run list view".into()),
-        progress: vec!["Read src/App.tsx".into()],
-    };
-    let continued = execution_continue(&root, "r-000001", &control).unwrap();
-    assert_eq!(continued.expected, package.expected);
-    assert_eq!(continued.worker_prompts.len(), 1);
-    assert!(continued.worker_prompts[0]
-        .prompt
-        .contains("Focus on the run list view"));
-    assert_eq!(
-        execution_next(&root, "r-000001").unwrap().expected,
-        package.expected
-    );
-}
-
-#[test]
 fn partial_frames_never_complete_the_parent() {
     let (_temp, root) = fixture();
     let package = parallel(&root);
     write_outputs(&package);
     write_worker_reports(&package);
-    let bytes = state_bytes(&root);
-    for statuses in [
-        vec![("worker-1", "FINISHED")],
-        vec![("worker-1", "FINISHED"), ("worker-2", "NEEDS_CONTEXT")],
-        vec![("worker-1", "FINISHED"), ("worker-2", "BLOCKED")],
-        vec![("worker-1", "FINISHED"), ("worker-1", "FINISHED")],
-    ] {
-        let error = complete(&root, &parent_control(&package, &statuses)).unwrap_err();
-        assert_eq!(error.code(), "invalid_worker_result", "{statuses:?}");
-        assert_eq!(bytes, state_bytes(&root));
+    let first = parent_control(&package, &[("worker-1", "FINISHED")]);
+    let remaining = complete(&root, &first).unwrap();
+    assert_eq!(remaining.status, "running");
+    assert_eq!(remaining.worker_prompts.len(), 1);
+    assert_eq!(remaining.worker_prompts[0].key, "worker-2");
+    let resumed = unelos_core::execution_resume(&root, "r-000001").unwrap();
+    assert_eq!(resumed.worker_prompts.len(), 1);
+    assert_eq!(resumed.expected, package.expected);
+    for attempt in 1..=3 {
+        let error = complete(&root, &first).unwrap_err();
+        assert!(error.to_string().contains("worker-1"));
+        assert_eq!(error.to_string().contains("Stop and tell the user."), attempt == 3);
     }
-    let mut with_outcome = parent_control(
-        &package,
-        &[("worker-1", "FINISHED"), ("worker-2", "FINISHED")],
-    );
-    with_outcome.outcome = Some("approved".into());
-    assert_eq!(
-        complete(&root, &with_outcome).unwrap_err().code(),
-        "invalid_outcome"
-    );
-    assert_eq!(bytes, state_bytes(&root));
+    let next = complete(&root, &parent_control(&remaining, &[("worker-2", "FINISHED")])).unwrap();
+    assert_eq!(packet_json(&next)["nodeId"], "synthesis");
 }
 
 #[test]
@@ -424,7 +354,7 @@ fn missing_aggregate_or_worker_report_blocks_completion() {
         .unwrap()
         .to_owned();
     std::fs::remove_file(&frontend).unwrap();
-    assert_eq!(complete(&root, &all).unwrap_err().code(), "missing_output");
+    assert_eq!(complete(&root, &parent_control(&package, &[])).unwrap_err().code(), "missing_output");
 }
 
 #[test]
@@ -455,7 +385,8 @@ fn gate_rejection_reenters_parallel_with_same_paths_and_new_identity() {
         &root,
         "r-000001",
         ExecutionOperation::Reject,
-        &ExecutionControl {
+        &CompletionControl {
+            summary: None,
             expected: gate.expected.clone().unwrap(),
             result_text: None,
             outcome: None,
@@ -486,6 +417,8 @@ fn gate_rejection_reenters_parallel_with_same_paths_and_new_identity() {
         complete(&root, &stale).unwrap_err().code(),
         "stale_execution"
     );
+    let report = again["outputs"][0]["path"].as_str().unwrap();
+    std::fs::write(report, "Addressed error handling feedback").unwrap();
     let finished = complete(
         &root,
         &parent_control(
@@ -502,10 +435,10 @@ fn parallel_package_carries_concurrent_dispatch_policy() {
     let (_temp, root) = fixture();
     let policy = parallel(&root).controller_instructions;
     for phrase in [
-        "before waiting for any result",
-        "workerKey",
-        "partial set",
-        "every worker's final frame",
+        "before waiting for any",
+        "Never run them yourself",
+        "read every report",
+        "only their final messages",
     ] {
         assert!(policy.contains(phrase), "{phrase}");
     }

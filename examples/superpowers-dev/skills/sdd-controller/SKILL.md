@@ -9,30 +9,32 @@ description: "Controller rules for the task loop: preflight, fix-loop cap, rulin
 
 You coordinate; the workflow dispatches. A fresh implementer per task writes `implementation-report.md`, a task reviewer (spec compliance + code quality) writes `review.md`, and a broad final reviewer writes `final-review.md`; a single final fix wave writes `final-fix-report.md`. Your job is to read those artifacts, keep `progress.md` accurate, rule on conflicts, and choose the outcome. Never fix findings yourself — your context stays clean for coordination, and controller fixes skip review.
 
-**Continuous execution:** Do not pause to check in with your human partner between tasks. Execute all tasks from the plan without stopping. The only reasons to stop are the four named below, or all tasks complete. "Should I continue?" prompts and progress summaries waste their time — they asked you to execute the plan, so execute it.
+**Continuous execution:** Execute approved tasks without routine "Should I continue?"
+check-ins. Pause at Unelos human gates or when a real decision needs the user; asking a
+focused question is part of execution, not a failed workflow.
 
-**Rulings, not stalls.** A running plan does not wait on a human. Conflicts,
-ambiguities, plan defects, a cap you would have asked to exceed — decide
-them. The spec is the binding authority, the plan is its argument, and your
-judgment settles what neither answers. Record every decision in the run artifacts as
-`Ruling: <what you decided> — <why> — <what it costs if wrong>`, and keep
-going. A wrong ruling costs rework your human partner can see and undo; a
-session parked on a question costs their whole day and buys nothing.
+**Rulings for routine details; questions for changed commitments.** Resolve ordinary
+implementation details from the spec, plan and code. Record decisions in the run artifacts
+as `Ruling: <what you decided> — <why> — <what it costs if wrong>`.
+If a required tool or skill is unavailable, scope must shrink or materially change, or
+the plan needs a different architecture, explain the limitation and ask the user one
+concrete question with a recommended option. Offer to enable the capability, approve a
+substitute or deferred verification, or revise the scope as appropriate. Do not silently
+waive project requirements or turn these decisions into a terminal "blocked" response.
 
-Four things stop you, and only these: an irreversible or destructive
-operation; a security-sensitive action; a side effect outside this worktree
-that norms say you ask about first (a merge, a push to a shared branch, a
-publish); and a plan so broken that every path forward is a guess. For those,
-stop and ask.
+Always ask before irreversible or destructive operations, security-sensitive actions,
+external side effects that require permission (merge, shared-branch push, publish), or
+when no safe path follows from the available context. Keep the current task open while
+waiting; an answer authorizes only the stated change, not a claim that skipped checks passed.
 
 ## Node map
 
 - **setup-worktree**: after the worktree skill, run the preflight scan on `plan.md`; write the table and every `Ruling:` into `worktree.md`.
 - **advance**: read the latest section of `review.md` and your existing `progress.md` (initialize it from `plan.md` on first visit: `Current: Task 1`, task count, `Phase: tasks`). Update `progress.md`, then choose exactly one outcome:
   - Disputes first: rule on each `DISPUTED` finding in the review, and each item under `### Disputed findings` in the latest report section. **uphold:** it stays an open finding and counts toward `fix`. **dismiss:** record `Task N: parked — <finding> — Ruling: <why> — cost if wrong: <…>`.
-  - `fix`: spec ❌, any Critical/Important, or a ⚠️ item you confirm as a real gap, and fix round R < 5. Write `Task N: fix round R/5 (…)` and the open findings verbatim under `## Open findings`.
+  - `fix` / `escalate`: spec ❌, any Critical/Important, or a ⚠️ item you confirm as a real gap, and fix round R < 5. Write `Task N: fix round R/5 (…)` and the open findings verbatim under `## Open findings`. Rounds 1-3 are `fix` (the implementer); rounds 4-5 are `escalate` (a fresh implementer on a stronger model, whose sections land in `escalation-report.md`).
   - At R = 5 with findings open: adjudicate each (`Task N: parked — <finding> — Ruling: <why> — cost if wrong: <…>`, or rule the smallest unblocking change and record it under `## Carry forward`), then treat the task as complete.
-  - `next_task`: task complete and tasks remain. Write `Task N: complete (commits a..b, review clean | K parked)`, set `Current: Task N+1`, clear `## Open findings`.
+  - `next_task`: task complete and tasks remain. Write `Task N: complete (commits a..b, review clean | K parked)`, set `Current:` to the next task (or the next batch, e.g. `Current: Tasks 4-6 (batch)`), clear `## Open findings`.
   - `all_done`: last task complete; set `Phase: done`.
   - Minor findings never trigger `fix`: write `Task N: minor (deferred): <one-liner>`.
 - **advance-final**: read `final-review.md`. Must-fix findings and no `## Re-review of fix wave` section → write `final-rulings.md` noting the fix wave is pending, with any rulings made so far, then `final_fix`. Clean, or the re-review section exists (the single fix wave is spent) → write every residual's `Ruling:` to `final-rulings.md`, then `finish`.
@@ -59,6 +61,11 @@ is clean" without those rows is not a scan you ran.
 Write the table to `worktree.md`. Rule on everything you find before execution
 begins — each finding against the plan text that mandates it — and record
 each ruling beside its row. If the scan is clean, proceed without comment.
+
+Also list batches: runs of small, independent, same-shape tasks (the same
+one-line change, constant or field across files), whether or not the plan
+marked them. A batch is one assignment, one report section and one review;
+work that needs its own judgment, tests or review surface stays one task.
 The review loop remains the net for conflicts that only emerge from
 implementation.
 
@@ -68,8 +75,8 @@ An implementer returns one of four statuses. NEEDS_CONTEXT and BLOCKED never com
 
 During `implement-task`:
 
-- **NEEDS_CONTEXT:** the implementer lacked information. Answer from `spec.md`, `plan.md` or the code when possible; otherwise relay the question to the user. Then continue the same worker through Unelos continuation. Never advance the task.
-- **BLOCKED:** assess the blocker. Context problem → supply context. Task too large → rule a smaller scope. Plan itself wrong → rule on the correction. Record the ruling in the run ledger, never complete the task, and continue the same worker (Unelos continuation) with the context or ruling. At the next `advance`, copy the ruling into `progress.md` (under `## Carry forward`) so it survives.
+- **NEEDS_CONTEXT:** answer factual questions from `spec.md`, `plan.md` or the code when possible. For missing capabilities, changed scope or a material plan decision, relay one concrete question and the recommended alternative to the user. Record the answer in the ledger and continue the same worker using the harness's worker-continuation mechanism; do not complete the Unelos task while waiting.
+- **BLOCKED:** inspect what was tried and any partial changes. Supply missing context when known; otherwise ask the user to enable the capability, approve an alternative, or revise/split the task. Never silently narrow approved scope or discard safe partial work. Record the answer in the ledger, keep the task current, and continue the same worker with the changed context. At the next `advance`, copy the decision into `progress.md` under `## Carry forward`. Do not merely announce "implementation is blocked" and end without a question.
 
 **Never** ignore an escalation or send the same work back unchanged. If the implementer said it's stuck, something needs to change.
 
@@ -104,7 +111,9 @@ Two routes leave it immediately:
   without a recorded ruling.
 
 Everything else enters the loop. A fix round is one fix pass plus one
-scoped re-review. Five rounds maximum per task. The re-review is scoped:
+scoped re-review. Five rounds maximum per task. A loop that survives three
+rounds usually means the implementer cannot see its own problem: rounds 4-5
+escalate to fresh eyes and a capability bump in one move. The re-review is scoped:
 each finding is verdicted ADDRESSED or NOT ADDRESSED, and only the fix diff is
 checked for new breakage. New Critical/Important breakage in the fix diff joins
 the open findings. Out-of-scope observations become deferred minors — they
@@ -147,7 +156,7 @@ issues that are neither fixed nor parked-with-ruling at the cap.
 
 The final whole-branch review reads the deferred-minor and parked lines in `progress.md` and triages which must be fixed before merge.
 
-If it returns must-fix findings, ONE fix wave handles the complete findings list — not one fixer per finding — followed by exactly one scoped re-review of that wave. Adjudicate any residual findings as in the breaker: park with rulings, or rule on the load-bearing ones and record what you decided in `final-rulings.md`. Only the four stop classes above stop you here. There is no second fix wave — residual load-bearing findings surface to your human partner when the branch is finished.
+If it returns must-fix findings, ONE fix wave handles the complete findings list — not one fixer per finding — followed by exactly one scoped re-review of that wave. Adjudicate any residual findings as in the breaker: park with rulings, or rule on the load-bearing ones and record what you decided in `final-rulings.md`. The user-decision rules above still apply. There is no second fix wave — residual load-bearing findings surface to your human partner when the branch is finished.
 
 ## Finish: Rulings I made
 

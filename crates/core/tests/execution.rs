@@ -2,20 +2,22 @@ use assert_fs::TempDir;
 use camino::{Utf8Path, Utf8PathBuf};
 use unelos_core::*;
 
-fn finished_control(package: &ExecutionPackage) -> ExecutionControl {
+fn finished_control(package: &ExecutionPackage) -> CompletionControl {
     let expected = package.expected.clone().unwrap();
-    let mut result = serde_json::to_value(&expected).unwrap();
+    let mut result =
+        serde_json::json!({"taskId": serde_json::to_value(&expected).unwrap()["taskId"]});
     result["status"] = "FINISHED".into();
     result["summary"] = "Inspected".into();
     result["changedPaths"] = serde_json::json!([]);
     result["verification"] = serde_json::json!(["Read report"]);
-    result["progress"] = serde_json::json!([]);
     result["outcome"] = serde_json::Value::Null;
-    ExecutionControl {
+    CompletionControl {
+        summary: Some("Inspected".into()),
         expected,
-        result_text: Some(format!(
-            "<unelos-worker-result>{result}</unelos-worker-result>"
-        )),
+        result_text: package
+            .worker_prompt
+            .as_ref()
+            .map(|_| format!("<unelos-worker-result>{result}</unelos-worker-result>")),
         outcome: None,
         reason: None,
     }
@@ -24,7 +26,7 @@ fn finished_control(package: &ExecutionPackage) -> ExecutionControl {
 fn write_outputs(package: &ExecutionPackage) {
     let packet = serde_json::to_value(&package.packet).unwrap();
     for output in packet["outputs"].as_array().unwrap() {
-        std::fs::write(output["path"].as_str().unwrap(), "Useful report section\n").unwrap();
+        std::fs::write(output["path"].as_str().unwrap(), format!("Useful report section {:?}\n", package.expected)).unwrap();
     }
 }
 
@@ -32,7 +34,7 @@ fn state_bytes(root: &Utf8Path) -> Vec<u8> {
     let state = status(root, "r-000001").unwrap();
     std::fs::read(
         root.join(".unelos/runs")
-            .join(&state.name)
+            .join(&state.run_id)
             .join("state.json"),
     )
     .unwrap()
@@ -67,14 +69,8 @@ fn unnamed_start_derives_its_name_without_requesting_a_user_name() {
     let (_temp, root) = fixture();
     let fresh = execution_new(&root).unwrap();
     let package = execution_start(&root, "simple-plan-execute-review", None).unwrap();
-    for policy in [
-        &fresh.controller_instructions,
-        &package.controller_instructions,
-    ] {
-        assert!(policy.contains("derive a descriptive safe run name from the agreed goal"));
-        assert!(policy.contains("Do not ask the user to name the run"));
-        assert!(!policy.contains("Obtain the agreed goal and a descriptive name before starting"));
-    }
+    assert!(fresh.controller_instructions.contains("Never ask the user to name the run"));
+    assert!(!fresh.controller_instructions.contains("unelos_complete"));
     let run_id = package.run_id.as_deref().unwrap();
     let started = status(&root, run_id).unwrap();
     assert!(started.naming_pending);
@@ -99,16 +95,58 @@ fn main_and_delegated_packages_deliver_mandatory_controller_completion_policy() 
             Some(packet(&root, delegated)),
             vec![],
             Some("Change greeting"),
-            None,
         )
         .unwrap();
         assert_eq!(package.status, "running");
-        assert!(package.controller_instructions.contains(
-            "For every automated Task, main or delegated, you must call unelos_complete"
-        ));
-        assert!(package
-            .controller_instructions
-            .contains("Never hand completion back to the user or stop at a success summary"));
+        let block = if delegated {
+            include_str!("../src/instructions/controller-delegated.md")
+        } else {
+            include_str!("../src/instructions/controller-main-task.md")
+        };
+        assert_eq!(package.controller_instructions, format!("{}\n{block}", include_str!("../src/instructions/controller.md")));
+    }
+}
+
+#[test]
+fn every_state_delivers_only_its_policy_block() {
+    let (_temp, root) = fixture();
+    let (_delegated_temp, delegated_root) = fixture();
+    let cases = [
+        (None, "idle"),
+        (Some(packet(&root, false)), "main-task"),
+        (Some(packet(&delegated_root, true)), "delegated"),
+        (Some(WorkPacket::Parallel(ParallelPacket {
+            kind: "parallel", run_id: "run".into(), task_id: "task".into(),
+            node_id: "parallel".into(), request: String::new(), inputs: vec![],
+            outputs: vec![], feedback: None, workers: vec![], ledger_path: "ledger.md".into(),
+        })), "parallel"),
+        (Some(WorkPacket::HumanGate(GatePacket {
+            kind: "human-gate", run_id: "run".into(), activation_id: "gate".into(),
+            node_id: "gate".into(), artifacts: vec![], ledger_path: "ledger.md".into(),
+        })), "gate"),
+        (Some(WorkPacket::Finished(FinishedPacket {
+            kind: "finished", run_id: "run".into(), node_id: "done".into(),
+            ledger_path: "ledger.md".into(),
+        })), "finished"),
+    ];
+    for (packet, state) in cases {
+        let package = render_execution_package(packet, vec![], None).unwrap();
+        let block = std::fs::read_to_string(
+            Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join(format!("src/instructions/controller-{state}.md")),
+        ).unwrap();
+        assert_eq!(package.controller_instructions, format!("{}\n{block}", include_str!("../src/instructions/controller.md")));
+        let text = serde_json::to_string(&package).unwrap();
+        for forbidden in ["unelos_continue", "complete NODE", "Task done; Unelos run finished"] {
+            assert!(!text.contains(forbidden), "{state}: {forbidden}");
+        }
+        if state == "idle" {
+            assert!(!package.controller_instructions.contains("unelos_complete"));
+        }
+        if state == "gate" {
+            assert!(!package.controller_instructions.contains("workerPrompt"));
+            assert!(!package.controller_instructions.contains("FINISHED"));
+        }
     }
 }
 
@@ -172,7 +210,8 @@ fn rejected_completion_never_changes_confirmation_or_state() {
             &root,
             "r-000001",
             ExecutionOperation::Complete,
-            &ExecutionControl {
+            &CompletionControl {
+                summary: None,
                 expected,
                 ..control.clone()
             }
@@ -180,7 +219,7 @@ fn rejected_completion_never_changes_confirmation_or_state() {
         .is_err());
         assert_eq!(bytes, state_bytes(&root));
     }
-    let invalid = ExecutionControl {
+    let invalid = CompletionControl {
         outcome: Some("invented".into()),
         ..control.clone()
     };
@@ -194,7 +233,7 @@ fn rejected_completion_never_changes_confirmation_or_state() {
     value["progress"] = serde_json::json!([]);
     value["question"] = "Where?".into();
     value["dependsOn"] = "User".into();
-    let question = ExecutionControl {
+    let question = CompletionControl {
         result_text: Some(format!(
             "<unelos-worker-result>{value}</unelos-worker-result>"
         )),
@@ -208,7 +247,8 @@ fn rejected_completion_never_changes_confirmation_or_state() {
 fn gate_reentry_rejects_old_activation_and_continuation_preserves_reports() {
     let (_temp, root) = fixture();
     let original_gate = gate(&root);
-    let old = ExecutionControl {
+    let old = CompletionControl {
+        summary: None,
         expected: original_gate.expected.unwrap(),
         result_text: None,
         outcome: None,
@@ -218,7 +258,7 @@ fn gate_reentry_rejects_old_activation_and_continuation_preserves_reports() {
         &root,
         "r-000001",
         ExecutionOperation::Reject,
-        &ExecutionControl {
+        &CompletionControl {
             reason: Some("Add exact byte check".into()),
             ..old.clone()
         },
@@ -237,7 +277,8 @@ fn gate_reentry_rejects_old_activation_and_continuation_preserves_reports() {
         &root,
         "r-000001",
         ExecutionOperation::Approve,
-        &ExecutionControl {
+        &CompletionControl {
+            summary: None,
             expected: new_gate.expected.unwrap(),
             ..old
         },
@@ -254,15 +295,8 @@ fn gate_reentry_rejects_old_activation_and_continuation_preserves_reports() {
     let report_path = packet["outputs"][0]["path"].as_str().unwrap();
     let ledger = std::fs::read(ledger_path).unwrap();
     let report = std::fs::read(report_path).unwrap();
-    let control = ContinuationControl {
-        expected: implementation.expected.clone().unwrap(),
-        worker_key: None,
-        answer: Some("Keep mobile".into()),
-        progress: vec!["Read layout".into()],
-    };
-    let continued = execution_continue(&root, "r-000001", &control).unwrap();
-    assert_eq!(continued.expected, implementation.expected);
-    assert!(continued.worker_prompt.unwrap().contains("Keep mobile"));
+    let refreshed = execution_next(&root, "r-000001").unwrap();
+    assert_eq!(refreshed.expected, implementation.expected);
     assert_eq!(before, state_bytes(&root));
     assert_eq!(ledger, std::fs::read(ledger_path).unwrap());
     assert_eq!(report, std::fs::read(report_path).unwrap());
@@ -272,15 +306,17 @@ fn gate_reentry_rejects_old_activation_and_continuation_preserves_reports() {
     assert_eq!(review_context["execution"], "subagent");
     assert_eq!(review_context["agent"], "simple-reviewer");
     write_outputs(&review);
-    let invalid = ExecutionControl {
-        outcome: Some("invented".into()),
+    let invalid = CompletionControl {
+        result_text: finished_control(&review)
+            .result_text
+            .map(|s| s.replace("\"outcome\":null", "\"outcome\":\"invented\"")),
         ..finished_control(&review)
     };
     let bytes = state_bytes(&root);
     assert!(execution_mutate(&root, "r-000001", ExecutionOperation::Complete, &invalid).is_err());
     assert_eq!(bytes, state_bytes(&root));
     let mut correction = finished_control(&review);
-    correction.outcome = Some("changes_requested".into());
+    correction.outcome = Some("ignored-for-delegated-work".into());
     correction.result_text = Some(
         correction
             .result_text
@@ -294,7 +330,6 @@ fn gate_reentry_rejects_old_activation_and_continuation_preserves_reports() {
         "implement"
     );
     assert_ne!(reentered.expected, implementation.expected);
-    assert!(execution_continue(&root, "r-000001", &control).is_err());
 }
 
 #[test]
@@ -328,21 +363,18 @@ fn concurrent_duplicate_mutations_commit_once() {
 }
 
 #[test]
-fn concurrent_gate_approval_commits_once_and_missing_brief_never_advances() {
+fn concurrent_gate_approval_commits_once_without_brief() {
     let (_temp, root) = fixture();
     let package = gate(&root);
-    let control = ExecutionControl {
+    let control = CompletionControl {
+        summary: None,
         expected: package.expected.unwrap(),
         result_text: None,
         outcome: None,
         reason: None,
     };
-    let ledger = root.join(".unelos/runs/guard-check/ledger.md");
+    let ledger = root.join(".unelos/runs/r-000001/ledger.md");
     std::fs::write(&ledger, "No Brief").unwrap();
-    let bytes = state_bytes(&root);
-    assert!(execution_mutate(&root, "r-000001", ExecutionOperation::Approve, &control).is_err());
-    assert_eq!(bytes, state_bytes(&root));
-    std::fs::write(&ledger, "## Brief\nChange greeting\n").unwrap();
     let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
     let handles: Vec<_> = (0..2)
         .map(|_| {
@@ -382,10 +414,7 @@ fn concurrent_gate_approval_commits_once_and_missing_brief_never_advances() {
     assert!(finished.worker_prompt.is_none());
     assert!(finished
         .controller_instructions
-        .contains("Only when the returned package has status finished, explicitly tell the user"));
-    assert!(finished
-        .controller_instructions
-        .contains("Task done; Unelos run finished"));
+        .contains("The run is finished. Tell the user it is done"));
 }
 
 fn fixture() -> (TempDir, Utf8PathBuf) {
@@ -454,90 +483,98 @@ fn delegated_prompt_contains_resolved_context_without_controller_metadata() {
     };
     let task_instructions = task.packet.context.task_instructions.clone();
     let skill = task.packet.context.skills[0].clone();
-    let package =
-        render_execution_package(Some(packet), vec![], Some("Change heading"), None).unwrap();
+    let package = render_execution_package(Some(packet), vec![], Some("Change heading")).unwrap();
     let text = package.worker_prompt.unwrap();
     assert!(text.contains("Change heading"));
     assert!(text.contains("implementation-report.md"));
-    let json: serde_json::Value = serde_json::from_str(
-        text.split("Executor context:\n")
-            .nth(1)
-            .unwrap()
-            .split("\n\nBrief:")
-            .next()
-            .unwrap(),
-    )
-    .unwrap();
-    assert_eq!(json["taskInstructions"], task_instructions);
-    assert_eq!(json["skills"][0], serde_json::to_value(skill).unwrap());
-    assert!(json.get("ledgerPath").is_none());
-    assert!(json.get("controllerInstructions").is_none());
+    assert!(text.contains(&task_instructions));
+    assert!(text.contains(&skill.content));
+    assert!(text.starts_with("# Unelos Task: implement\n"));
+    let json = serde_json::to_value(&package.packet).unwrap();
+    for field in [
+        "taskInstructions",
+        "agentInstructions",
+        "skills",
+        "completionInstructions",
+    ] {
+        assert!(json.get(field).is_none(), "{field}");
+    }
     assert!(!text.contains("unelos-opencode-worker"));
 }
 
 #[test]
 fn main_and_idle_packages_do_not_require_a_brief() {
     let (_temp, root) = fixture();
-    let main = render_execution_package(Some(packet(&root, false)), vec![], None, None).unwrap();
+    let main = render_execution_package(Some(packet(&root, false)), vec![], None).unwrap();
     assert_eq!(main.status, "running");
     assert!(main.worker_prompt.is_none());
     let idle =
-        render_execution_package(None, vec!["simple-plan-execute-review".into()], None, None)
-            .unwrap();
+        render_execution_package(None, vec!["simple-plan-execute-review".into()], None).unwrap();
     assert_eq!(idle.status, "idle");
     assert_eq!(idle.workflows, ["simple-plan-execute-review"]);
     assert!(idle.expected.is_none());
 }
 
 #[test]
-fn brief_is_exactly_one_nonempty_section_with_crlf_support() {
+fn markdown_prompt_includes_only_nonempty_sections_and_marks_existing_outputs() {
+    let (_temp, root) = fixture();
+    let mut work = packet(&root, true);
+    let WorkPacket::Task(task) = &mut work else {
+        panic!()
+    };
+    task.packet.request = "Keep the public API".into();
+    let path = task.packet.outputs[0].path.clone();
+    std::fs::write(&path, "Existing useful content").unwrap();
+    let prompt = render_execution_package(Some(work.clone()), vec![], Some("Agreed goal"))
+        .unwrap()
+        .worker_prompt
+        .unwrap();
+    assert!(prompt.contains("## Request\nKeep the public API"));
+    assert!(prompt.contains("## Brief\nAgreed goal"));
+    assert!(prompt.contains("(exists: update in place, keep useful content)"));
+    let WorkPacket::Task(task) = &mut work else {
+        panic!()
+    };
+    task.packet.request.clear();
+    let prompt = render_execution_package(Some(work), vec![], None)
+        .unwrap()
+        .worker_prompt
+        .unwrap();
+    assert!(!prompt.contains("## Request"));
+    assert!(!prompt.contains("## Brief"));
+    assert!(!prompt.contains("Continuation context"));
+}
+
+#[test]
+fn delegated_first_start_renders_worker_prompt_without_brief() {
+    let (_temp, root) = fixture();
+    std::fs::write(
+        root.join(".unelos/workflows/simple-plan-execute-review.yaml"),
+        "name: simple-plan-execute-review\nstart: work\nnodes:\n  work:\n    taskDefinition:\n      instructions: Do the work.\n    agent: simple-implementer\n    execution: subagent\n    next: done\n  done:\n    type: end\n",
+    ).unwrap();
+    let package = execution_start(&root, "simple-plan-execute-review", None).unwrap();
+    assert!(package.worker_prompt.is_some());
+    assert!(!package
+        .worker_prompt
+        .as_ref()
+        .unwrap()
+        .contains("\n\nBrief:"));
+    let serialized = serde_json::to_value(&package).unwrap();
+    assert!(serialized["packet"].get("controllerInstructions").is_none());
+    assert!(!serialized.to_string().contains("complete NODE"));
+}
+
+#[test]
+fn brief_is_optional_first_section_with_crlf_support() {
     assert_eq!(
         read_brief("## Brief\r\nKeep mobile\r\n## Progress\r\nDone").unwrap(),
         "Keep mobile"
     );
-    for text in ["", "## Brief\n", "## Brief\nA\n## Brief\nB", "# Brief\nA"] {
-        assert!(read_brief(text).is_err(), "{text}");
+    assert_eq!(read_brief("## Brief\nA\n## Brief\nB").as_deref(), Some("A"));
+    assert_eq!(read_brief("## Brief\n## Brief\nB"), None);
+    for text in ["", "## Brief\n", "# Brief\nA"] {
+        assert!(read_brief(text).is_none(), "{text}");
     }
-}
-
-#[test]
-fn continuation_keeps_identity_and_rejects_stale_or_missing_brief() {
-    let (_temp, root) = fixture();
-    let packet = packet(&root, true);
-    let expected = ExecutionIdentity::from_packet(&packet).unwrap();
-    let control = ContinuationControl {
-        expected: expected.clone(),
-        worker_key: None,
-        answer: Some("Keep mobile".into()),
-        progress: vec!["Layout inspected".into()],
-    };
-    let a = render_execution_package(
-        Some(packet.clone()),
-        vec![],
-        Some("Heading"),
-        Some(&control),
-    )
-    .unwrap();
-    let b = render_execution_package(
-        Some(packet.clone()),
-        vec![],
-        Some("Heading"),
-        Some(&control),
-    )
-    .unwrap();
-    assert_eq!(a.expected, Some(expected));
-    assert_eq!(a.worker_prompt, b.worker_prompt);
-    assert!(a.worker_prompt.unwrap().contains("Keep mobile"));
-    assert!(render_execution_package(Some(packet.clone()), vec![], None, None).is_err());
-    let stale = ContinuationControl {
-        expected: ExecutionIdentity::Task {
-            run_id: "r-000001".into(),
-            node_id: "implement".into(),
-            task_id: "task-later".into(),
-        },
-        ..control
-    };
-    assert!(render_execution_package(Some(packet), vec![], Some("Heading"), Some(&stale)).is_err());
 }
 
 #[test]
@@ -547,7 +584,7 @@ fn result_parser_rejects_wrong_identity_malformed_frames_and_empty_context() {
         node_id: "implement".into(),
         task_id: "task-3".into(),
     };
-    let valid = serde_json::json!({"kind":"task","runId":"r-1","nodeId":"implement","taskId":"task-3","status":"FINISHED","summary":"Checked","changedPaths":[],"verification":["Read report"],"progress":[],"outcome":null});
+    let valid = serde_json::json!({"taskId":"task-3","status":"FINISHED","summary":"Checked","changedPaths":[],"verification":["Read report"],"outcome":null});
     let frame =
         |value: &serde_json::Value| format!("<unelos-worker-result>{value}</unelos-worker-result>");
     assert!(parse_worker_result(&frame(&valid), &expected).is_ok());
@@ -571,13 +608,53 @@ fn result_parser_rejects_wrong_identity_malformed_frames_and_empty_context() {
     for (status, key) in [("NEEDS_CONTEXT", "question"), ("BLOCKED", "reason")] {
         let mut bad = valid.clone();
         bad["status"] = status.into();
-        bad.as_object_mut().unwrap().remove("outcome");
         bad[key] = "".into();
-        if status == "NEEDS_CONTEXT" {
-            bad["dependsOn"] = "User".into();
-        }
         assert!(parse_worker_result(&frame(&bad), &expected).is_err());
         bad[key] = "Required context".into();
         assert!(parse_worker_result(&frame(&bad), &expected).is_ok());
     }
+}
+
+#[test]
+fn result_errors_name_the_failed_check_and_reject_duplicate_keys() {
+    let expected = ExecutionIdentity::Task {
+        run_id: "r-1".into(),
+        node_id: "work".into(),
+        task_id: "task-5".into(),
+    };
+    let valid = r#"{"taskId":"task-5","status":"FINISHED","outcome":null,"summary":"Done","changedPaths":[],"verification":[]}"#;
+    let frame = |json: &str| {
+        format!("surrounding text\n<unelos-worker-result>{json}</unelos-worker-result>\nmore text")
+    };
+    assert!(parse_worker_result(&frame(valid), &expected).is_ok());
+    for (json, message) in [
+        (
+            valid.replace("task-5", "task-3"),
+            "taskId \"task-3\" does not match expected \"task-5\"",
+        ),
+        (
+            valid.replace("\"taskId\":", "\"taskId\":\"first\",\"taskId\":"),
+            "duplicate field `taskId`",
+        ),
+        (
+            valid.replace("\"summary\":", "\"notes\":true,\"summary\":"),
+            "unknown field `notes`",
+        ),
+        (
+            valid.replace("FINISHED", "NEEDS_CONTEXT"),
+            "NEEDS_CONTEXT requires a nonempty question",
+        ),
+        (
+            valid.replace("\"outcome\":null,", ""),
+            "missing field `outcome`",
+        ),
+        ("{".into(), "invalid JSON at line"),
+    ] {
+        let error = parse_worker_result(&frame(&json), &expected).unwrap_err();
+        assert!(error.to_string().contains(message), "{error}");
+    }
+    assert!(parse_worker_result("done", &expected)
+        .unwrap_err()
+        .to_string()
+        .contains("no <unelos-worker-result> frame found"));
 }

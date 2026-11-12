@@ -1,4 +1,5 @@
 mod projects;
+mod runs;
 mod harnesses;
 mod model_mappings;
 
@@ -53,15 +54,31 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            runs::list_runs,
+            runs::get_run,
+            runs::delete_run,
+            runs::read_run_artifact,
             harnesses::list_harnesses,
             model_mappings::list_model_mappings,
             model_mappings::save_model_mapping,
             model_mappings::delete_model_mapping,
             model_mappings::harness_models,
             model_mappings::agent_model_options,
+            projects::get_project_settings,
+            projects::save_project_settings,
+            projects::build_harness_config,
+            projects::auto_build_harness,
             projects::get_agent,
             projects::get_task,
             projects::save_agent,
+            projects::list_mcps,
+            projects::get_mcp,
+            projects::save_mcp,
+            projects::remove_mcp,
+            projects::list_global_mcps,
+            projects::get_global_mcp,
+            projects::save_global_mcp,
+            projects::remove_global_mcp,
             projects::save_task,
             harnesses::install_harness,
             harnesses::uninstall_harness,
@@ -81,6 +98,7 @@ pub fn run() {
             projects::get_workflow,
             projects::validate_workflow,
             projects::save_workflow,
+            projects::create_workflow,
             projects::list_agents,
             projects::list_tasks,
             projects::list_global_tasks,

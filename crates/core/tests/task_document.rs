@@ -34,7 +34,7 @@ fn fixture() -> (assert_fs::TempDir, camino::Utf8PathBuf) {
     fs::create_dir_all(root.join(".unelos/agents/engineer")).unwrap();
     fs::write(root.join(".unelos/agents/engineer/agent.yaml"), "instructions: work\n").unwrap();
     fs::create_dir_all(root.join(".unelos/workflows")).unwrap();
-    let workflow = "start: step\nnodes:\n  step:\n    task: test\n    agent: engineer\n    next:\n      good: success # keep\n      bad: failure\n  other:\n    task: other\n    agent: engineer\n    next: {good: success, bad: failure}\n  parallel:\n    type: parallel\n    tasks:\n      - task: test\n        agent: engineer\n    next: {good: success, bad: failure}\n  success:\n    type: end\n  failure:\n    type: end\n";
+    let workflow = "start: step\nnodes:\n  step:\n    task: test\n    agent: engineer\n    next:\n      good: success # keep\n      bad: failure\n  other:\n    task: other\n    agent: engineer\n    next: {good: success, bad: failure}\n  parallel:\n    type: parallel\n    tasks:\n      - taskDefinition:\n          instructions: work\n        agent: engineer\n    next: success\n  success:\n    type: end\n  failure:\n    type: end\n";
     for name in ["one", "two"] { fs::write(root.join(format!(".unelos/workflows/{name}.yaml")), format!("name: {name}\n{workflow}")).unwrap(); }
     (temp, root)
 }
@@ -48,7 +48,8 @@ fn outcome_rename_updates_only_matching_nodes_and_preserves_destinations() {
     for name in ["one", "two"] {
         let text = fs::read_to_string(root.join(format!(".unelos/workflows/{name}.yaml"))).unwrap();
         assert!(text.contains("\"goodss\": success # keep"));
-        assert_eq!(text.matches("{good: success, bad: failure}").count(), 2);
+        assert_eq!(text.matches("{good: success, bad: failure}").count(), 1);
+        assert!(text.contains("    next: success"));
         unelos_core::parse_workflow_definition(name, &text).unwrap();
         unelos_core::validate_project(&unelos_core::load_project(&root, name).unwrap()).unwrap();
     }

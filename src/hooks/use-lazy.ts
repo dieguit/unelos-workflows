@@ -16,5 +16,9 @@ export function useLazy<T>(fetch: () => Promise<T>) {
       }
     )
   }, [fetch])
-  return { ...state, load }
+  const reload = useCallback(() => {
+    started.current = false
+    load()
+  }, [load])
+  return { ...state, load, reload }
 }

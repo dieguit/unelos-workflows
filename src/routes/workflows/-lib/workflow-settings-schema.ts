@@ -1,5 +1,6 @@
 import { z } from "zod"
 import type { WorkflowStep } from "@/lib/projects"
+import { humanize, slugify } from "@/lib/step-edit"
 
 const route = z.object({ outcome: z.string().nullable(), target: z.string() })
 
@@ -11,10 +12,30 @@ const step = z
     execution: z.enum(["main", "subagent"]).nullable(),
     routes: z.array(route),
     task: z.object({ source: z.enum(["inline", "named"]) }).nullable(),
+    workers: z.array(z.object({
+      task: z.object({ source: z.enum(["inline", "named"]), description: z.string().nullable() }),
+      agent: z.string(),
+    })),
   })
   .loose()
   .superRefine((s, ctx) => {
     if (!s.id) ctx.addIssue({ code: "custom", path: ["id"], message: "Enter a name." })
+    if (s.kind === "parallel") {
+      if (!s.workers.length)
+        ctx.addIssue({ code: "custom", path: ["workers"], message: "Add at least one task." })
+      const names = new Set<string>()
+      s.workers.forEach((worker, i) => {
+        if (!worker.agent.trim())
+          ctx.addIssue({ code: "custom", path: ["workers", i, "agent"], message: "Choose an Agent." })
+        if (worker.task.source !== "inline") return
+        const name = slugify(worker.task.description ?? "")
+        if (!name)
+          ctx.addIssue({ code: "custom", path: ["workers", i, "task", "description"], message: "Enter a task name." })
+        else if (names.has(name))
+          ctx.addIssue({ code: "custom", path: ["workers", i, "task", "description"], message: `Names must be unique within ${humanize(s.id)}.` })
+        names.add(name)
+      })
+    }
     if (s.kind !== "task" && s.kind !== "human-gate") return
     if (s.kind === "task") {
       if (!s.agent) ctx.addIssue({ code: "custom", path: ["agent"], message: "Choose an agent." })

@@ -17,7 +17,7 @@ pub(super) fn prepare_work(
         RuntimeError::InvalidState(format!("Workflow Node {node_id:?} is missing"))
     })?;
     super::check_component(node_id, "Node")?;
-    let run_dir = project.project_root.join(".unelos/runs").join(&state.name);
+    let run_dir = project.project_root.join(".unelos/runs").join(&state.run_id);
     store::validate_artifacts(state, &run_dir)?;
     let mut candidate = state.clone();
     candidate.current = match node {
@@ -31,6 +31,9 @@ pub(super) fn prepare_work(
                 inputs,
                 outputs,
                 worker_reports: vec![],
+                output_digests: Default::default(),
+                worker_receipts: Default::default(),
+                invalid_worker_results: 0,
                 feedback,
                 confirmed_execution_id: None,
             })
@@ -71,6 +74,9 @@ pub(super) fn prepare_work(
                 inputs,
                 outputs,
                 worker_reports: reports,
+                output_digests: Default::default(),
+                worker_receipts: Default::default(),
+                invalid_worker_results: 0,
                 feedback,
                 confirmed_execution_id: None,
             })
@@ -84,6 +90,9 @@ pub(super) fn prepare_work(
                 inputs,
                 outputs: vec![],
                 worker_reports: vec![],
+                output_digests: Default::default(),
+                worker_receipts: Default::default(),
+                invalid_worker_results: 0,
                 feedback,
                 confirmed_execution_id: None,
             })
@@ -92,6 +101,11 @@ pub(super) fn prepare_work(
             node_id: node_id.into(),
         },
     };
+    if let CurrentWork::Task(record) | CurrentWork::Parallel(record) = &mut candidate.current {
+        for output in record.outputs.iter().chain(record.worker_reports.iter().map(|r| &r.report)) {
+            record.output_digests.insert(output.path.clone(), digest(&output.path)?);
+        }
+    }
     Ok(candidate)
 }
 
@@ -204,7 +218,7 @@ pub(super) fn runtime_input(
     let ledger_path = project
         .project_root
         .join(".unelos/runs")
-        .join(&state.name)
+        .join(&state.run_id)
         .join("ledger.md");
     match &state.current {
         CurrentWork::Task(record) => Ok(WorkRuntimeInput::Task {
@@ -253,4 +267,38 @@ pub(super) fn ensure_inputs_are_files(record: &ExecutionRecord) -> Result<(), Ru
         })?;
     }
     Ok(())
+}
+
+// shortcut: stable FNV-1a detects ordinary edits, use a cryptographic digest for adversarial artifacts.
+fn digest(path: &Utf8Path) -> Result<Option<String>, RuntimeError> {
+    match fs::read(path) {
+        Ok(bytes) => {
+            let hash = bytes.iter().fold(0xcbf29ce484222325u64, |hash, byte| (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3));
+            Ok(Some(format!("{hash:016x}")))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(super::path_error(path, error)),
+    }
+}
+
+pub(super) fn require_nonempty_file(path: &Utf8Path) -> Result<(), String> {
+    require_regular_file(path)?;
+    if fs::metadata(path).map_err(|error| error.to_string())?.len() == 0 {
+        return Err("empty file".into());
+    }
+    Ok(())
+}
+
+pub(super) fn verify_freshness(record: &ExecutionRecord) -> Result<(), RuntimeError> {
+    if !record.feedback.as_ref().is_some_and(|f| f.outcome.is_some() || f.reason.is_some()) {
+        return Ok(());
+    }
+    let mut unchanged = Vec::new();
+    for output in record.outputs.iter().chain(record.worker_reports.iter().map(|r| &r.report)) {
+        if record.output_digests.get(&output.path) != Some(&digest(&output.path)?) {
+            return Ok(());
+        }
+        unchanged.push(output.path.as_str());
+    }
+    Err(RuntimeError::InvalidState(format!("Unchanged outputs: {}. Update an output and record in a report how the feedback was addressed", unchanged.join(", "))))
 }

@@ -12,8 +12,8 @@ import {
 } from "@/components/ui/command"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import type { WorkflowStep } from "@/lib/projects"
-import { humanize } from "../-lib/step-edit"
-import { stepIconColors, stepIcons } from "./flow/step-icon"
+import { humanize } from "@/lib/step-edit"
+import { stepIconColors, stepIcons } from "@/components/flow/step-icon"
 
 /** Step combobox. `start` lists steps a run can begin at; `destination` adds End steps and leaves out `exclude`. */
 export function StepPicker({

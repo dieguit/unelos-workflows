@@ -37,8 +37,8 @@ fn fresh_entry_delivers_descriptions_and_zero_based_opt_out_instructions() {
     assert!(package["workflowDescriptions"].get("bbb").is_none());
     let instructions = package["controllerInstructions"].as_str().unwrap();
     assert!(instructions.contains("0. Continue without Unelos"));
-    assert!(instructions.contains("1..N"));
-    assert!(instructions.contains("number or workflow name"));
+    assert!(instructions.contains("Accept a number, a name"));
+    assert!(instructions.contains("requestedAction"));
     assert!(!root.join(".unelos/runs").exists());
 }
 
@@ -49,32 +49,26 @@ fn fresh_entry_never_selects_history_and_resume_is_read_only() {
     let b = execution_start(&root, "simple-plan-execute-review", Some("second-run")).unwrap();
     let a_id = a.run_id.as_deref().unwrap();
     let b_id = b.run_id.as_deref().unwrap();
-    let ledger = root.join(".unelos/runs/first-run/ledger.md");
+    let ledger = root.join(".unelos/runs").join(a_id).join("ledger.md");
     std::fs::write(
         &ledger,
         "## Brief\nChange A\n\n## Progress\nInterview pending\n",
     )
     .unwrap();
-    let state_a = root.join(".unelos/runs/first-run/state.json");
+    let state_a = root.join(".unelos/runs").join(a_id).join("state.json");
     let before = std::fs::read(&state_a).unwrap();
     let fresh = execution_new(&root).unwrap();
     assert!(fresh.run_id.is_none());
     assert!(fresh.packet.is_none());
     assert!(fresh.resume_context.is_none());
     assert_eq!(serde_json::to_value(&fresh).unwrap()["entryMode"], "new");
-    assert_eq!(execution_runs(&root).unwrap().runs.len(), 2);
+    let catalog = execution_runs(&root).unwrap();
+    assert_eq!(catalog.runs.len(), 2);
+    assert_eq!(catalog.controller_instructions, format!("{}\n{}", include_str!("../src/instructions/controller.md"), include_str!("../src/instructions/controller-resume.md")));
     let resumed = execution_resume(&root, a_id).unwrap();
+    assert_eq!(resumed.controller_instructions, format!("{}\n{}\n{}", include_str!("../src/instructions/controller.md"), include_str!("../src/instructions/controller-main-task.md"), include_str!("../src/instructions/controller-resume.md")));
     assert_eq!(resumed.run_id.as_deref(), Some(a_id));
-    assert_eq!(
-        resumed
-            .resume_context
-            .as_ref()
-            .unwrap()
-            .ledger
-            .content
-            .as_deref(),
-        Some("## Brief\nChange A\n\n## Progress\nInterview pending\n")
-    );
+    assert!(resumed.resume_context.as_ref().unwrap().ledger.exists);
     assert_eq!(
         serde_json::to_value(&resumed).unwrap()["entryMode"],
         "resume"
@@ -141,25 +135,19 @@ fn empty_output_is_distinct_from_missing_and_missing_input_blocks_dispatch() {
     let path = &record.outputs[0].path;
     std::fs::write(path, "").unwrap();
     let resumed = execution_resume(&root, &state.run_id).unwrap();
-    assert_eq!(
-        resumed.resume_context.unwrap().reports[0]
-            .content
-            .as_deref(),
-        Some("")
-    );
+    assert!(resumed.resume_context.unwrap().reports[0].exists);
     std::fs::remove_file(path).unwrap();
-    assert!(execution_resume(&root, &state.run_id)
+    assert!(!execution_resume(&root, &state.run_id)
         .unwrap()
         .resume_context
         .unwrap()
         .reports[0]
-        .content
-        .is_none());
+        .exists);
     let plan = finish_main(&root, &state);
     std::fs::remove_file(path).unwrap();
     let before = std::fs::read(
         root.join(".unelos/runs")
-            .join(&plan.name)
+            .join(&plan.run_id)
             .join("state.json"),
     )
     .unwrap();
@@ -176,7 +164,7 @@ fn empty_output_is_distinct_from_missing_and_missing_input_blocks_dispatch() {
     assert_eq!(
         std::fs::read(
             root.join(".unelos/runs")
-                .join(&plan.name)
+                .join(&plan.run_id)
                 .join("state.json")
         )
         .unwrap(),
@@ -198,13 +186,12 @@ fn resume_rejects_oversize_or_invalid_utf8_without_mutation() {
         std::fs::write(&record.outputs[0].path, &bytes).unwrap();
         let path = root
             .join(".unelos/runs")
-            .join(&state.name)
+            .join(&state.run_id)
             .join("state.json");
         let before = std::fs::read(&path).unwrap();
-        assert_eq!(
-            execution_resume(&root, &state.run_id).unwrap_err().code(),
-            code
-        );
+        let resumed = execution_resume(&root, &state.run_id).unwrap();
+        assert!(resumed.resume_context.unwrap().reports[0].exists);
+        let _ = code;
         assert_eq!(std::fs::read(path).unwrap(), before);
     }
 }
@@ -232,7 +219,7 @@ fn resume_gate_preserves_activation_and_never_approves() {
     let gate = finish_main(&root, &state);
     let path = root
         .join(".unelos/runs")
-        .join(&gate.name)
+        .join(&gate.run_id)
         .join("state.json");
     let before = std::fs::read(&path).unwrap();
     let resumed = execution_resume(&root, &gate.run_id).unwrap();
@@ -246,14 +233,14 @@ fn resume_gate_preserves_activation_and_never_approves() {
 }
 
 #[test]
-fn delegated_resume_keeps_prompt_identity_and_reports_and_missing_brief_blocks() {
+fn delegated_resume_keeps_prompt_without_brief_or_ledger() {
     let (_temp, root) = fixture();
     let state = start_workflow(&root, "simple-plan-execute-review", None).unwrap();
     let state = finish_main(&root, &state);
     let state = finish_main(&root, &state);
     let ledger = root
         .join(".unelos/runs")
-        .join(&state.name)
+        .join(&state.run_id)
         .join("ledger.md");
     std::fs::write(&ledger, "## Brief\nMake the requested change\n").unwrap();
     let state = approve_node(&root, &state.run_id, "approve-plan").unwrap();
@@ -267,12 +254,17 @@ fn delegated_resume_keeps_prompt_identity_and_reports_and_missing_brief_blocks()
     assert_eq!(resumed.expected, current.expected);
     assert!(serde_json::to_string(&resumed.resume_context)
         .unwrap()
-        .contains("Previous implementation progress"));
+        .contains(record.outputs[0].path.as_str()));
+    std::fs::write(&ledger, "No Brief").unwrap();
+    let without_brief = execution_resume(&root, &state.run_id).unwrap();
+    assert_eq!(without_brief.status, "running");
+    assert!(without_brief.worker_prompt.is_some());
+    assert_eq!(without_brief.expected, current.expected);
     std::fs::remove_file(ledger).unwrap();
     let missing = execution_resume(&root, &state.run_id).unwrap();
-    assert_eq!(missing.status, "needs-context");
+    assert_eq!(missing.status, "running");
     assert_eq!(missing.expected, current.expected);
-    assert!(missing.worker_prompt.is_none());
-    assert!(!missing.resume_context.unwrap().issues.is_empty());
+    assert!(missing.worker_prompt.is_some());
+    assert!(missing.resume_context.unwrap().issues.is_empty());
     assert_eq!(status(&root, &state.run_id).unwrap(), state);
 }

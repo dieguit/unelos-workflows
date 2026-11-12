@@ -5,12 +5,11 @@ use std::{
     process::ExitCode,
 };
 use unelos_core::{
-    approve_node, build_graph, complete_node, execution_continue, execution_mutate, execution_new,
-    execution_next, execution_resume, execution_runs, execution_start, inspect_node,
-    list_workflows, load_project, next, reject_node, rename_run, start_workflow, status,
-    validate_project, ContextError, ContinuationControl, ExecutionControl, ExecutionError,
-    ExecutionOperation, ProjectLoadError, ProjectValidationError, RuntimeError, Settings,
-    SettingsError,
+    approve_node, build_graph, complete_node, execution_mutate, execution_new, execution_next,
+    execution_resume, execution_runs, execution_start, inspect_node, list_workflows, load_project,
+    next, reject_node, rename_run, start_workflow, status, validate_project, CompletionControl,
+    ContextError, ExecutionError, ExecutionOperation, ProjectLoadError, ProjectValidationError,
+    RuntimeError, Settings, SettingsError,
 };
 
 mod init;
@@ -161,10 +160,6 @@ enum ExecutionCommand {
         #[command(flatten)]
         target: RunSelector,
     },
-    Continue {
-        #[command(flatten)]
-        target: RunSelector,
-    },
 }
 
 #[derive(clap::Args)]
@@ -308,11 +303,15 @@ fn run(cli: &Cli) -> Result<(), Error> {
                     workflow,
                 )?;
                 opencode::check_agents(&cli.project, &agents)?;
+                unelos_core::check_opencode_mcps(&cli.project, workflow, &agents)?;
             }
             let installed =
                 unelos_core::install_workflow(&cli.project, source.as_deref(), workflow)?;
             let native_agents = match selected {
-                Some(version) => opencode::write_agents(&cli.project, version, &installed.agents)?,
+                Some(version) => {
+                    unelos_core::write_opencode_mcps(&cli.project, workflow, &installed.agents)?;
+                    opencode::write_agents(&cli.project, version, &installed.agents)?
+                }
                 None => Vec::new(),
             };
             let value = serde_json::json!({"workflow":installed.workflow,"agents":installed.agents,"nativeAgents":native_agents});
@@ -343,11 +342,6 @@ fn run(cli: &Cli) -> Result<(), Error> {
                 ExecutionCommand::Start { workflow, name } => {
                     execution_start(&cli.project, workflow, name.as_deref())?
                 }
-                ExecutionCommand::Continue { target } => execution_continue(
-                    &cli.project,
-                    &target.run_id,
-                    &read_control::<ContinuationControl>()?,
-                )?,
                 operation => {
                     let (operation, target) = match operation {
                         ExecutionCommand::Complete { target } => {
@@ -363,7 +357,7 @@ fn run(cli: &Cli) -> Result<(), Error> {
                         &cli.project,
                         &target.run_id,
                         operation,
-                        &read_control::<ExecutionControl>()?,
+                        &read_control::<CompletionControl>()?,
                     )?
                 }
             };

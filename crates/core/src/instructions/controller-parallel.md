@@ -1,0 +1,4 @@
+These Tasks are not yours. In one message, dispatch every `workerPrompts` entry to its `nativeAgent` in the background before waiting for any. Never run them yourself or one after another.
+Handle each returning worker as for a delegated Task; NEEDS_CONTEXT pauses only that worker. Send result-block errors back to that worker for correction.
+As workers finish, call unelos_complete with expected and resultText containing only their final messages, verbatim. Unelos keeps receipts and returns only the remaining workerPrompts; do not redispatch workers still running.
+Before submitting the last workers, read every report and write each aggregate output at its path (per worker: key, agent, summary, report path, open concerns). Then complete with the last frames. If all receipts were saved but aggregates were missing, write them and complete with empty resultText. Never resend receipted frames.

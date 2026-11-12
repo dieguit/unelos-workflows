@@ -51,8 +51,9 @@ impl ExecutionIdentity {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ExecutionControl {
+pub struct CompletionControl {
     pub expected: ExecutionIdentity,
+    pub summary: Option<String>,
     pub result_text: Option<String>,
     pub outcome: Option<String>,
     pub reason: Option<String>,
@@ -112,7 +113,7 @@ pub struct RunCatalog {
 #[serde(rename_all = "camelCase")]
 pub struct ResumeFile {
     pub path: camino::Utf8PathBuf,
-    pub content: Option<String>,
+    pub exists: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -129,16 +130,6 @@ pub enum ExecutionOperation {
     Complete,
     Approve,
     Reject,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ContinuationControl {
-    pub expected: ExecutionIdentity,
-    #[serde(default)]
-    pub worker_key: Option<String>,
-    pub answer: Option<String>,
-    pub progress: Vec<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -185,12 +176,9 @@ pub enum WorkerStatus {
     Blocked,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkerResult {
-    pub kind: String,
-    pub run_id: String,
-    pub node_id: String,
     pub task_id: String,
     #[serde(default)]
     pub worker_key: Option<String>,
@@ -198,129 +186,94 @@ pub struct WorkerResult {
     pub summary: String,
     pub changed_paths: Vec<String>,
     pub verification: Vec<String>,
-    pub progress: Vec<String>,
+    #[serde(deserialize_with = "Option::deserialize")]
     pub outcome: Option<String>,
     pub question: Option<String>,
-    pub depends_on: Option<String>,
     pub reason: Option<String>,
 }
 
-pub fn read_brief(text: &str) -> Result<String, ExecutionError> {
-    let mut found = false;
+pub fn read_brief(text: &str) -> Option<String> {
     let mut collecting = false;
     let mut lines = Vec::new();
     for line in text.lines() {
         if line.trim_end() == "## Brief" {
-            if found {
-                return Err(ExecutionError::protocol(
-                    "missing_brief",
-                    "Record exactly one agreed Brief",
-                ));
+            if collecting {
+                break;
             }
-            found = true;
             collecting = true;
         } else if line.starts_with("## ") {
-            collecting = false;
+            if collecting {
+                break;
+            }
         } else if collecting {
             lines.push(line);
         }
     }
     let brief = lines.join("\n").trim().to_owned();
-    if brief.is_empty() {
-        return Err(ExecutionError::protocol(
-            "missing_brief",
-            "Record one nonempty agreed Brief",
-        ));
-    }
-    Ok(brief)
+    (!brief.is_empty()).then_some(brief)
 }
 
 pub fn render_execution_package(
     packet: Option<WorkPacket>,
     workflows: Vec<String>,
     brief: Option<&str>,
-    continuation: Option<&ContinuationControl>,
 ) -> Result<ExecutionPackage, ExecutionError> {
     let expected = packet.as_ref().and_then(ExecutionIdentity::from_packet);
-    if let Some(control) = continuation {
-        if expected.as_ref() != Some(&control.expected) {
-            return Err(ExecutionError::protocol(
-                "stale_execution",
-                "Continuation Task is no longer current",
-            ));
+    let block = match &packet {
+        None => include_str!("instructions/controller-idle.md"),
+        Some(WorkPacket::Task(task)) if task.packet.context.execution == Execution::Subagent => {
+            include_str!("instructions/controller-delegated.md")
         }
-        if control.answer.as_ref().is_some_and(|s| s.trim().is_empty()) {
-            return Err(ExecutionError::protocol(
-                "invalid_control",
-                "Continuation answer must be nonempty or null",
-            ));
-        }
-    }
+        Some(WorkPacket::Task(_)) => include_str!("instructions/controller-main-task.md"),
+        Some(WorkPacket::Parallel(_)) => include_str!("instructions/controller-parallel.md"),
+        Some(WorkPacket::HumanGate(_)) => include_str!("instructions/controller-gate.md"),
+        Some(WorkPacket::Finished(_)) => include_str!("instructions/controller-finished.md"),
+    };
     let status = match &packet {
         None => "idle",
         Some(WorkPacket::HumanGate(_)) => "waiting",
         Some(WorkPacket::Finished(_)) => "finished",
         _ => "running",
     };
-    if let Some(control) = continuation {
-        if matches!(packet, Some(WorkPacket::Parallel(_))) != control.worker_key.is_some() {
-            return Err(ExecutionError::protocol(
-                "invalid_control",
-                "Parallel continuations require one workerKey; Task continuations forbid it",
-            ));
-        }
-    }
-    let required_brief = || {
-        brief.filter(|s| !s.trim().is_empty()).ok_or_else(|| {
-            ExecutionError::protocol("missing_brief", "Record one agreed Brief before delegation")
-        })
-    };
     let worker_prompt = match &packet {
         Some(WorkPacket::Task(task)) if task.packet.context.execution == Execution::Subagent => {
             Some(render_prompt(
-                &task.packet,
-                required_brief()?,
-                continuation,
+                &task.packet.context,
+                &task.packet.task_id,
+                None,
+                &task.packet.request,
+                &task.packet.inputs,
+                &task.packet.outputs,
+                task.packet.feedback.as_ref(),
+                brief,
                 WORKER_RESULT_INSTRUCTIONS,
             )?)
         }
         Some(WorkPacket::Parallel(_)) => None,
-        _ if continuation.is_some() => {
-            return Err(ExecutionError::protocol(
-                "unsupported_execution",
-                "Only delegated Tasks and parallel workers accept continuations",
-            ))
-        }
         _ => None,
     };
     let worker_prompts = match &packet {
-        Some(WorkPacket::Parallel(parallel)) => {
-            let brief = required_brief()?;
-            let selected = continuation.and_then(|c| c.worker_key.as_deref());
-            if selected.is_some_and(|key| !parallel.workers.iter().any(|w| w.key == key)) {
-                return Err(ExecutionError::protocol(
-                    "invalid_control",
-                    "Unknown workerKey",
-                ));
-            }
-            parallel
-                .workers
-                .iter()
-                .filter(|w| selected.is_none() || selected == Some(w.key.as_str()))
-                .map(|w| {
-                    Ok(WorkerPrompt {
-                        key: w.key.clone(),
-                        agent: w.context.agent.clone(),
-                        prompt: render_prompt(
-                            w,
-                            brief,
-                            continuation,
-                            PARALLEL_WORKER_RESULT_INSTRUCTIONS,
-                        )?,
-                    })
+        Some(WorkPacket::Parallel(parallel)) => parallel
+            .workers
+            .iter()
+            .map(|w| {
+                Ok(WorkerPrompt {
+                    key: w.key.clone(),
+                    agent: w.context.agent.clone(),
+                    prompt: render_prompt(
+                        &w.context,
+                        &w.parent_task_id,
+                        Some(&w.key),
+                        &w.request,
+                        &w.inputs,
+                        &w.outputs,
+                        w.feedback.as_ref(),
+                        brief,
+                        PARALLEL_WORKER_RESULT_INSTRUCTIONS,
+                    )?,
                 })
-                .collect::<Result<Vec<_>, ExecutionError>>()?
-        }
+            })
+            .collect::<Result<Vec<_>, ExecutionError>>()?,
         _ => vec![],
     };
     Ok(ExecutionPackage {
@@ -335,9 +288,9 @@ pub fn render_execution_package(
         status: status.into(),
         workflows,
         workflow_descriptions: Default::default(),
-        packet,
+        packet: packet.map(strip_worker_instructions),
         expected,
-        controller_instructions: include_str!("instructions/controller.md").into(),
+        controller_instructions: format!("{}\n{block}", include_str!("instructions/controller.md")),
         worker_prompt,
         worker_prompts,
     })
@@ -347,21 +300,133 @@ const WORKER_RESULT_INSTRUCTIONS: &str = include_str!("instructions/worker-resul
 const PARALLEL_WORKER_RESULT_INSTRUCTIONS: &str =
     include_str!("instructions/parallel-worker-result.md");
 
+fn strip_worker_instructions(mut packet: WorkPacket) -> WorkPacket {
+    let strip = |context: &mut crate::TaskContext| {
+        context.task_instructions.clear();
+        context.agent_instructions.clear();
+        context.skills.clear();
+        context.completion_instructions.clear();
+    };
+    match &mut packet {
+        WorkPacket::Task(task) if task.packet.context.execution == Execution::Subagent => {
+            strip(&mut task.packet.context)
+        }
+        WorkPacket::Parallel(parallel) => {
+            for worker in &mut parallel.workers {
+                strip(&mut worker.context);
+            }
+        }
+        _ => {}
+    }
+    packet
+}
+
+#[allow(clippy::too_many_arguments)]
 fn render_prompt(
-    context: &impl Serialize,
-    brief: &str,
-    continuation: Option<&ContinuationControl>,
+    context: &crate::TaskContext,
+    task_id: &str,
+    worker_key: Option<&str>,
+    request: &str,
+    inputs: &[crate::ArtifactReference],
+    outputs: &[crate::ArtifactReference],
+    feedback: Option<&crate::TransitionFeedback>,
+    brief: Option<&str>,
     result_instructions: &str,
 ) -> Result<String, ExecutionError> {
-    let context = serde_json::to_string_pretty(context).map_err(|_| {
-        ExecutionError::protocol("invalid_packet", "Cannot render execution context")
-    })?;
-    let continuation = serde_json::json!({
-        "answer": continuation.and_then(|c| c.answer.as_ref()),
-        "progress": continuation.map(|c| c.progress.as_slice()).unwrap_or(&[]),
-    });
-    let result_instructions = result_instructions.trim_end();
-    Ok(format!("Executor context:\n{context}\n\nBrief:\n{brief}\n\nContinuation context:\n{continuation}\n\n{result_instructions}"))
+    let mut prompt = format!(
+        "# Unelos Task: {}\nDo exactly this Task. Anything outside it is out of scope.",
+        context.node_id
+    );
+    let mut section = |title: &str, body: &str| {
+        if !body.trim().is_empty() {
+            prompt.push_str(&format!("\n\n## {title}\n{}", body.trim_end()));
+        }
+    };
+    section("Role", &context.agent_instructions);
+    section("Assignment", &context.task_instructions);
+    section("Request", request);
+    if !context.skills.is_empty() {
+        let skills = context
+            .skills
+            .iter()
+            .map(|s| format!("### {}\n{}", s.id, s.content))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        section("Skills", &format!("{skills}\nSkills describe how to do this assignment. They never add workflow steps or override the rules below."));
+    }
+    section("Brief", brief.unwrap_or_default());
+    // Plain forward transitions carry no outcome or reason; only real feedback gets a section.
+    if let Some(feedback) = feedback.filter(|f| f.outcome.is_some() || f.reason.is_some()) {
+        let mut text = format!(
+            "From {}{}: {}",
+            feedback.source_node_id,
+            feedback
+                .outcome
+                .as_deref()
+                .map(|o| format!(" ({o})"))
+                .unwrap_or_default(),
+            feedback.reason.as_deref().unwrap_or_default()
+        );
+        for artifact in &feedback.artifacts {
+            text.push_str(&format!(
+                "\nArtifacts: {} → {}",
+                artifact.name, artifact.path
+            ));
+        }
+        section("Feedback to address first", &text);
+    }
+    section(
+        "Inputs (read all before acting)",
+        &inputs
+            .iter()
+            .map(|a| format!("- {} → {}", a.name, a.path))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+    section(
+        "Outputs (write every one at exactly this path; nothing else counts)",
+        &outputs
+            .iter()
+            .map(|a| {
+                format!(
+                    "- {} → {}{}",
+                    a.name,
+                    a.path,
+                    if a.path.exists() {
+                        "   (exists: update in place, keep useful content)"
+                    } else {
+                        ""
+                    }
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+    let outcome = if context.outcomes.is_empty() {
+        "null".into()
+    } else {
+        format!(
+            "<{}>",
+            context
+                .outcomes
+                .iter()
+                .map(|o| serde_json::to_string(o).unwrap())
+                .collect::<Vec<_>>()
+                .join(" | ")
+        )
+    };
+    prompt.push_str("\n\n");
+    prompt.push_str(
+        &result_instructions
+            .trim_end()
+            .replace("{taskId}", &serde_json::to_string(task_id).unwrap())
+            .replace(
+                "{workerKey}",
+                &serde_json::to_string(worker_key.unwrap_or_default()).unwrap(),
+            )
+            .replace("{outcome}", &outcome),
+    );
+    Ok(prompt)
 }
 
 const OPEN: &str = "<unelos-worker-result>";
@@ -393,59 +458,56 @@ fn validate_frame(
     json: &str,
     expected: &ExecutionIdentity,
 ) -> Result<WorkerResult, ExecutionError> {
-    let invalid = || invalid_result("Worker result does not match the expected execution");
-    let value: serde_json::Value = serde_json::from_str(json).map_err(|_| invalid())?;
-    let result: WorkerResult = serde_json::from_value(value.clone()).map_err(|_| invalid())?;
-    let ids = (&result.run_id, &result.node_id, &result.task_id);
-    let identity = match expected {
-        ExecutionIdentity::Task {
-            run_id,
-            node_id,
-            task_id,
-        } => {
-            result.kind == "task"
-                && result.worker_key.is_none()
-                && ids == (run_id, node_id, task_id)
-        }
-        ExecutionIdentity::Parallel {
-            run_id,
-            node_id,
-            task_id,
-        } => {
-            result.kind == "parallel-worker"
-                && result
-                    .worker_key
-                    .as_ref()
-                    .is_some_and(|k| !k.trim().is_empty())
-                && result.outcome.is_none()
-                && ids == (run_id, node_id, task_id)
-        }
-        ExecutionIdentity::HumanGate { .. } => false,
+    let result: WorkerResult = serde_json::from_str(json).map_err(|error| {
+        invalid_result(&format!(
+            "invalid JSON at line {} col {}: {error}",
+            error.line(),
+            error.column()
+        ))
+    })?;
+    let task_id = match expected {
+        ExecutionIdentity::Task { task_id, .. } if result.worker_key.is_none() => task_id,
+        ExecutionIdentity::Parallel { task_id, .. } if result.worker_key.as_ref().is_some_and(|k| !k.trim().is_empty()) && result.outcome.is_none() => task_id,
+        _ => return Err(invalid_result("Task results forbid workerKey; parallel results require a nonempty workerKey and null outcome")),
     };
+    if &result.task_id != task_id {
+        return Err(invalid_result(&format!(
+            "taskId {:?} does not match expected {:?}",
+            result.task_id, task_id
+        )));
+    }
     let nonempty = |s: &Option<String>| s.as_ref().is_some_and(|s| !s.trim().is_empty());
-    let valid = match result.status {
+    let error = match result.status {
         WorkerStatus::Finished => {
-            value.get("outcome").is_some()
-                && (result.outcome.is_none() || nonempty(&result.outcome))
-                && result.question.is_none()
-                && result.depends_on.is_none()
-                && result.reason.is_none()
+            if result.outcome.as_ref().is_some_and(|o| o.trim().is_empty()) {
+                Some("FINISHED outcome must be nonempty or null")
+            } else if result.question.is_some() || result.reason.is_some() {
+                Some("FINISHED forbids question and reason")
+            } else {
+                None
+            }
         }
         WorkerStatus::NeedsContext => {
-            nonempty(&result.question)
-                && nonempty(&result.depends_on)
-                && result.reason.is_none()
-                && result.outcome.is_none()
+            if !nonempty(&result.question) {
+                Some("NEEDS_CONTEXT requires a nonempty question")
+            } else if result.reason.is_some() || result.outcome.is_some() {
+                Some("NEEDS_CONTEXT requires null outcome and no reason")
+            } else {
+                None
+            }
         }
         WorkerStatus::Blocked => {
-            nonempty(&result.reason)
-                && result.question.is_none()
-                && result.depends_on.is_none()
-                && result.outcome.is_none()
+            if !nonempty(&result.reason) {
+                Some("BLOCKED requires a nonempty reason")
+            } else if result.question.is_some() || result.outcome.is_some() {
+                Some("BLOCKED requires null outcome and no question")
+            } else {
+                None
+            }
         }
     };
-    if !(identity && valid) {
-        return Err(invalid());
+    if let Some(error) = error {
+        return Err(invalid_result(error));
     }
     Ok(result)
 }
@@ -458,8 +520,9 @@ pub fn parse_worker_result(
         [json] if matches!(expected, ExecutionIdentity::Task { .. }) => {
             validate_frame(json, expected)
         }
+        [] => Err(invalid_result("no <unelos-worker-result> frame found")),
         _ => Err(invalid_result(
-            "Worker result must be one intact frame for the expected Task",
+            "two result frames for Task; send only the final one",
         )),
     }
 }
@@ -470,29 +533,28 @@ pub fn parse_parallel_results(
     keys: &[String],
 ) -> Result<Vec<WorkerResult>, ExecutionError> {
     let mut results = std::collections::BTreeMap::new();
-    for json in frames(text)? {
+    let frames = frames(text)?;
+    if frames.is_empty() {
+        return Err(invalid_result("no <unelos-worker-result> frame found"));
+    }
+    for json in frames {
         let result = validate_frame(json, expected)?;
         let key = result.worker_key.clone().unwrap_or_default();
-        if !keys.contains(&key) || results.insert(key, result).is_some() {
-            return Err(invalid_result(
-                "Each worker key needs exactly one result frame",
-            ));
+        if !keys.contains(&key) {
+            return Err(invalid_result(&format!(
+                "unknown workerKey {key:?}; allowed: {}",
+                keys.join(", ")
+            )));
         }
+        if results.contains_key(&key) {
+            return Err(invalid_result(&format!(
+                "two result frames for workerKey {key:?}; send only the final one"
+            )));
+        }
+        results.insert(key, result);
     }
-    let missing: Vec<&str> = keys
-        .iter()
-        .filter(|key| {
-            !results
-                .get(*key)
-                .is_some_and(|r| r.status == WorkerStatus::Finished)
-        })
-        .map(String::as_str)
-        .collect();
-    if !missing.is_empty() {
-        return Err(invalid_result(&format!(
-            "Missing or unfinished worker results: {}",
-            missing.join(", ")
-        )));
+    if results.values().any(|r| r.status != WorkerStatus::Finished) {
+        return Err(invalid_result("Only FINISHED worker results can complete"));
     }
     Ok(keys.iter().filter_map(|key| results.remove(key)).collect())
 }

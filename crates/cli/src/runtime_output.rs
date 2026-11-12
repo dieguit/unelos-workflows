@@ -21,7 +21,7 @@ pub(crate) fn summary(root: &Utf8Path, state: &RunState) -> Result<Value, io::Er
     Ok(json!({
         "runId": state.run_id, "name": state.name, "namingPending": state.naming_pending,
         "workflowName": state.workflow_name,
-        "runDirectory": root.join(".unelos/runs").join(&state.name),
+        "runDirectory": root.join(".unelos/runs").join(&state.run_id),
         "status": status, "current": { "kind": kind, "nodeId": node },
     }))
 }

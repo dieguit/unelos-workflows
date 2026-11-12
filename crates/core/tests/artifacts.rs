@@ -87,6 +87,7 @@ fn preparation_requires_the_latest_completed_binding_to_be_a_file() {
         reason: None,
     });
     let mut newer = plan.clone();
+    newer.output_digests.clear();
     newer.outputs[0].path = root.join(".unelos/runs/missing-latest/plan/new-plan.md");
     fs::create_dir_all(newer.outputs[0].path.parent().unwrap()).unwrap();
     fs::write(&newer.outputs[0].path, "new").unwrap();
@@ -176,6 +177,7 @@ fn next_keeps_frozen_inputs_and_feedback_and_rejects_missing_bound_files() {
     };
     newer.node_id = "plan".into();
     newer.execution_id = "task-99".into();
+    newer.output_digests.clear();
     newer.outputs[0].path = root.join(".unelos/runs/frozen-binding/plan/newer.md");
     let mut saved = state.clone();
     saved.history.push(CompletedExecution {
@@ -266,6 +268,8 @@ fn confirms_outputs_only_for_current_execution_and_rechecks_files() {
     assert!(confirm_outputs(&root, "confirm-run", "task-1").is_err());
     let path = root.join(".unelos/runs/confirm-run/plan/plan.md");
     fs::write(&path, "").unwrap();
+    assert!(confirm_outputs(&root, "confirm-run", "task-1").is_err());
+    fs::write(&path, "report").unwrap();
     let confirmed = confirm_outputs(&root, "confirm-run", "task-1").unwrap();
     assert!(verify_outputs(&root, "confirm-run", "task-1").is_ok());
     verify_work_outputs(&root, &confirmed, "task-1").unwrap();
@@ -365,7 +369,7 @@ fn confirmation_is_atomic_for_all_outputs_and_required_even_for_empty_outputs() 
 }
 
 #[test]
-fn parallel_verification_requires_only_parent_aggregate_outputs() {
+fn parallel_verification_requires_aggregate_outputs_and_worker_reports() {
     let (_temp, root) = project_copy();
     fs::write(root.join(".unelos/workflows/implement-feature.yaml"), "name: implement-feature\nstart: parallel\nnodes:\n  parallel:\n    type: parallel\n    tasks:\n      - {task: create-plan, agent: planner}\n    outputs: [aggregate.md]\n    next: done\n  done:\n    type: end\n").unwrap();
     let project = load_project(&root, "implement-feature").unwrap();
@@ -376,6 +380,8 @@ fn parallel_verification_requires_only_parent_aggregate_outputs() {
     fs::write(&record.outputs[0].path, "aggregate").unwrap();
     assert!(!record.worker_reports[0].report.path.exists());
     confirm_outputs(&root, "aggregate-only", "task-1").unwrap();
+    assert!(verify_outputs(&root, "aggregate-only", "task-1").is_err());
+    fs::write(&record.worker_reports[0].report.path, "worker report").unwrap();
     assert!(verify_outputs(&root, "aggregate-only", "task-1").is_ok());
     fs::remove_file(&record.outputs[0].path).unwrap();
     assert!(verify_outputs(&root, "aggregate-only", "task-1").is_err());

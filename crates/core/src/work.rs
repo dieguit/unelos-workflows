@@ -45,7 +45,6 @@ pub struct TaskWorkPacket {
     #[serde(flatten)]
     pub packet: TaskPacket,
     pub ledger_path: Utf8PathBuf,
-    pub controller_instructions: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -75,7 +74,6 @@ pub struct ParallelPacket {
     pub feedback: Option<TransitionFeedback>,
     pub workers: Vec<WorkerPacket>,
     pub ledger_path: Utf8PathBuf,
-    pub controller_instructions: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -86,10 +84,7 @@ pub struct GatePacket {
     pub activation_id: String,
     pub node_id: String,
     pub artifacts: Vec<ArtifactReference>,
-    pub decisions: Vec<String>,
-    pub rejection_reason_required: bool,
     pub ledger_path: Utf8PathBuf,
-    pub controller_instructions: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -98,9 +93,7 @@ pub struct FinishedPacket {
     pub kind: &'static str,
     pub run_id: String,
     pub node_id: String,
-    pub remaining_work: bool,
     pub ledger_path: Utf8PathBuf,
-    pub controller_instructions: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -112,37 +105,16 @@ pub enum WorkPacket {
     Finished(FinishedPacket),
 }
 
-impl WorkPacket {
-    /// Delegated work needs the agreed Brief before dispatch.
-    pub fn requires_brief(&self) -> bool {
-        match self {
-            WorkPacket::Task(task) => task.packet.context.execution == Execution::Subagent,
-            WorkPacket::Parallel(_) => true,
-            _ => false,
-        }
-    }
-}
-
-const LEDGER_DUTY: &str = include_str!("instructions/ledger.md");
-const OUTPUT_CONFIRMATION_DUTY: &str = include_str!("instructions/output-confirmation.md");
-const CONTEXT_AND_NAMING_DUTY: &str = include_str!("instructions/context-and-naming.md");
-
 pub fn build_work_packet(
     project: &LoadedProject,
     input: WorkRuntimeInput,
 ) -> Result<WorkPacket, ContextError> {
-    let ledger_duty = LEDGER_DUTY.trim_end();
-    let output_confirmation_duty = OUTPUT_CONFIRMATION_DUTY.trim_end();
-    let context_and_naming_duty = CONTEXT_AND_NAMING_DUTY.trim_end();
     match input {
         WorkRuntimeInput::Task { input, ledger_path } => {
             let packet = crate::build_task_packet(project, input)?;
             Ok(WorkPacket::Task(Box::new(TaskWorkPacket {
                 packet,
                 ledger_path,
-                controller_instructions: format!(
-                    "{ledger_duty} {context_and_naming_duty} {output_confirmation_duty}"
-                ),
             })))
         }
         WorkRuntimeInput::Parallel {
@@ -251,10 +223,6 @@ pub fn build_work_packet(
                 feedback: input.feedback,
                 workers,
                 ledger_path,
-                controller_instructions: format!(
-                    "{ledger_duty} {context_and_naming_duty} {output_confirmation_duty} {}",
-                    include_str!("instructions/parallel.md").trim_end()
-                ),
             }))
         }
         WorkRuntimeInput::HumanGate {
@@ -285,13 +253,7 @@ pub fn build_work_packet(
                 activation_id,
                 node_id,
                 artifacts,
-                decisions: inspection.decisions,
-                rejection_reason_required: inspection.rejection_reason_required,
                 ledger_path,
-                controller_instructions: format!(
-                    "{ledger_duty} {context_and_naming_duty} {}",
-                    include_str!("instructions/human-gate.md").trim_end()
-                ),
             }))
         }
         WorkRuntimeInput::Finished {
@@ -313,12 +275,7 @@ pub fn build_work_packet(
                 kind: "finished",
                 run_id,
                 node_id,
-                remaining_work: false,
                 ledger_path,
-                controller_instructions: format!(
-                    "{ledger_duty} {}",
-                    include_str!("instructions/finished.md").trim_end()
-                ),
             }))
         }
     }
@@ -355,7 +312,6 @@ pub struct ParallelInspection {
     pub inputs: Vec<String>,
     pub outputs: Vec<String>,
     pub workers: Vec<WorkerInspection>,
-    pub controller_instructions: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -366,7 +322,6 @@ pub struct GateInspection {
     pub inputs: Vec<String>,
     pub decisions: Vec<String>,
     pub rejection_reason_required: bool,
-    pub controller_instructions: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -433,9 +388,6 @@ pub fn inspect_node(
                 inputs: parallel.inputs.clone(),
                 outputs: parallel.outputs.clone(),
                 workers,
-                controller_instructions: include_str!("instructions/parallel-inspection.md")
-                    .trim_end()
-                    .into(),
             }))
         }
         NodeDefinition::HumanGate(gate) => {
@@ -455,9 +407,6 @@ pub fn inspect_node(
                 inputs: gate.inputs.clone(),
                 decisions: vec!["approved".into(), "rejected".into()],
                 rejection_reason_required: true,
-                controller_instructions: include_str!("instructions/human-gate-inspection.md")
-                    .trim_end()
-                    .into(),
             }))
         }
         NodeDefinition::End => Ok(NodeInspection::End(EndInspection {

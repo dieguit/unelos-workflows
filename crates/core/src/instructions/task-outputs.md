@@ -1,1 +1,1 @@
-Read any existing declared outputs and update them in place, preserving relevant content. Produce every declared output before completing this current Task; report the changes to the controller. Do not edit the run ledger.
+Read any existing declared outputs and update them in place, preserving relevant content. Produce every declared output before completing this current Task; report the changes to the controller.

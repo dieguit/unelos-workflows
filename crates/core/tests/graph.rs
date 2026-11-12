@@ -174,7 +174,7 @@ fn parallel_stays_one_node_for_single_and_labeled_routes() {
     };
     parallel.next =
         Transition::Outcomes([("z".into(), "review".into()), ("a".into(), "review".into())].into());
-    validate_project(&project).unwrap();
+    assert_eq!(validate_project(&project).unwrap_err().field, "nodes.implement.next");
     let graph = build_graph(&project.workflow);
     assert_eq!(graph.nodes.len(), 5);
     assert_eq!(graph.nodes, single_route_nodes);

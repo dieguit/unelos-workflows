@@ -55,14 +55,7 @@ fn execution_packages_and_guarded_stdin_controls_work_without_external_next() {
         "Plan",
     )
     .unwrap();
-    let mut finished = expected.clone();
-    finished["status"] = "FINISHED".into();
-    finished["summary"] = "Inspected".into();
-    finished["changedPaths"] = serde_json::json!([]);
-    finished["verification"] = serde_json::json!(["Read plan"]);
-    finished["progress"] = serde_json::json!([]);
-    finished["outcome"] = Value::Null;
-    let control = serde_json::json!({"expected":expected,"resultText":format!("<unelos-worker-result>{finished}</unelos-worker-result>")});
+    let control = serde_json::json!({"expected":expected,"summary":"Inspected"});
     let output = command(root)
         .args(["execution", "complete", "--run", run_id])
         .write_stdin(control.to_string())
@@ -103,7 +96,7 @@ fn invalid_execution_stdin_never_mutates_state() {
             "bad-input",
         ],
     );
-    let state = root.join(".unelos/runs/bad-input/state.json");
+    let state = root.join(".unelos/runs/r-000001/state.json");
     let run_id = package["runId"].as_str().unwrap();
     let before = fs::read(&state).unwrap();
     for text in [
@@ -121,7 +114,7 @@ fn invalid_execution_stdin_never_mutates_state() {
         assert!(!output.status.success());
         assert_eq!(fs::read(&state).unwrap(), before);
     }
-    for operation in ["approve", "reject", "continue"] {
+    for operation in ["approve", "reject"] {
         let output = command(root)
             .args(["execution", operation, "--run", run_id])
             .write_stdin("{}")
@@ -155,14 +148,7 @@ fn lost_mutation_response_reports_uncertainty_and_does_not_retry() {
         "Plan",
     )
     .unwrap();
-    let mut finished = package["expected"].clone();
-    finished["status"] = "FINISHED".into();
-    finished["summary"] = "Inspected".into();
-    finished["changedPaths"] = serde_json::json!([]);
-    finished["verification"] = serde_json::json!(["Read plan"]);
-    finished["progress"] = serde_json::json!([]);
-    finished["outcome"] = Value::Null;
-    let input = serde_json::json!({"expected":package["expected"],"resultText":format!("<unelos-worker-result>{finished}</unelos-worker-result>")});
+    let input = serde_json::json!({"expected":package["expected"],"summary":"Inspected"});
     let run_id = package["runId"].as_str().unwrap();
     let program = cargo_bin_cmd!("unelos").get_program().to_owned();
     let mut child = Process::new(program)
@@ -370,14 +356,13 @@ fn explicit_name_rename_and_mutations_preserve_identity() {
     let renamed = result(root, &["rename", "fix-save-button", "--run", run_id]);
     assert_eq!(renamed["runId"], run_id);
     assert_eq!(renamed["name"], "fix-save-button");
-    assert!(!std::path::Path::new(&old_path).exists());
+    assert!(std::path::Path::new(&old_path).exists());
+    assert_eq!(renamed["runDirectory"], started["runDirectory"]);
 
     let packet = result(root, &["next", "--run", run_id]);
     assert_eq!(packet["kind"], "task");
-    let instructions = packet["controllerInstructions"].as_str().unwrap();
-    assert!(instructions.contains("Carry relevant conversation context"));
-    assert!(instructions.contains("complete NODE"));
-    assert!(!instructions.contains("--execution"));
+    assert!(packet.get("controllerInstructions").is_none());
+    assert!(!packet.to_string().contains("complete NODE"));
     let state_path =
         std::path::Path::new(renamed["runDirectory"].as_str().unwrap()).join("state.json");
     let before = fs::read(&state_path).unwrap();
@@ -402,10 +387,7 @@ fn explicit_name_rename_and_mutations_preserve_identity() {
     );
     let gate = result(root, &["next", "--run", run_id]);
     assert_eq!(gate["kind"], "human-gate");
-    assert!(gate["controllerInstructions"]
-        .as_str()
-        .unwrap()
-        .contains("obtain an explicit user decision"));
+    assert!(gate.get("controllerInstructions").is_none());
     assert_eq!(
         result(
             root,
@@ -615,7 +597,7 @@ fn rejected_mutations_emit_structured_errors_without_changing_state() {
         (
             vec![
                 "rename",
-                "../unsafe",
+                "!!!",
                 "--run",
                 started["runId"].as_str().unwrap(),
             ],

@@ -55,7 +55,7 @@ fn complete(root: &Utf8Path, state: &RunState, outcome: Option<&str>) -> RunStat
         panic!("expected task at {}", node(state))
     };
     for output in &record.outputs {
-        std::fs::write(&output.path, format!("{} report\n", record.node_id)).unwrap();
+        std::fs::write(&output.path, format!("{} {} report\n", record.node_id, record.execution_id)).unwrap();
     }
     complete_node(root, &state.run_id, &record.node_id, outcome).unwrap()
 }
@@ -65,16 +65,25 @@ fn every_route_binds_inputs_and_delivers_loop_state_through_feedback() {
     let (_temp, root) = fixture();
     let s = start_workflow(&root, WORKFLOW, Some("walk")).unwrap();
     std::fs::write(
-        root.join(".unelos/runs/walk/ledger.md"),
+        root.join(".unelos/runs/r-000001/ledger.md"),
         "## Brief\nWalk every route\n",
     )
     .unwrap();
     assert_eq!(node(&s), "brainstorm");
+    let s = complete(&root, &s, Some("check"));
+    assert_eq!(node(&s), "spec-check");
+    assert_eq!(task_inputs(&s), ["spec.md"]);
     let s = complete(&root, &s, None);
+    assert_eq!(node(&s), "brainstorm");
+    assert_eq!(
+        feedback(&s),
+        ("spec-check".into(), vec!["builder-questions.md".into()])
+    );
+    let s = complete(&root, &s, Some("ready"));
     assert_eq!(node(&s), "approve-spec");
     let s = reject_node(&root, &s.run_id, "approve-spec", "Clarify scope").unwrap();
     assert_eq!(node(&s), "brainstorm");
-    let s = complete(&root, &s, None);
+    let s = complete(&root, &s, Some("ready"));
     let s = approve_node(&root, &s.run_id, "approve-spec").unwrap();
     assert_eq!(node(&s), "write-plan");
     let s = complete(&root, &s, None);
@@ -102,6 +111,16 @@ fn every_route_binds_inputs_and_delivers_loop_state_through_feedback() {
     assert_eq!(feedback(&s), ("advance".into(), vec!["progress.md".into()]));
     assert_eq!(task_outputs(&s), report);
     let s = complete(&root, &s, None);
+    let s = complete(&root, &s, None);
+    let s = complete(&root, &s, Some("escalate"));
+    assert_eq!(node(&s), "escalate-task");
+    assert_eq!(feedback(&s), ("advance".into(), vec!["progress.md".into()]));
+    let s = complete(&root, &s, None);
+    assert_eq!(node(&s), "review-task");
+    assert_eq!(
+        feedback(&s),
+        ("escalate-task".into(), vec!["escalation-report.md".into()])
+    );
     let s = complete(&root, &s, None);
     let s = complete(&root, &s, Some("next_task"));
     assert_eq!(node(&s), "implement-task");

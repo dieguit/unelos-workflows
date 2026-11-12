@@ -1,4 +1,4 @@
-mod jsonc;
+pub(crate) mod jsonc;
 mod opencode;
 
 use crate::{

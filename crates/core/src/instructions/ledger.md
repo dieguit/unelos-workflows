@@ -1,1 +1,0 @@
-Only the controller updates the supplied run ledger: record progress, received decisions, and descriptions of artifact changes. The ledger is informational; use Unelos for current work, completion, and transitions. Never use the ledger to derive destinations. Read existing declared outputs before updating them in place; preserve relevant content and do not recreate the run tree.

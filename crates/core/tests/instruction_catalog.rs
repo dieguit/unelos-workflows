@@ -43,7 +43,7 @@ fn catalog_sources_are_delivered_with_runtime_paths_kept_separate() {
                 outputs: record.outputs.clone(),
                 feedback: record.feedback.clone(),
             },
-            ledger_path: root.join(".unelos/runs/catalog-check/ledger.md"),
+            ledger_path: root.join(".unelos/runs").join(&state.run_id).join("ledger.md"),
         },
     )
     .unwrap();
@@ -57,7 +57,7 @@ fn catalog_sources_are_delivered_with_runtime_paths_kept_separate() {
     assert_eq!(task.packet.outputs[0].name, "implementation-report.md");
     assert_eq!(
         task.packet.outputs[0].path,
-        root.join(".unelos/runs/catalog-check/implement/implementation-report.md")
+        root.join(".unelos/runs").join(&state.run_id).join("implement/implementation-report.md")
     );
     for path in [
         task.packet.outputs[0].path.clone(),
@@ -69,19 +69,22 @@ fn catalog_sources_are_delivered_with_runtime_paths_kept_separate() {
             Some(WorkPacket::Task(task)),
             vec![],
             Some("Change greeting"),
-            None,
         )
         .unwrap();
-        assert_eq!(package.controller_instructions, controller);
+        assert_eq!(
+            package.controller_instructions,
+            format!("{controller}\n{}", fs::read_to_string(source.join("controller-delegated.md")).unwrap())
+        );
         let prompt = package.worker_prompt.unwrap();
-        assert!(prompt.ends_with(result.trim_end()));
-        let json = prompt
-            .strip_prefix("Executor context:\n")
-            .unwrap()
-            .split_once("\n\nBrief:")
-            .unwrap()
-            .0;
-        let context: serde_json::Value = serde_json::from_str(json).unwrap();
-        assert_eq!(context["outputs"][0]["path"], path.as_str());
+        assert!(prompt.ends_with(
+            result
+                .replace(
+                    "{taskId}",
+                    &serde_json::to_string(&record.execution_id).unwrap()
+                )
+                .replace("{outcome}", "null")
+                .trim_end()
+        ));
+        assert!(prompt.contains(path.as_str()));
     }
 }

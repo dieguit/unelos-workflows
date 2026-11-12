@@ -3,14 +3,14 @@ import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/empty-state"
 import { NewWorkflowButton } from "./workflows-table"
 
-export function NoWorkflows() {
+export function NoWorkflows({ onCreate, creating }: { onCreate: () => void; creating: boolean }) {
   return (
     <EmptyState
       dashed
       icon={WorkflowIcon}
       title="Create your first workflow"
       description="Workflows define steps, approval gates and review loops for this project."
-      action={<NewWorkflowButton />}
+      action={<NewWorkflowButton onClick={onCreate} disabled={creating} />}
     />
   )
 }

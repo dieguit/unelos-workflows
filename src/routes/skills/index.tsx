@@ -1,3 +1,4 @@
+import { useDelayedFlag } from "@/hooks/use-delayed-flag"
 import { useEffect, useRef, useState } from "react"
 import { createFileRoute, useBlocker, useRouter } from "@tanstack/react-router"
 import { toast } from "sonner"
@@ -80,6 +81,7 @@ function SkillsHome() {
   )
   const draft = useStore(form.store, (s) => s.values)
   const saving = useStore(form.store, (s) => s.isSubmitting)
+  const visualSaving = useDelayedFlag(saving)
   const isDefaultValue = useStore(form.store, (s) => s.isDefaultValue)
   const discard = useDiscardChanges()
   useEffect(() => {
@@ -148,7 +150,7 @@ function SkillsHome() {
 
   return (
     // Cancel <main>'s padding so the inspector sits flush right at full height.
-    <div className="-mx-8 -mt-6 -mb-8 flex h-[calc(100%+3.5rem)]">
+    <div inert={saving} className="-mx-8 -mt-6 -mb-8 flex h-[calc(100%+3.5rem)]">
       <div className="min-w-0 flex-1 overflow-y-auto px-8 pt-6 pb-8">
         {editing ? (
           <div className="flex h-full flex-col gap-4">
@@ -197,7 +199,7 @@ function SkillsHome() {
                   kind="Skill"
                   name={name}
                   nameSchema={skillSchema.shape.name}
-                  disabled={saving}
+                  disabled={visualSaving}
                   beforeRemove={async () =>
                     id !== name ||
                     (!saving &&

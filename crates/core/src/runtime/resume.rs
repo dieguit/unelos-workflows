@@ -4,19 +4,12 @@ use crate::{
     ExecutionPackage, ResumeContext, ResumeFile, RunCatalog, RunState, RunSummary, RuntimeError,
 };
 use camino::Utf8Path;
-use std::{
-    collections::BTreeSet,
-    fs,
-    io::{self, Read},
-};
-
-const MAX_RESUME_CONTEXT_BYTES: usize = 8 * 1024 * 1024;
+use std::{collections::BTreeSet, fs, io};
 
 pub fn execution_new(root: &Utf8Path) -> Result<ExecutionPackage, ExecutionError> {
     let descriptions =
         crate::project::list_workflow_descriptions(root).map_err(RuntimeError::from)?;
-    let mut package =
-        render_execution_package(None, descriptions.keys().cloned().collect(), None, None)?;
+    let mut package = render_execution_package(None, descriptions.keys().cloned().collect(), None)?;
     package.workflow_descriptions = descriptions
         .into_iter()
         .filter_map(|(name, description)| description.map(|text| (name, text)))
@@ -25,20 +18,10 @@ pub fn execution_new(root: &Utf8Path) -> Result<ExecutionPackage, ExecutionError
     Ok(package)
 }
 
-fn identity(state: &RunState) -> Option<ExecutionIdentity> {
-    match &state.current {
-        CurrentWork::Task(record) => Some(ExecutionIdentity::Task {
-            run_id: state.run_id.clone(),
-            node_id: record.node_id.clone(),
-            task_id: record.execution_id.clone(),
-        }),
-        CurrentWork::HumanGate(record) => Some(ExecutionIdentity::HumanGate {
-            run_id: state.run_id.clone(),
-            node_id: record.node_id.clone(),
-            activation_id: record.execution_id.clone(),
-        }),
-        _ => None,
-    }
+fn identity(root: &Utf8Path, state: &RunState) -> Result<Option<ExecutionIdentity>, ExecutionError> {
+    let project = crate::load_project(root, &state.workflow_name).map_err(RuntimeError::from)?;
+    let packet = packet_for_snapshot(&project, state, false)?;
+    Ok(ExecutionIdentity::from_packet(&packet))
 }
 
 pub fn execution_runs(root: &Utf8Path) -> Result<RunCatalog, ExecutionError> {
@@ -55,64 +38,37 @@ pub fn execution_runs(root: &Utf8Path) -> Result<RunCatalog, ExecutionError> {
                 CurrentWork::HumanGate(record) => ("waiting", record.node_id.clone()),
                 CurrentWork::Finished { .. } => unreachable!(),
             };
-            let expected = identity(&state);
-            RunSummary {
+            let expected = identity(root, &state)?;
+            Ok(RunSummary {
                 run_id: state.run_id,
                 name: state.name,
                 workflow_name: state.workflow_name,
                 status: status.into(),
                 node_id,
                 expected,
-            }
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, ExecutionError>>()?;
     Ok(RunCatalog {
         entry_mode: ExecutionEntry::Resume,
-        controller_instructions: include_str!("../instructions/controller.md").into(),
+        controller_instructions: format!(
+            "{}\n{}",
+            include_str!("../instructions/controller.md"),
+            include_str!("../instructions/controller-resume.md")
+        ),
         runs,
     })
 }
 
-fn read_file(path: &Utf8Path, remaining: &mut usize) -> Result<ResumeFile, ExecutionError> {
+fn read_file(path: &Utf8Path) -> Result<ResumeFile, ExecutionError> {
     super::store::reject_symlink(path)?;
-    let metadata = match fs::metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Ok(ResumeFile {
-                path: path.into(),
-                content: None,
-            })
-        }
-        Err(source) => return Err(super::path_error(path, source).into()),
+    let exists = match fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => true,
+        Ok(_) => return Err(ExecutionError::protocol("invalid_resume_context", format!("Recovery path is not a regular file: {path}"))),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+        Err(error) => return Err(super::path_error(path, error).into()),
     };
-    if !metadata.is_file() {
-        return Err(ExecutionError::protocol(
-            "invalid_resume_context",
-            format!("Recovery path is not a regular file: {path}"),
-        ));
-    }
-    let file = fs::File::open(path).map_err(|source| super::path_error(path, source))?;
-    let mut bytes = Vec::new();
-    file.take((*remaining + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|source| super::path_error(path, source))?;
-    if bytes.len() > *remaining {
-        return Err(ExecutionError::protocol(
-            "resume_context_too_large",
-            "Recovery context exceeds 8 MiB; reduce report size explicitly",
-        ));
-    }
-    *remaining -= bytes.len();
-    let content = String::from_utf8(bytes).map_err(|_| {
-        ExecutionError::protocol(
-            "invalid_resume_context",
-            format!("Recovery report is not UTF-8: {path}"),
-        )
-    })?;
-    Ok(ResumeFile {
-        path: path.into(),
-        content: Some(content),
-    })
+    Ok(ResumeFile { path: path.into(), exists })
 }
 
 pub fn execution_resume(root: &Utf8Path, run_id: &str) -> Result<ExecutionPackage, ExecutionError> {
@@ -130,14 +86,12 @@ pub fn execution_resume(root: &Utf8Path, run_id: &str) -> Result<ExecutionPackag
     // Missing required inputs are recovery issues, not a reason to hide the current identity.
     // All live definition/binding validation still runs.
     let packet = packet_for_snapshot(&project, &state, false)?;
-    let mut remaining = MAX_RESUME_CONTEXT_BYTES;
     let ledger = read_file(
         &store
             .root()
             .join(".unelos/runs")
-            .join(&state.name)
+            .join(&state.run_id)
             .join("ledger.md"),
-        &mut remaining,
     )?;
     let record = match &state.current {
         CurrentWork::Task(record)
@@ -160,13 +114,13 @@ pub fn execution_resume(root: &Utf8Path, run_id: &str) -> Result<ExecutionPackag
         .chain(feedback)
     {
         if seen.insert(report.path.clone()) {
-            reports.push(read_file(&report.path, &mut remaining)?);
+            reports.push(read_file(&report.path)?);
         }
     }
     for input in &record.inputs {
         if reports
             .iter()
-            .any(|report| report.path == input.path && report.content.is_none())
+            .any(|report| report.path == input.path && !report.exists)
         {
             issues.push(format!(
                 "Restore missing required input before continuing: {}",
@@ -174,31 +128,20 @@ pub fn execution_resume(root: &Utf8Path, run_id: &str) -> Result<ExecutionPackag
             ));
         }
     }
-    let delegated = packet.requires_brief();
-    let brief = if delegated {
-        match read_brief(ledger.content.as_deref().unwrap_or("")) {
-            Ok(brief) => Some(brief),
-            Err(error) => {
-                issues.push(error.to_string());
-                None
-            }
-        }
-    } else {
-        None
-    };
-    let mut package = if delegated && brief.is_none() {
-        let mut package = render_execution_package(None, vec![], None, None)?;
-        package.expected = ExecutionIdentity::from_packet(&packet);
-        package.packet = Some(packet);
-        package
-    } else {
-        render_execution_package(Some(packet), vec![], brief.as_deref(), None)?
-    };
+    let brief = if ledger.exists {
+        read_brief(&fs::read_to_string(&ledger.path).map_err(|error| super::path_error(&ledger.path, error))?)
+    } else { None };
+    let mut package = render_execution_package(Some(packet), vec![], brief.as_deref())?;
+    package.controller_instructions.push('\n');
+    package
+        .controller_instructions
+        .push_str(include_str!("../instructions/controller-resume.md"));
     if !issues.is_empty() {
         package.status = "needs-context".into();
         package.worker_prompt = None;
         package.worker_prompts.clear();
     }
+    super::execution::filter_receipts(&mut package, &state);
     package.run_id = Some(state.run_id.clone());
     package.entry_mode = Some(ExecutionEntry::Resume);
     package.resume_context = Some(ResumeContext {

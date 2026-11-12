@@ -78,11 +78,11 @@ pub fn get_skill(root: &Utf8Path, id: &str) -> Result<SkillDocument, String> {
     })
 }
 
-fn rename_refs(value: &mut Value, old: &str, new: &str) {
+fn rename_refs(value: &mut Value, old: &str, new: &str, field: &str) {
     match value {
         Value::Mapping(map) => {
             for (key, value) in map {
-                if key.as_str() == Some("skills") {
+                if key.as_str() == Some(field) {
                     if let Value::Sequence(items) = value {
                         for item in items {
                             if item.as_str() == Some(old) {
@@ -91,13 +91,13 @@ fn rename_refs(value: &mut Value, old: &str, new: &str) {
                         }
                     }
                 } else {
-                    rename_refs(value, old, new);
+                    rename_refs(value, old, new, field);
                 }
             }
         }
         Value::Sequence(items) => {
             for item in items {
-                rename_refs(item, old, new);
+                rename_refs(item, old, new, field);
             }
         }
         _ => {}
@@ -106,9 +106,18 @@ fn rename_refs(value: &mut Value, old: &str, new: &str) {
 
 // Accept a textual edit only if its semantic change is confined to skills lists.
 fn reference_edit(text: &str, old: &str, new: &str) -> Result<String, String> {
+    reference_field_edit(text, old, new, "skills")
+}
+
+pub(crate) fn reference_field_edit(
+    text: &str,
+    old: &str,
+    new: &str,
+    field: &str,
+) -> Result<String, String> {
     let original: Value = serde_yaml_ng::from_str(text).map_err(|e| e.to_string())?;
     let mut expected = original.clone();
-    rename_refs(&mut expected, old, new);
+    rename_refs(&mut expected, old, new, field);
     if expected == original {
         return Ok(text.into());
     }
@@ -176,10 +185,10 @@ fn reference_edit(text: &str, old: &str, new: &str) -> Result<String, String> {
         candidate.replace_range(span, &replacement);
         if let Ok(parsed) = serde_yaml_ng::from_str::<Value>(&candidate) {
             let mut normalized = parsed.clone();
-            rename_refs(&mut normalized, old, new);
+            rename_refs(&mut normalized, old, new, field);
             // Normalization must leave every value outside skills unchanged.
             let mut before = current.clone();
-            rename_refs(&mut before, old, new);
+            rename_refs(&mut before, old, new, field);
             if normalized == before && parsed != current {
                 result = candidate;
                 current = parsed;
@@ -192,7 +201,11 @@ fn reference_edit(text: &str, old: &str, new: &str) -> Result<String, String> {
     Ok(result)
 }
 
-fn collect(root: &Utf8Path, relative: &str, files: &mut Vec<Utf8PathBuf>) -> Result<(), String> {
+pub(crate) fn collect(
+    root: &Utf8Path,
+    relative: &str,
+    files: &mut Vec<Utf8PathBuf>,
+) -> Result<(), String> {
     let path = bounded(root, relative)?;
     if !path.exists() {
         return Ok(());

@@ -1,4 +1,5 @@
 import { useRef, useState } from "react"
+import { toast } from "sonner"
 import { createFileRoute, useRouter } from "@tanstack/react-router"
 import { Button } from "@/components/ui/button"
 import { ListSearch } from "@/components/list-search"
@@ -6,6 +7,7 @@ import { PageHeader } from "@/components/page-header"
 import { ListActions } from "@/components/list-actions"
 import {
   duplicateWorkflow,
+  createWorkflow,
   listWorkflows,
   removeWorkflow,
   requireProject,
@@ -29,12 +31,12 @@ export const Route = createFileRoute("/workflows/")({
   errorComponent: WorkflowsError,
 })
 
-function Header() {
+function Header({ onCreate, creating }: { onCreate?: () => void; creating?: boolean }) {
   return (
     <PageHeader
       title="Workflows"
       description="Reusable process definitions for this project. Open one to edit its settings."
-      action={<NewWorkflowButton />}
+      action={<NewWorkflowButton onClick={onCreate} disabled={creating} />}
     />
   )
 }
@@ -47,6 +49,20 @@ function WorkflowsHome() {
   const [selected, setSelected] = useState<{ root: string; id: string }>()
   const search = useRef<HTMLInputElement>(null)
   const router = useRouter()
+  const [creating, setCreating] = useState(false)
+  async function create() {
+    if (creating) return
+    setCreating(true)
+    try {
+      const id = await createWorkflow(data.root)
+      setSelected({ root: data.root, id })
+      void router.invalidate()
+    } catch (error) {
+      toast.error(`Could not create workflow: ${String(error)}`)
+    } finally {
+      setCreating(false)
+    }
+  }
   const shown = filterWorkflows(workflows, query)
 
   if (data.root !== project.path)
@@ -70,14 +86,14 @@ function WorkflowsHome() {
   if (workflows.length === 0)
     return (
       <div className="flex flex-col gap-6">
-        <Header />
-        <NoWorkflows />
+        <Header onCreate={create} creating={creating} />
+        <NoWorkflows onCreate={create} creating={creating} />
       </div>
     )
 
   return (
     <div className="flex flex-col gap-4">
-      <Header />
+      <Header onCreate={create} creating={creating} />
       <ListSearch
         noun="workflow"
         value={query}

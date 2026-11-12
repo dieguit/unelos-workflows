@@ -134,7 +134,7 @@ fn workflow_edits(project: &Utf8Path, root: &Utf8Path, id: Option<&str>, old: &[
     }
     if !edits.is_empty() {
         // shortcut: run creation is not locked with authoring, add a shared lock before supporting concurrent edits/execution.
-        let runs = crate::list_runs(project).map_err(|e| format!("Cannot inspect stored runs: {e}"))?;
+        let runs = crate::runtime::stored_runs(project).map_err(|e| format!("Cannot inspect stored runs: {e}"))?;
         for (path, _, _) in &edits {
             let id = path.file_stem().ok_or("Invalid workflow filename")?;
             if runs.iter().any(|run| run.workflow_name == id && !run.is_finished()) {

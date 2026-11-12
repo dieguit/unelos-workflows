@@ -82,7 +82,7 @@ fn confirm_current(root: &Utf8Path, state: &unelos_core::RunState, contents: &st
         _ => panic!("expected task work"),
     };
     for output in &record.outputs {
-        fs::write(&output.path, contents).unwrap();
+        fs::write(&output.path, format!("{contents} {}", record.execution_id)).unwrap();
     }
     confirm_outputs(root, &state.run_id, &record.execution_id).unwrap();
 }
@@ -141,6 +141,10 @@ fn completion_routes_a_correction_loop_with_fresh_ids_and_feedback() {
         outputs(&state.history[2].work)[0].path
     );
 
+    confirm_outputs(&root, &state.run_id, "task-4").unwrap();
+    let error = complete(&root, &state.run_id, "task-4", None, None).unwrap_err().to_string();
+    assert!(error.contains("Unchanged outputs"));
+    assert!(error.contains("record in a report how the feedback was addressed"));
     confirm_current(&root, &state, "implementation v1");
     state = complete(&root, &state.run_id, "task-4", None, None).unwrap();
     assert_eq!(execution(&state).execution_id, "task-5");
@@ -379,7 +383,7 @@ fn incompatible_live_bindings_and_missing_successor_skill_do_not_advance() {
 }
 
 #[test]
-fn parallel_completion_requires_only_confirmed_parent_aggregate() {
+fn parallel_completion_requires_confirmed_aggregate_and_worker_reports() {
     let (_temp, root) = project_copy();
     fs::write(
         root.join(".unelos/workflows/implement-feature.yaml"),
@@ -399,6 +403,10 @@ fn parallel_completion_requires_only_confirmed_parent_aggregate() {
     fs::write(&record.outputs[0].path, "aggregate").unwrap();
     assert!(!report.exists());
     confirm_outputs(&root, "parallel-completion", "task-1").unwrap();
+    let confirmed = fs::read(&state_path).unwrap();
+    assert!(complete(&root, &state.run_id, "task-1", None, None).is_err());
+    assert_eq!(fs::read(&state_path).unwrap(), confirmed);
+    fs::write(&report, "worker report").unwrap();
     assert!(complete(&root, &state.run_id, "task-1", None, None)
         .unwrap()
         .is_finished());

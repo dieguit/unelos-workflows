@@ -206,6 +206,72 @@ fn set(object: &CstObject, key: &str, value: CstInputValue) {
     }
 }
 
+pub(crate) fn mcp_text(
+    text: &str,
+    previous: &Value,
+    desired: &Value,
+) -> Result<String, InstallError> {
+    let document = parse_config(text)?;
+    let object = document.object_value().unwrap();
+    for section in ["mcp", "tools"] {
+        let existing = object
+            .get(section)
+            .map(|p| {
+                p.value().and_then(|n| n.as_object()).ok_or_else(|| {
+                    fail(
+                        "invalid_opencode_config",
+                        format!("{section} must be an object"),
+                    )
+                })
+            })
+            .transpose()?;
+        let old = previous[section].as_object().unwrap();
+        let new = desired[section].as_object().unwrap();
+        for (key, value) in old {
+            if let Some(property) = existing.as_ref().and_then(|o| o.get(key)) {
+                if property.value().and_then(|n| n.to_serde_value()).as_ref() != Some(value) {
+                    return Err(fail(
+                        "mcp_collision",
+                        format!("Managed OpenCode {section}.{key} was edited"),
+                    ));
+                }
+            }
+        }
+        for key in new.keys() {
+            if !old.contains_key(key) && existing.as_ref().is_some_and(|o| o.get(key).is_some()) {
+                return Err(fail(
+                    "mcp_collision",
+                    format!("OpenCode {section}.{key} already exists"),
+                ));
+            }
+        }
+        if old.is_empty() && new.is_empty() {
+            continue;
+        }
+        let section_object = if let Some(existing) = existing {
+            existing
+        } else {
+            object.append(section, CstInputValue::Object(vec![]));
+            object
+                .get(section)
+                .unwrap()
+                .value()
+                .unwrap()
+                .as_object()
+                .unwrap()
+        };
+        for key in old.keys().filter(|k| !new.contains_key(*k)) {
+            if let Some(property) = section_object.get(key) {
+                property.remove();
+            }
+        }
+        for (key, value) in new {
+            set(&section_object, key, input(value.clone()));
+        }
+    }
+    Ok(document.to_string())
+}
+
 pub fn configured_text(
     text: &str,
     package: &str,

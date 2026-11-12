@@ -1,3 +1,5 @@
+import { BusyContent } from "@/components/busy-content"
+import { useDelayedFlag } from "@/hooks/use-delayed-flag"
 import { useStore } from "@tanstack/react-form"
 import {
   PanelRightCloseIcon,
@@ -41,11 +43,12 @@ export function MappingInspector({
   onDelete: () => Promise<void>
   onClose: () => void
 }) {
+  const visualBusy = useDelayedFlag(busy)
   const draft = useStore(form.store, (s) => s.values)
   const name = draft.alias || "this alias"
 
   return (
-    <aside
+    <aside inert={busy}
       aria-label={original ? `Alias ${original}` : "New alias"}
       className="flex w-[380px] max-w-full shrink-0 flex-col border-l bg-background"
     >
@@ -69,9 +72,9 @@ export function MappingInspector({
           size="sm"
           type="submit"
           form="mapping-form"
-          disabled={!dirty || busy}
+          disabled={!dirty || visualBusy}
         >
-          {busy ? "Saving…" : original ? "Save" : "Create"}
+          <BusyContent busy={visualBusy}>{original ? "Save" : "Create"}</BusyContent>
         </Button>
         {original ? (
           <Button
@@ -79,7 +82,7 @@ export function MappingInspector({
             size="icon-sm"
             aria-label={`Delete ${original}`}
             title="Delete alias"
-            disabled={busy}
+            disabled={visualBusy}
             onClick={() => {
               const n = usedBy?.length ?? 0
               if (
@@ -99,7 +102,7 @@ export function MappingInspector({
           aria-label="Close panel"
           title="Close panel"
           onClick={onClose}
-          disabled={busy}
+          disabled={visualBusy}
         >
           <PanelRightCloseIcon aria-hidden="true" />
         </Button>
@@ -113,7 +116,7 @@ export function MappingInspector({
           if (dirty && !busy) void form.handleSubmit()
         }}
       >
-        <fieldset disabled={busy} className="min-w-0 disabled:opacity-60">
+        <fieldset disabled={visualBusy} className="min-w-0 disabled:opacity-60">
           <FieldGroup>
             <form.Field name="alias">
               {(field) => {
@@ -256,7 +259,7 @@ export function MappingInspector({
         {error ? (
           <div role="alert" className="flex flex-col items-start gap-2 text-sm text-destructive">
             <p className="[overflow-wrap:anywhere]">{error}</p>
-            <Button type="submit" variant="outline" size="sm" disabled={busy}>Retry</Button>
+            <Button type="submit" variant="outline" size="sm" disabled={visualBusy}>Retry</Button>
           </div>
         ) : null}
       </form>

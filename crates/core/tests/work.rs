@@ -266,29 +266,8 @@ fn composes_deterministic_parallel_workers_with_explicit_paths_and_parent_identi
             .join("parallel-research/backend-researcher/result.md")
             .as_str()
     );
-    let instructions = value["controllerInstructions"].as_str().unwrap();
-    assert!(!instructions.contains("future completion"));
-    for duty in [
-        "Only the controller updates the supplied run ledger",
-        "Dispatch every listed worker",
-        "relay questions and resume the same logical work",
-        "Wait for all reports",
-        "read them",
-        "update aggregate outputs",
-        "in place",
-        "A worker return or question never transitions the Node",
-        "Never complete a blocked or partial parent",
-        "Never use the ledger to derive destinations",
-        "report completion through Unelos",
-        "complete NODE",
-        "unchanged reviewed outputs may be confirmed",
-        "Workers report produced or reviewed outputs to the controller",
-        "Workers never edit the ledger or authorize progression",
-        "Carry relevant conversation context",
-        "Read status for namingPending",
-    ] {
-        assert!(instructions.contains(duty), "missing {duty}");
-    }
+    assert!(value.get("controllerInstructions").is_none());
+    assert!(!value.to_string().contains("complete NODE"));
     assert_eq!(
         serde_json::to_vec(&packet).unwrap(),
         serde_json::to_vec(&build_work_packet(&project, input.clone()).unwrap()).unwrap()
@@ -512,24 +491,10 @@ fn composes_task_gate_and_finished_variants_with_controller_contracts() {
         gate_json["artifacts"][1]["path"],
         root.join("summary").as_str()
     );
-    assert_eq!(
-        gate_json["decisions"],
-        serde_json::json!(["approved", "rejected"])
-    );
-    assert_eq!(gate_json["rejectionReasonRequired"], true);
-    assert!(gate_json.get("taskId").is_none() && gate_json.get("agent").is_none());
-    let gate_instructions = gate_json["controllerInstructions"].as_str().unwrap();
-    for duty in [
-        "Only the controller updates the supplied run ledger",
-        "obtain an explicit user decision",
-        "Require a nonempty rejection reason",
-        "Record the decision through Unelos",
-        "ledger notes do not authorize progression",
-        "Carry relevant conversation context",
-        "Read status for namingPending",
-    ] {
-        assert!(gate_instructions.contains(duty), "missing {duty}");
-    }
+    assert!(gate_json.get("decisions").is_none());
+    assert!(gate_json.get("rejectionReasonRequired").is_none());
+    assert!(gate_json.get("controllerInstructions").is_none());
+    assert!(!gate_json.to_string().contains("complete NODE"));
 
     let finished = build_work_packet(
         &project,
@@ -543,14 +508,12 @@ fn composes_task_gate_and_finished_variants_with_controller_contracts() {
     let finished_json = serde_json::to_value(&finished).unwrap();
     assert_eq!(finished_json["kind"], "finished");
     assert_eq!(finished_json["runId"], "run-1");
-    assert_eq!(finished_json["remainingWork"], false);
+    assert!(finished_json.get("remainingWork").is_none());
     assert_eq!(finished_json["nodeId"], "done");
     assert_eq!(finished_json["ledgerPath"], ledger_path.as_str());
     assert!(finished_json.get("taskId").is_none() && finished_json.get("executor").is_none());
-    assert!(finished_json["controllerInstructions"]
-        .as_str()
-        .unwrap()
-        .contains("final status reported by Unelos"));
+    assert!(finished_json.get("controllerInstructions").is_none());
+    assert!(!finished_json.to_string().contains("complete NODE"));
     assert_ne!(gate_json["kind"], finished_json["kind"]);
 
     let task = build_work_packet(
@@ -575,7 +538,7 @@ fn composes_task_gate_and_finished_variants_with_controller_contracts() {
     let task_json = serde_json::to_value(&task).unwrap();
     assert_eq!(task_json["kind"], "task");
     assert_eq!(task_json["taskId"], "task-plan");
-    assert!(task_json.get("controllerInstructions").is_some());
+    assert!(task_json.get("controllerInstructions").is_none());
     assert_eq!(task_json["feedback"], serde_json::Value::Null);
     assert_eq!(
         serde_json::to_vec(&task)
@@ -590,30 +553,7 @@ fn composes_task_gate_and_finished_variants_with_controller_contracts() {
     assert_eq!(task_json["request"], "Plan it");
     assert_eq!(task_json["outputs"][0]["name"], "plan.md");
     assert_eq!(task_json["taskDefinition"], "plan");
-    assert!(task_json["controllerInstructions"]
-        .as_str()
-        .unwrap()
-        .contains("Read existing declared outputs"));
-    for duty in [
-        "Carry relevant conversation context",
-        "Read status for namingPending",
-        "complete NODE",
-    ] {
-        assert!(task_json["controllerInstructions"]
-            .as_str()
-            .unwrap()
-            .contains(duty));
-    }
-    for forbidden in [
-        "--execution",
-        "separate confirmation",
-        "confirm all parent outputs",
-    ] {
-        assert!(!task_json["controllerInstructions"]
-            .as_str()
-            .unwrap()
-            .contains(forbidden));
-    }
+    assert!(!task_json.to_string().contains("complete NODE"));
     assert_eq!(
         serde_json::to_value(inspect_node(&project, "done").unwrap()).unwrap()["kind"],
         "end"

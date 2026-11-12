@@ -48,8 +48,13 @@ unelos --project /absolute/project install superpowers-dev --opencode v2 --json
 
 Unrelated native agents/configuration and existing run state remain untouched.
 No model is written when unauthored: native subagents inherit the parent model.
-Required tools are not permission grants/allowlists. Unsupported declared MCP
-requirements fail explicitly; third-party Skills/MCP/credentials are not installed.
+Required tools are not permission grants/allowlists. Agent `mcps: [id]` references
+`.unelos/mcps/<id>.yaml` (source packages: `mcps/<id>.yaml`). Local/remote servers
+are projected into project OpenCode config, disabled globally with `<id>_*` and
+enabled only in referencing agent profiles. Missing definitions and user-config
+collisions fail explicitly; reinstall cleans removed references. Environment/header
+values live in project files: use OpenCode `{env:VAR}` substitution for secrets.
+Third-party MCP executables and credentials are not installed.
 An explicit `install --opencode v1|v2` overrides agent generation without changing
 the recorded integration. Without metadata or a flag, install remains core-only.
 Missing recorded integration assets block install with guidance to rerun init.
@@ -69,15 +74,15 @@ separately; keep extracted package files together outside `.opencode/plugins`.
 opencode --standalone /absolute/project
 ```
 
-Enter `/unelos`, select a Workflow and describe the change: it always starts fresh.
+Enter `/unelos` or `/unelos <free text>`, select a Workflow and describe the change: it always starts fresh. Free text is passed as `requestedAction`; only the single words `off` and `resume` are keywords.
 `/unelos resume` lists unfinished runs; selecting one injects its persisted context
 and immediately continues ordinary work. Pending gates still need explicit decisions.
 `/unelos off` disables only this session. Each session binds its own stable run ID;
 independent runs do not isolate edits to shared source files.
 
 Native tools: `unelos_next`, `unelos_start`, `unelos_resume`, `unelos_complete`, `unelos_approve`,
-`unelos_reject`, `unelos_continue`, `unelos_status`, `unelos_inspect`, `unelos_rename`.
-Each calls CLI once. Completion/decisions check full expected identity inside the
+`unelos_reject`, `unelos_status`, `unelos_inspect`, `unelos_rename`.
+V1 inspects workflows before starting; parallel workflows are unavailable and fail with `unsupported_workflow` before run creation. Other tools call CLI once. Completion/decisions check full expected identity inside the
 core runtime lock and return the resulting package. No shell-called JS helper,
 status-then-next loop, worker tracking or per-model-request polling.
 
@@ -88,7 +93,7 @@ relays questions and completes ordinary work. Native return alone is not success
 
 Parallel Nodes (V2 only) supply `workerPrompts[]`, each with its own mapped
 `nativeAgent`. The controller starts every worker with `background=true` in one
-turn, relays a worker's question with `unelos_continue` + `workerKey`, writes the
+turn, relays a worker's question through its native session, writes the
 aggregate itself, then completes the parent with every worker's final frame.
 
 Core validates result frames; gate decisions still require real human intent.

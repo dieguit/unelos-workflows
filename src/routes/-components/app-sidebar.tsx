@@ -22,12 +22,13 @@ import { cn } from "@/lib/utils"
 import { ProjectSelector } from "./project-selector"
 
 export const sections = [
-  { id: "settings", label: "Project settings", icon: SettingsIcon },
   { id: "workflows", label: "Workflows", icon: WorkflowIcon },
   { id: "agents", label: "Agents", icon: BotIcon },
   { id: "skills", label: "Skills", icon: BookOpenIcon },
   { id: "tasks", label: "Tasks", icon: ListTodoIcon },
+  { id: "mcps", label: "MCPs", icon: CableIcon },
   { id: "runs", label: "Runs", icon: HistoryIcon },
+  { id: "settings", label: "Project settings", icon: SettingsIcon },
 ] as const
 
 const rowClass =
@@ -136,6 +137,10 @@ export function AppSidebar() {
         <Link to="/global-tasks" data-section="global-tasks" className={linkClass}>
           <ListTodoIcon aria-hidden="true" className={iconClass} />
           Global tasks
+        </Link>
+        <Link to="/global-mcps" data-section="global-mcps" className={linkClass}>
+          <CableIcon aria-hidden="true" className={iconClass} />
+          Global MCPs
         </Link>
       </nav>
       <footer className="mt-auto flex flex-col gap-0.5 border-t pt-2">

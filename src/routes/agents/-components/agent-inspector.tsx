@@ -1,4 +1,8 @@
+import { BusyContent } from "@/components/busy-content"
+import { useDelayedFlag } from "@/hooks/use-delayed-flag"
 import { useCallback } from "react"
+import { McpPicker } from "./mcp-picker"
+import { Link } from "@tanstack/react-router"
 import { PanelRightCloseIcon, PencilIcon, XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -9,7 +13,7 @@ import {
   FieldLabel,
   FieldTitle,
 } from "@/components/ui/field"
-import { listSkills, type AgentDocument } from "@/lib/projects"
+import { listGlobalMcps, listMcps, listSkills, type AgentDocument } from "@/lib/projects"
 import type { AgentForm } from "../-hooks/use-agent-form"
 import { useLazy } from "@/hooks/use-lazy"
 import { AgentModelPicker } from "./model-picker"
@@ -44,10 +48,16 @@ export function AgentInspector({
   onClose: () => void
   onRetry: () => void
 }) {
+  const visualSaving = useDelayedFlag(saving)
   const fetchSkills = useCallback(() => listSkills(root), [root])
   const skills = useLazy(fetchSkills)
+  const fetchMcps = useCallback(async () => {
+    const [project, global] = await Promise.all([listMcps(root), listGlobalMcps()])
+    return [...project, ...global.map((m) => ({ ...m, name: `global/${m.name}` }))]
+  }, [root])
+  const mcps = useLazy(fetchMcps)
   return (
-    <aside
+    <aside inert={saving}
       aria-label={originalId ? `Agent ${originalId}` : "New Agent"}
       className="flex w-[380px] max-w-full shrink-0 flex-col border-l bg-background"
     >
@@ -69,16 +79,16 @@ export function AgentInspector({
           size="sm"
           type="submit"
           form="agent-form"
-          disabled={!dirty || saving || editing}
+          disabled={!dirty || visualSaving || editing}
         >
-          {saving ? "Saving…" : "Save"}
+          <BusyContent busy={visualSaving}>Save</BusyContent>
         </Button>
         <Button
           variant="ghost"
           size="icon-sm"
           aria-label="Close panel"
           title="Close panel"
-          disabled={saving}
+          disabled={visualSaving}
           onClick={onClose}
         >
           <PanelRightCloseIcon aria-hidden="true" />
@@ -110,7 +120,7 @@ export function AgentInspector({
             }}
           >
             <fieldset
-              disabled={saving || editing}
+              disabled={visualSaving || editing}
               className="min-w-0 disabled:opacity-60"
             >
               <FieldGroup className="gap-4">
@@ -226,28 +236,52 @@ export function AgentInspector({
                     </Field>
                   )}
                 </form.Field>
-                <Field>
-                  <FieldTitle>MCPs</FieldTitle>
-                  {draft.mcps.length ? (
-                    <ul className="space-y-1 text-sm text-foreground-dim">
-                      {draft.mcps.map((mcp, i) => (
-                        <li
-                          key={`${i}-${mcp}`}
-                          className="[overflow-wrap:anywhere]"
-                        >
-                          {mcp}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">
-                      Not configured
-                    </p>
+                <form.Field name="mcps" mode="array">
+                  {(field) => (
+                    <Field onBlur={field.handleBlur}>
+                      <FieldTitle>MCPs</FieldTitle>
+                      {field.state.value.length ? (
+                        <ul className="flex flex-wrap gap-1.5">
+                          {field.state.value.map((mcp, i) => (
+                            <li
+                              key={`${i}-${mcp}`}
+                              className="flex h-7 min-w-0 items-center gap-1 rounded-md border pr-0.5 pl-1.5 font-mono text-xs"
+                            >
+                              <Link
+                                to={mcp.startsWith("global/") ? "/global-mcps" : "/mcps"}
+                                search={{ mcp: mcp.startsWith("global/") ? mcp.slice(7) : mcp }}
+                                className="min-w-0 flex-1 truncate text-sm hover:underline"
+                                title={mcp.startsWith("global/") ? "Open in Global MCPs" : "Open in MCPs"}
+                              >
+                                {mcp}
+                              </Link>
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                aria-label={`Remove ${mcp}`}
+                                onClick={() => field.removeValue(i)}
+                              >
+                                <XIcon aria-hidden="true" />
+                              </Button>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">
+                          Not configured
+                        </p>
+                      )}
+                      <McpPicker
+                        mcps={mcps.data}
+                        error={mcps.error}
+                        taken={field.state.value}
+                        onOpen={mcps.load}
+                        onPick={(mcp) => field.pushValue(mcp)}
+                      />
+
+                    </Field>
                   )}
-                  <p className="text-xs text-muted-foreground">
-                    Read-only for now.
-                  </p>
-                </Field>
+                </form.Field>
               </FieldGroup>
             </fieldset>
             {saveError ? (
@@ -266,7 +300,7 @@ export function AgentInspector({
                   variant="outline"
                   size="sm"
                   type="submit"
-                  disabled={saving || editing}
+                  disabled={visualSaving || editing}
                 >
                   Retry
                 </Button>

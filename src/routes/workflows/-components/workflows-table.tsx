@@ -2,11 +2,6 @@ import { PlusIcon } from "lucide-react"
 import type { ReactNode } from "react"
 import { Button } from "@/components/ui/button"
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
-import {
   ListBody,
   ListCell,
   ListHead,
@@ -18,16 +13,11 @@ import {
 } from "@/components/list-table"
 import type { WorkflowSummary } from "@/lib/projects"
 
-export function NewWorkflowButton() {
+export function NewWorkflowButton({ onClick, disabled }: { onClick?: () => void; disabled?: boolean }) {
   return (
-    <Tooltip>
-      <TooltipTrigger render={<span tabIndex={0} />}>
-        <Button data-new-workflow disabled>
-          <PlusIcon /> New workflow
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>Coming soon</TooltipContent>
-    </Tooltip>
+    <Button data-new-workflow disabled={disabled || !onClick} onClick={onClick}>
+      <PlusIcon /> New workflow
+    </Button>
   )
 }
 

@@ -68,6 +68,20 @@ pub fn validate_project(
                         &worker.task,
                         &worker.agent,
                     )?;
+                    let worker_field = format!("{field}.tasks[{index}]");
+                    let (definition, _) = project.selected_task(&worker.task, &worker_field)?;
+                    if !definition.outcomes.is_empty() {
+                        return Err(error(
+                            &format!("{worker_field}.task"),
+                            "parallel worker Tasks must declare no outcomes".into(),
+                        ));
+                    }
+                }
+                if !matches!(parallel.next, Transition::Single(_)) {
+                    return Err(error(
+                        &format!("{field}.next"),
+                        "parallel next must be a single successor".into(),
+                    ));
                 }
                 validate_transition(project, &field, &parallel.next)?;
                 (&parallel.inputs, &parallel.outputs[..])
@@ -134,7 +148,7 @@ fn validate_references(
         return Err(ProjectValidationError {
             path: project.workflow_source.clone(),
             field: format!("{field}.agent"),
-            cause: format!("unknown Agent {agent:?}"),
+            cause: if agent.trim().is_empty() { "Pick an agent".into() } else { format!("unknown Agent {agent:?}") },
         });
     }
     Ok(())

@@ -1,3 +1,5 @@
+import { BusyContent } from "@/components/busy-content"
+import { useDelayedFlag } from "@/hooks/use-delayed-flag"
 import { useCallback } from "react"
 import { useStore } from "@tanstack/react-form"
 import { PanelRightCloseIcon, PencilIcon, PlusIcon, XIcon } from "lucide-react"
@@ -53,11 +55,12 @@ export function TaskInspector({
   onOutcomeAdd: () => void
   onOutcomeRemove: (index: number) => void
 }) {
+  const visualSaving = useDelayedFlag(saving)
   const noSkills = useCallback(() => Promise.resolve([] as SkillSummary[]), [])
   const skills = useLazy(fetchSkills ?? noSkills)
   const attempted = useStore(form.store, (s) => s.submissionAttempts > 0)
   return (
-    <aside
+    <aside inert={saving}
       aria-label={originalId ? `Task ${originalId}` : "New Task"}
       className="flex w-[380px] max-w-full shrink-0 flex-col border-l bg-background"
     >
@@ -79,16 +82,16 @@ export function TaskInspector({
           size="sm"
           type="submit"
           form="task-form"
-          disabled={!dirty || saving || editing}
+          disabled={!dirty || visualSaving || editing}
         >
-          {saving ? "Saving…" : "Save"}
+          <BusyContent busy={visualSaving}>Save</BusyContent>
         </Button>
         <Button
           variant="ghost"
           size="icon-sm"
           aria-label="Close panel"
           title="Close panel"
-          disabled={saving}
+          disabled={visualSaving}
           onClick={onClose}
         >
           <PanelRightCloseIcon aria-hidden="true" />
@@ -120,7 +123,7 @@ export function TaskInspector({
             }}
           >
             <fieldset
-              disabled={saving || editing}
+              disabled={visualSaving || editing}
               className="min-w-0 disabled:opacity-60"
             >
               <FieldGroup className="gap-4">
@@ -338,7 +341,7 @@ export function TaskInspector({
                   variant="outline"
                   size="sm"
                   type="submit"
-                  disabled={saving || editing}
+                  disabled={visualSaving || editing}
                 >
                   Retry
                 </Button>

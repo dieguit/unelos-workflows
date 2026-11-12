@@ -15,10 +15,12 @@ mod gates;
 mod rename;
 mod resume;
 mod store;
+mod runs_ui;
+pub use runs_ui::{delete_run, get_run, list_runs, read_run_artifact, RunDetails, RunListItem};
 
 pub use commands::{approve_node, complete_node, reject_node};
 pub use completion::complete;
-pub use execution::{execution_continue, execution_mutate, execution_next, execution_start};
+pub use execution::{execution_mutate, execution_next, execution_start};
 pub use gates::{approve, reject};
 pub use rename::rename_run;
 pub use resume::{execution_new, execution_resume, execution_runs};
@@ -26,6 +28,10 @@ pub use resume::{execution_new, execution_resume, execution_runs};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<u64>,
     pub run_id: String,
     pub name: String,
     pub workflow_name: String,
@@ -92,6 +98,12 @@ pub struct ExecutionRecord {
     pub inputs: Vec<ArtifactReference>,
     pub outputs: Vec<ArtifactReference>,
     pub worker_reports: Vec<WorkerReportBinding>,
+    #[serde(default)]
+    pub output_digests: std::collections::BTreeMap<Utf8PathBuf, Option<String>>,
+    #[serde(default)]
+    pub worker_receipts: std::collections::BTreeMap<String, crate::WorkerResult>,
+    #[serde(default)]
+    pub invalid_worker_results: u32,
     pub feedback: Option<TransitionFeedback>,
     #[serde(default)]
     pub confirmed_execution_id: Option<String>,
@@ -182,6 +194,24 @@ pub(crate) fn valid_run_name(name: &str) -> bool {
         )
 }
 
+pub(crate) fn slugify_run_name(input: &str) -> Result<String, RuntimeError> {
+    let mut name = input
+        .to_ascii_lowercase()
+        .split(|c: char| !c.is_ascii_lowercase() && !c.is_ascii_digit())
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    name.truncate(64);
+    name = name.trim_end_matches('-').into();
+    if name.is_empty() {
+        return Err(RuntimeError::InvalidName { name: input.into() });
+    }
+    if !valid_run_name(&name) {
+        name.push_str("-run");
+    }
+    Ok(name)
+}
+
 pub(crate) fn path_error(path: &Utf8Path, source: std::io::Error) -> RuntimeError {
     RuntimeError::Io {
         path: path.to_owned(),
@@ -190,13 +220,11 @@ pub(crate) fn path_error(path: &Utf8Path, source: std::io::Error) -> RuntimeErro
 }
 
 pub fn start(project: &LoadedProject, name: &str, request: &str) -> Result<RunState, RuntimeError> {
-    if !valid_run_name(name) {
-        return Err(RuntimeError::InvalidName { name: name.into() });
-    }
+    let name = slugify_run_name(name)?;
     crate::validate_project(project)?;
     let store = store::RunStore::open(&project.project_root)?;
-    store.ensure_start_available(Some(name))?;
-    start_prepared(project, name, name, request, false, &store)
+    store.ensure_start_available(Some(&name))?;
+    start_prepared(project, &name, &name, request, false, &store)
 }
 
 pub fn start_workflow(
@@ -204,17 +232,13 @@ pub fn start_workflow(
     workflow: &str,
     name: Option<&str>,
 ) -> Result<RunState, RuntimeError> {
-    if let Some(name) = name {
-        if !valid_run_name(name) {
-            return Err(RuntimeError::InvalidName { name: name.into() });
-        }
-    }
+    let name = name.map(slugify_run_name).transpose()?;
     let project = crate::load_project(root, workflow)?;
     crate::validate_project(&project)?;
     let store = store::RunStore::open(&project.project_root)?;
-    store.ensure_start_available(name)?;
+    store.ensure_start_available(name.as_deref())?;
     let run_id = store.allocate_run_id()?;
-    let run_name = name.unwrap_or(&run_id);
+    let run_name = name.as_deref().unwrap_or(&run_id);
     start_prepared(&project, &run_id, run_name, "", name.is_none(), &store)
 }
 
@@ -230,7 +254,7 @@ fn start_prepared(
     store.publish(&state, |run| {
         artifacts::prepare_work_directories(&state, run)
     })?;
-    Ok(state)
+    store.run(run_id)
 }
 
 fn prepare_start_state(
@@ -243,6 +267,8 @@ fn prepare_start_state(
     let node_id = &project.workflow.start;
     check_component(node_id, "Node")?;
     let state = RunState {
+        started_at: None,
+        updated_at: None,
         run_id: run_id.into(),
         name: name.into(),
         workflow_name: project.workflow.name.clone(),
@@ -268,7 +294,7 @@ pub fn prepare_work(
     artifacts::prepare_work(project, state, node_id, feedback)
 }
 
-pub fn list_runs(project_root: &Utf8Path) -> Result<Vec<RunState>, RuntimeError> {
+pub(crate) fn stored_runs(project_root: &Utf8Path) -> Result<Vec<RunState>, RuntimeError> {
     store::RunStore::open(project_root)?.runs()
 }
 
@@ -293,7 +319,7 @@ pub fn confirm_outputs(
         }
     };
     for output in &record.outputs {
-        artifacts::require_regular_file(&output.path).map_err(|cause| {
+        artifacts::require_nonempty_file(&output.path).map_err(|cause| {
             RuntimeError::InvalidState(format!(
                 "declared output {:?} at {} is unavailable: {cause}",
                 output.name, output.path
@@ -302,7 +328,7 @@ pub fn confirm_outputs(
     }
     record.confirmed_execution_id = Some(expected_execution_id.into());
     store.update(&state)?;
-    Ok(state)
+    store.run(&state.run_id)
 }
 
 pub fn verify_outputs(
@@ -323,7 +349,7 @@ pub fn verify_work_outputs(
 ) -> Result<(), RuntimeError> {
     let root = crate::project::absolute_root(project_root)
         .map_err(|source| path_error(project_root, source))?;
-    let run_path = root.join(".unelos/runs").join(&state.name);
+    let run_path = root.join(".unelos/runs").join(&state.run_id);
     store::validate_state(state)?;
     store::validate_artifacts(state, &run_path)?;
     state.expect_execution(expected_execution_id)?;
@@ -340,14 +366,19 @@ pub fn verify_work_outputs(
             "outputs for execution {expected_execution_id:?} have not been confirmed"
         )));
     }
-    for output in &record.outputs {
-        artifacts::require_regular_file(&output.path).map_err(|cause| {
+    for output in record
+        .outputs
+        .iter()
+        .chain(record.worker_reports.iter().map(|r| &r.report))
+    {
+        artifacts::require_nonempty_file(&output.path).map_err(|cause| {
             RuntimeError::InvalidState(format!(
                 "declared output {:?} at {} is unavailable: {cause}",
                 output.name, output.path
             ))
         })?;
     }
+    artifacts::verify_freshness(record)?;
     Ok(())
 }
 
@@ -379,7 +410,7 @@ fn packet_for_snapshot(
                 ledger_path: project
                     .project_root
                     .join(".unelos/runs")
-                    .join(&state.name)
+                    .join(&state.run_id)
                     .join("ledger.md"),
             };
             return Ok(crate::build_work_packet(project, input)?);
@@ -396,7 +427,7 @@ fn packet_for_snapshot(
     let ledger_path = project
         .project_root
         .join(".unelos/runs")
-        .join(&state.name)
+        .join(&state.run_id)
         .join("ledger.md");
     let input = match (&state.current, node) {
         (CurrentWork::Task(_), NodeDefinition::Task(task)) => {
@@ -608,6 +639,8 @@ mod tests {
 
     fn state() -> RunState {
         RunState {
+            started_at: None,
+            updated_at: None,
             run_id: "qa-run".into(),
             name: "qa-run".into(),
             workflow_name: "implement-feature".into(),
@@ -643,6 +676,9 @@ mod tests {
             inputs: vec![],
             outputs: vec![],
             worker_reports: vec![],
+            output_digests: Default::default(),
+            worker_receipts: Default::default(),
+            invalid_worker_results: 0,
             feedback: None,
             confirmed_execution_id: None,
         });
@@ -671,6 +707,9 @@ mod tests {
             inputs: vec![],
             outputs: vec![],
             worker_reports: vec![],
+            output_digests: Default::default(),
+            worker_receipts: Default::default(),
+            invalid_worker_results: 0,
             feedback: None,
             confirmed_execution_id: None,
         });

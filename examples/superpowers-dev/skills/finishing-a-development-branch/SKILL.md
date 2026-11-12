@@ -130,6 +130,7 @@ This path exists only as a response to an explicit request to throw the
 work away. Confirm first:
 
 List what will be permanently deleted (branch, all commits, worktree path) and say: "Type 'discard' to confirm."
+This literal confirmation is a deliberate destructive-action exception.
 
 Wait for that exact confirmation. When it arrives:
 

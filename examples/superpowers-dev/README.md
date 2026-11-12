@@ -13,14 +13,16 @@ The workflow YAML `description` appears beside its name in `/unelos`:
 
 | Step | Runs as | Output / decision |
 | --- | --- | --- |
-| `brainstorm` | Controller (main) | `spec.md`: agreed design, self-reviewed |
+| `brainstorm` | Controller (main) | `spec.md`: agreed design; outcome `check` → spec-check (projects), `ready` → approve-spec |
+| `spec-check` | Builder-check subagent | `builder-questions.md`: what a cold builder would have to ask → brainstorm |
 | `approve-spec` | Human gate | Approved → plan; rejected → revise spec |
 | `write-plan` | Controller (main) | `plan.md`: tasks with exact code and commands |
 | `approve-plan` | Human gate | Approved → worktree; rejected → revise plan |
 | `setup-worktree` | Controller (main) | `worktree.md`: worktree, branch, base branch, merge-base, green baseline, preflight rulings |
 | `implement-task` | Implementer subagent | `implementation-report.md`: one task or one fix round appended |
 | `review-task` | Task reviewer subagent | `review.md`: full task review, or scoped re-review of a fix round |
-| `advance` | Controller (main) | `progress.md`; outcome `fix` / `next_task` → implement-task, `all_done` → final-review |
+| `advance` | Controller (main) | `progress.md`; outcome `fix` / `next_task` → implement-task, `escalate` → escalate-task, `all_done` → final-review |
+| `escalate-task` | Escalation implementer subagent | `escalation-report.md`: fix rounds 4-5 on a stronger model → review-task |
 | `final-review` | Final reviewer subagent | `final-review.md`: whole branch from merge-base; scoped re-review of the fix wave on return |
 | `advance-final` | Controller (main) | `final-rulings.md`; outcome `final_fix` → fix-final, `finish` → finish |
 | `fix-final` | Implementer subagent | `final-fix-report.md`: one wave for all must-fix findings → final-review |
@@ -34,6 +36,8 @@ superpowers-dev/
 ├── workflows/superpowers-dev.yaml
 ├── agents/
 │   ├── sp-controller/{agent.yaml,instructions.md}
+│   ├── sp-builder-check/{agent.yaml,instructions.md}
+│   ├── sp-implementer-escalation/{agent.yaml,instructions.md}
 │   ├── sp-implementer/{agent.yaml,instructions.md}
 │   ├── sp-task-reviewer/{agent.yaml,instructions.md}
 │   └── sp-final-reviewer/{agent.yaml,instructions.md}
@@ -60,14 +64,17 @@ attribution header. Installed projects keep these folders under `.unelos/`.
 
 Each artifact has one producer node. Loop state that cannot be a declared input
 travels as transition feedback: `progress.md` reaches `implement-task` and
-`final-fix-report.md` reaches `final-review` re-reviews via transition feedback.
+`escalate-task`, `builder-questions.md` reaches `brainstorm`,
+`escalation-report.md` reaches `review-task`, and `final-fix-report.md` reaches
+`final-review` re-reviews.
 `implement-task` reads `## Open findings` and `## Carry forward` from `progress.md`;
 rulings under Carry forward bind over the plan text. With no `progress.md` feedback it
 implements Task 1. Reports and reviews are appended in place across visits.
 
-Fix rounds are capped at 5 per task; at the cap `advance` adjudicates the remaining
-findings (park with a ruling, or rule the smallest unblocking change) and the task
-counts as complete. The final loop allows one fix wave. Rulings are collected at
+Fix rounds are capped at 5 per task: rounds 1-3 go to `sp-implementer`, rounds 4-5
+escalate to `sp-implementer-escalation` with fresh context. At the cap `advance`
+adjudicates the remaining findings (park with a ruling, or rule the smallest
+unblocking change) and the task counts as complete. The final loop allows one fix wave. Rulings are collected at
 `finish` in "Rulings I made".
 
 The implementer's `DONE` / `DONE_WITH_CONCERNS` are status lines in its report; the
@@ -109,8 +116,13 @@ configuration and runs are preserved.
 
 ## Models
 
-`model:` is unset in every agent. Set `model:` in `agents/sp-final-reviewer/agent.yaml`
-to the strongest available model, and a cheaper one in `agents/sp-implementer/agent.yaml`.
+`model:` is unset in every agent, so each inherits the session model. Use the least
+powerful model that handles each role: the strongest available for
+`agents/sp-final-reviewer/agent.yaml`; a fast cheap one for
+`agents/sp-implementer/agent.yaml` (well-specified plan tasks are mostly mechanical);
+mid tier for `sp-task-reviewer` and `sp-builder-check`; and at least one tier above the
+implementer for `sp-implementer-escalation`. Very cheap models often take 2-3× the
+turns, which can cost more than they save.
 
 ## Interactive walkthrough (V2)
 
@@ -120,7 +132,8 @@ opencode --standalone /absolute/path/to/your/project
 
 1. Enter `/unelos`; select **superpowers-dev**. The controller asks what needs to
    be done if you have not already described it.
-2. Brainstorm with the controller and agree the design. It writes `spec.md`.
+2. Brainstorm with the controller: it reads the project first, asks only questions
+   whose answers change what gets built, lays out approaches, then writes `spec.md`.
 3. Approve or reject the spec at the gate. Conversation approval is not gate approval.
 4. Review the plan the same way; approve it at the gate.
 5. The controller sets up an isolated worktree. From here the task loop runs
@@ -140,9 +153,10 @@ observed versions and acceptance status.
 
 ## Deliberate simplifications
 
-- No model escalation after repeated fix rounds; each agent's model is fixed.
-  Add an `sp-implementer-escalation` agent and an `escalate` outcome if needed.
 - No per-task brief or review-package files; `plan.md`, `progress.md` and git
   ranges replace them.
+- No Native (inline, no per-task review) execution mode; every run uses per-task review.
 - No implementer resume across fix rounds: each fix round is a fresh worker that
   reads the report file.
+- Small same-shape tasks are batched by the controller at preflight (`Current: Tasks N-M`),
+  not by a separate node.

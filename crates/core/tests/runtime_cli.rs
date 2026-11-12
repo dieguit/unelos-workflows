@@ -128,7 +128,7 @@ fn starts_after_finish_allocate_distinct_ids() {
 fn collisions_and_second_unfinished_start_preserve_the_first_run() {
     let (_temp, root) = project_copy();
     let state = start_workflow(&root, "implement-feature", Some("first")).unwrap();
-    let state_path = root.join(".unelos/runs/first/state.json");
+    let state_path = root.join(".unelos/runs").join(&state.run_id).join("state.json");
     let saved = fs::read(&state_path).unwrap();
     assert!(start_workflow(&root, "implement-feature", Some("second")).is_ok());
     assert_eq!(fs::read(state_path).unwrap(), saved);
@@ -155,13 +155,14 @@ fn allocation_skips_legacy_generated_id_and_corrupt_counter_does_not_publish() {
     let mut saved: serde_json::Value =
         serde_json::from_slice(&fs::read(&state_path).unwrap()).unwrap();
     saved["runId"] = "r-000001".into();
-    fs::write(state_path, serde_json::to_vec(&saved).unwrap()).unwrap();
+    fs::write(&state_path, serde_json::to_vec(&saved).unwrap()).unwrap();
+    fs::rename(root.join(".unelos/runs/legacy"), root.join(".unelos/runs/r-000001")).unwrap();
     let generated = start_workflow(&root, "finished", None).unwrap();
     assert_ne!(generated.run_id, "r-000001");
 
     let before = fs::read(
         root.join(".unelos/runs")
-            .join(&generated.name)
+            .join(&generated.run_id)
             .join("state.json"),
     )
     .unwrap();
@@ -170,7 +171,7 @@ fn allocation_skips_legacy_generated_id_and_corrupt_counter_does_not_publish() {
     assert_eq!(
         fs::read(
             root.join(".unelos/runs")
-                .join(&generated.name)
+                .join(&generated.run_id)
                 .join("state.json")
         )
         .unwrap(),
@@ -186,6 +187,9 @@ fn node_completion_confirms_outputs_and_waits_for_gate() {
     let CurrentWork::Task(record) = &started.current else {
         panic!("task");
     };
+    let before = progression_bytes(&root, &started.run_id);
+    assert!(complete_node(&root, &started.run_id, "plan", None).is_err());
+    assert_progression_unchanged(&root, &started.run_id, &before);
     fs::write(&record.outputs[0].path, "plan").unwrap();
     let gate = complete_node(&root, &started.run_id, "plan", None).unwrap();
     assert!(matches!(gate.current, CurrentWork::HumanGate(_)));
@@ -200,15 +204,15 @@ fn rejected_completion_does_not_persist_output_confirmation() {
         panic!("task");
     };
     fs::write(&record.outputs[0].path, "plan").unwrap();
-    let before = progression_bytes(&root, &started.name);
+    let before = progression_bytes(&root, &started.run_id);
     assert!(complete_node(&root, &started.run_id, "plan", Some("approved")).is_err());
-    assert_progression_unchanged(&root, &started.name, &before);
+    assert_progression_unchanged(&root, &started.run_id, &before);
     assert!(matches!(
         complete_node(&root, &started.run_id, "implement", None),
         Err(unelos_core::RuntimeError::WrongNode { expected, current })
             if expected == "implement" && current == "plan"
     ));
-    assert_progression_unchanged(&root, &started.name, &before);
+    assert_progression_unchanged(&root, &started.run_id, &before);
     assert_eq!(status(&root, &started.run_id).unwrap(), started);
 }
 
@@ -225,6 +229,9 @@ fn node_completion_accepts_parallel_work() {
         panic!("parallel")
     };
     fs::write(&record.outputs[0].path, "summary").unwrap();
+    let before = progression_bytes(&root, &started.run_id);
+    assert!(complete_node(&root, &started.run_id, "parallel", None).is_err());
+    assert_progression_unchanged(&root, &started.run_id, &before);
     fs::write(&record.worker_reports[0].report.path, "worker result").unwrap();
     let finished = complete_node(&root, &started.run_id, "parallel", None).unwrap();
     assert!(finished.is_finished());
@@ -240,35 +247,35 @@ fn node_operations_follow_feedback_loop_and_reject_invalid_mutations_atomically(
         panic!("plan task")
     };
     let plan_path = plan.outputs[0].path.clone();
-    let before = progression_bytes(&root, "task");
+    let before = progression_bytes(&root, "r-000001");
     assert!(complete_node(&root, &state.run_id, "implement", None).is_err());
-    assert_progression_unchanged(&root, "task", &before);
+    assert_progression_unchanged(&root, "r-000001", &before);
     assert!(complete_node(&root, &state.run_id, "plan", None).is_err());
-    assert_progression_unchanged(&root, "task", &before);
+    assert_progression_unchanged(&root, "r-000001", &before);
     fs::create_dir_all(&plan_path).unwrap();
     assert!(complete_node(&root, &state.run_id, "plan", None).is_err());
-    assert_progression_unchanged(&root, "task", &before);
+    assert_progression_unchanged(&root, "r-000001", &before);
     fs::remove_dir(&plan_path).unwrap();
 
     fs::write(&plan_path, "plan").unwrap();
     state = complete_node(&root, &state.run_id, "plan", None).unwrap();
-    let gate_before = progression_bytes(&root, "task");
+    let gate_before = progression_bytes(&root, "r-000001");
     assert!(matches!(state.current, CurrentWork::HumanGate(_)));
     assert!(complete_node(&root, &state.run_id, "approve-plan", None).is_err());
     assert_eq!(status(&root, &state.run_id).unwrap(), state);
-    assert_progression_unchanged(&root, "task", &gate_before);
+    assert_progression_unchanged(&root, "r-000001", &gate_before);
     fs::remove_file(&plan_path).unwrap();
     assert!(approve_node(&root, &state.run_id, "approve-plan").is_err());
     assert_eq!(status(&root, &state.run_id).unwrap(), state);
-    assert_progression_unchanged(&root, "task", &gate_before);
+    assert_progression_unchanged(&root, "r-000001", &gate_before);
     fs::write(&plan_path, "plan").unwrap();
     for reason in ["  ", "\u{2003}"] {
         assert!(reject_node(&root, &state.run_id, "approve-plan", reason).is_err());
         assert_eq!(status(&root, &state.run_id).unwrap(), state);
-        assert_progression_unchanged(&root, "task", &gate_before);
+        assert_progression_unchanged(&root, "r-000001", &gate_before);
     }
     assert!(approve_node(&root, &state.run_id, "plan").is_err());
-    assert_progression_unchanged(&root, "task", &gate_before);
+    assert_progression_unchanged(&root, "r-000001", &gate_before);
     state = reject_node(&root, &state.run_id, "approve-plan", "  revise plan  ").unwrap();
     assert_eq!(
         state.history.last().unwrap().reason.as_deref(),
@@ -295,15 +302,15 @@ fn node_operations_follow_feedback_loop_and_reject_invalid_mutations_atomically(
         panic!("review")
     };
     let review_path = review.outputs[0].path.clone();
-    let missing_output_before = progression_bytes(&root, "task");
+    let missing_output_before = progression_bytes(&root, "r-000001");
     assert!(complete_node(&root, &state.run_id, "review", None).is_err());
-    assert_progression_unchanged(&root, "task", &missing_output_before);
+    assert_progression_unchanged(&root, "r-000001", &missing_output_before);
     fs::write(&review_path, "review").unwrap();
-    let invalid_outcome_before = progression_bytes(&root, "task");
+    let invalid_outcome_before = progression_bytes(&root, "r-000001");
     assert!(complete_node(&root, &state.run_id, "review", None).is_err());
-    assert_progression_unchanged(&root, "task", &invalid_outcome_before);
+    assert_progression_unchanged(&root, "r-000001", &invalid_outcome_before);
     assert!(complete_node(&root, &state.run_id, "review", Some("unknown")).is_err());
-    assert_progression_unchanged(&root, "task", &invalid_outcome_before);
+    assert_progression_unchanged(&root, "r-000001", &invalid_outcome_before);
     assert_eq!(status(&root, &state.run_id).unwrap(), state);
     state = complete_node(&root, &state.run_id, "review", Some("changes_requested")).unwrap();
     let CurrentWork::Task(implement) = &state.current else {
@@ -321,7 +328,7 @@ fn node_operations_follow_feedback_loop_and_reject_invalid_mutations_atomically(
     assert!(state.is_finished());
     assert_eq!(state.history.len(), 8);
     assert_eq!(fs::read_to_string(review_path).unwrap(), "review");
-    let saved = progression_bytes(&root, "task");
+    let saved = progression_bytes(&root, "r-000001");
     assert!(complete_node(&root, &state.run_id, "review", Some("approved")).is_err());
-    assert_progression_unchanged(&root, "task", &saved);
+    assert_progression_unchanged(&root, "r-000001", &saved);
 }

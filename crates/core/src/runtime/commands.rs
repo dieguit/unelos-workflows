@@ -98,8 +98,8 @@ fn commit(
 ) -> Result<RunState, RuntimeError> {
     artifacts::prepare_work_directories(
         &candidate,
-        &project.project_root.join(".unelos/runs").join(&state.name),
+        &project.project_root.join(".unelos/runs").join(&state.run_id),
     )?;
     store.update(&candidate)?;
-    Ok(candidate)
+    store.run(&candidate.run_id)
 }

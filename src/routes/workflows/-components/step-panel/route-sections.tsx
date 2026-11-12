@@ -6,8 +6,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import type { WorkflowStep } from "@/lib/projects"
 import type { WorkflowForm } from "../../-hooks/use-workflow-form"
 import { StepPicker } from "../step-picker"
-import { ErrorText, InlineAdd, RemoveButton, rowFrame, Section, shown } from "./panel-ui"
-import { reassignRoute } from "../../-lib/step-edit"
+import { ErrorText, InlineAdd, RemoveButton, rowFrame, Section, shown } from "@/components/step-panel/panel-ui"
+import { reassignRoute } from "@/lib/step-edit"
 
 type Props = { form: WorkflowForm; index: number; showErrors: boolean }
 

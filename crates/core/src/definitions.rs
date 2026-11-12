@@ -176,9 +176,11 @@ fn present_string<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<S
     strict_string(deserializer).map(Some)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct ProjectSettings {}
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ProjectSettings {
+    pub auto_build_harness: Option<bool>,
+}
 
 pub fn parse_project_settings(
     source: &str,
@@ -493,7 +495,7 @@ struct TaskNodeWire {
     task: Option<String>,
     #[serde(default, rename = "taskDefinition", deserialize_with = "present_task")]
     task_definition: Option<TaskDefinition>,
-    #[serde(deserialize_with = "strict_string")]
+    #[serde(default, deserialize_with = "strict_string")]
     agent: String,
     #[serde(default)]
     execution: Execution,
