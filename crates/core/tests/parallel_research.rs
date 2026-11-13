@@ -9,7 +9,13 @@ fn fixture() -> (TempDir, Utf8PathBuf) {
     let root = Utf8Path::from_path(temp.path()).unwrap().to_owned();
     install_workflow(
         &root,
-        Some(&Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/parallel-research")),
+        Some(
+            &Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join("..")
+                .join("examples")
+                .join("parallel-research"),
+        ),
         WORKFLOW,
     )
     .unwrap();
@@ -57,7 +63,11 @@ fn parallel_packet(root: &Utf8Path) -> WorkPacket {
                 feedback: record.feedback.clone(),
             },
             worker_reports: record.worker_reports.clone(),
-            ledger_path: root.join(".unelos/runs/parallel-check/ledger.md"),
+            ledger_path: root
+                .join(".unelos")
+                .join("runs")
+                .join("parallel-check")
+                .join("ledger.md"),
         },
     )
     .unwrap()
@@ -91,9 +101,13 @@ fn frames(values: &[serde_json::Value]) -> String {
 #[test]
 fn parallel_first_start_renders_worker_prompts_without_brief() {
     let (_temp, root) = fixture();
-    let path = root.join(".unelos/workflows/parallel-research.yaml");
+    let path = root
+        .join(".unelos")
+        .join("workflows")
+        .join("parallel-research.yaml");
     let yaml = std::fs::read_to_string(&path)
         .unwrap()
+        .replace("\r\n", "\n")
         .replace("start: scope", "start: parallel-research")
         .replace("    inputs: [brief.md]\n", "");
     std::fs::write(path, yaml).unwrap();
@@ -304,18 +318,22 @@ fn parallel_package_binds_flat_readable_paths() {
     }
     assert_eq!(packet["kind"], "parallel");
     assert_eq!(package.worker_prompts.len(), 2);
-    let run = root.join(".unelos/runs/r-000001/parallel-research");
+    let run = root
+        .join(".unelos")
+        .join("runs")
+        .join("r-000001")
+        .join("parallel-research");
     assert_eq!(
         packet["outputs"][0]["path"],
         run.join("research-summary.md").as_str()
     );
     assert_eq!(
         packet["workers"][0]["outputs"][0]["path"],
-        run.join("backend-researcher/result.md").as_str()
+        run.join("backend-researcher").join("result.md").as_str()
     );
     assert_eq!(
         packet["workers"][1]["outputs"][0]["path"],
-        run.join("frontend-researcher/result.md").as_str()
+        run.join("frontend-researcher").join("result.md").as_str()
     );
 }
 

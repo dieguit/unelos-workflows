@@ -330,7 +330,13 @@ pub fn save_skill(
         },
         updated_references: edits
             .iter()
-            .map(|(p, _, _)| p.strip_prefix(&project).unwrap().to_string())
+            .map(|(p, _, _)| {
+                p.strip_prefix(&project)
+                    .unwrap()
+                    .iter()
+                    .collect::<Vec<_>>()
+                    .join("/")
+            })
             .collect(),
     })
 }

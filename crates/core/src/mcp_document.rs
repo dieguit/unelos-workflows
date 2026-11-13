@@ -266,8 +266,12 @@ mod tests {
     fn removal_checks_agent_references() {
         let temp = assert_fs::TempDir::new().unwrap();
         let root = Utf8Path::from_path(temp.path()).unwrap();
-        fs::create_dir_all(root.join(".unelos/agents/worker")).unwrap();
-        let agent = root.join(".unelos/agents/worker/agent.yaml");
+        fs::create_dir_all(root.join(".unelos").join("agents").join("worker")).unwrap();
+        let agent = root
+            .join(".unelos")
+            .join("agents")
+            .join("worker")
+            .join("agent.yaml");
         fs::write(&agent, "instructions: Work\nmcps: [browser]\n").unwrap();
         save_mcp(
             root,
@@ -283,9 +287,17 @@ mod tests {
         .unwrap();
         let error = remove_mcp(root, "browser").unwrap_err();
         assert!(error.contains(agent.as_str()), "{error}");
-        assert!(root.join(".unelos/mcps/browser.yaml").exists());
+        assert!(root
+            .join(".unelos")
+            .join("mcps")
+            .join("browser.yaml")
+            .exists());
         fs::write(agent, "instructions: Work\n").unwrap();
         remove_mcp(root, "browser").unwrap();
-        assert!(!root.join(".unelos/mcps/browser.yaml").exists());
+        assert!(!root
+            .join(".unelos")
+            .join("mcps")
+            .join("browser.yaml")
+            .exists());
     }
 }

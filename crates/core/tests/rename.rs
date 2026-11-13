@@ -38,10 +38,13 @@ fn human_names_slugify_and_collisions_are_clear() {
 fn rename_keeps_rendered_delegated_prompt_paths_valid() {
     let (_temp, root) = project_copy();
     let workflow = root.join(".unelos/workflows/implement-feature.yaml");
-    let yaml = fs::read_to_string(&workflow).unwrap().replace(
-        "    task: create-plan\n",
-        "    task: create-plan\n    execution: subagent\n",
-    );
+    let yaml = fs::read_to_string(&workflow)
+        .unwrap()
+        .replace("\r\n", "\n")
+        .replace(
+            "    task: create-plan\n",
+            "    task: create-plan\n    execution: subagent\n",
+        );
     fs::write(workflow, yaml).unwrap();
     let package = unelos_core::execution_start(&root, "implement-feature", None).unwrap();
     let run_id = package.run_id.as_deref().unwrap();

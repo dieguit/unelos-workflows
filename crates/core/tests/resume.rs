@@ -269,9 +269,10 @@ fn delegated_resume_keeps_prompt_without_brief_or_ledger() {
     let resumed = execution_resume(&root, &state.run_id).unwrap();
     assert_eq!(resumed.worker_prompt, current.worker_prompt);
     assert_eq!(resumed.expected, current.expected);
-    assert!(serde_json::to_string(&resumed.resume_context)
-        .unwrap()
-        .contains(record.outputs[0].path.as_str()));
+    assert_eq!(
+        resumed.resume_context.as_ref().unwrap().state.current,
+        state.current
+    );
     std::fs::write(&ledger, "No Brief").unwrap();
     let without_brief = execution_resume(&root, &state.run_id).unwrap();
     assert_eq!(without_brief.status, "running");

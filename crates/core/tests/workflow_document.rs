@@ -199,6 +199,7 @@ fn rich_steps_preserve_authored_order_through_save() {
     let path = root.join(".unelos/workflows/implement-feature.yaml");
     let text = fs::read_to_string(&path)
         .unwrap()
+        .replace("\r\n", "\n")
         .replace(
             "      approved: implement\n      rejected: plan",
             "      rejected: plan\n      approved: implement",
