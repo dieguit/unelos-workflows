@@ -1,11 +1,20 @@
 import { spawn } from 'node:child_process';
 import { realpath } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import type { Plugin, PluginOptions } from '@opencode/plugin';
+import type { CliError, CliResult, CompletionControl, ToolArguments } from '../shared/protocol.ts';
+
+type Session = Awaited<ReturnType<Plugin.Context['session']['get']>>;
+type SessionID = Parameters<Plugin.Context['session']['get']>[0]['sessionID'];
+type Active = {project:string;enabled:boolean;mode:string;entryId:string;runId?:string};
+type Metadata = Session['metadata'] & {[OWNER]?: Active};
+type ToolContext = {sessionID:SessionID;signal?:AbortSignal};
+type ToolInput = Partial<ToolArguments['complete'] & ToolArguments['start'] & ToolArguments['resume'] & ToolArguments['reject'] & ToolArguments['inspect'] & ToolArguments['rename']>;
 
 const OWNER='unelos.opencode';
-const fail=(code,message)=>Object.assign(new Error(message),{code});
-const object=(properties={},required=[])=>({type:'object',properties,required,additionalProperties:false});
-const string={type:'string'};
+const fail=(code:string,message:string)=>Object.assign(new Error(message),{code});
+const object=<P extends Record<string, unknown>>(properties={} as P,required:string[]=[])=>({type:'object' as const,properties,required,additionalProperties:false});
+const string={type:'string' as const};
 const identity=object({kind:{type:'string',enum:['task','human-gate','parallel']},runId:string,nodeId:string,taskId:string,activationId:string},['kind','runId','nodeId']);
 const descriptions={next:'Read the selected Unelos execution package',start:'Start a fresh Unelos workflow and bind this session',resume:'Bind the explicitly selected unfinished run and immediately continue using core resume context',complete:'Complete the expected Unelos Task after inspection',approve:'Record explicit approval of the expected human gate',reject:'Reject the expected human gate with actionable feedback',status:'Read selected Unelos status',inspect:'Inspect a Unelos workflow or Node',rename:'Name the selected Unelos run'};
 
@@ -16,7 +25,7 @@ export const toolSchemas={
   status:object(),inspect:object({workflow:string,node:string},['workflow']),rename:object({name:string,runId:string},['name','runId']),
 };
 
-export function callCli(binary,project,argv,input,signal) {
+export function callCli(binary:string,project:string,argv:string[],input?:unknown,signal?:AbortSignal):Promise<CliResult> {
   const mutation=argv[0]==='rename'||argv[0]==='execution'&&['start','complete','approve','reject'].includes(argv[1]);
   const target=argv.includes('--run')?argv[argv.indexOf('--run')+1]:null;
   const guidance=target?`Reconcile with execution next --run ${target}; never blindly retry`:'List unfinished runs and explicitly reconcile; never blindly retry';
@@ -24,7 +33,7 @@ export function callCli(binary,project,argv,input,signal) {
     const child=spawn(binary,['--project',project,...argv],{signal,timeout:10000,killSignal:'SIGKILL',stdio:['pipe','pipe','pipe']});
     let stdout='',stderr='',size=0;
     const uncertain=()=>fail(mutation?'mutation_uncertain':'cli_failed',mutation?`Mutation response unavailable; ${guidance}`:'Unelos CLI failed');
-    for(const [stream,append] of [[child.stdout,s=>stdout+=s],[child.stderr,s=>stderr+=s]]) {
+    for(const [stream,append] of [[child.stdout,(s:string)=>stdout+=s],[child.stderr,(s:string)=>stderr+=s]] as const) {
       stream.setEncoding('utf8');stream.on('data',s=>{
         size+=Buffer.byteLength(s);if(size>16*1024*1024){child.kill('SIGKILL');reject(uncertain());}else append(s);
       });
@@ -35,9 +44,9 @@ export function callCli(binary,project,argv,input,signal) {
     child.once('close',code=>{
       if(code!==0){
         for(const line of stderr.trim().split('\n').reverse()) {
-          try {const error=JSON.parse(line)?.error;
+          try {const error=(JSON.parse(line) as Partial<CliError>|null)?.error;
             if(typeof error?.code==='string'&&typeof error.message==='string'){reject(fail(error.code,error.message));return;}
-          }catch{}
+          }catch{ /* Non-JSON stderr lines are diagnostics, not structured CLI errors. */ }
         }
         reject(uncertain());return;
       }
@@ -49,51 +58,50 @@ export function callCli(binary,project,argv,input,signal) {
   });
 }
 
-function binaryOption(options) {
+function binaryOption(options:PluginOptions) {
   const binary=options?.binary??'unelos';
   if(typeof binary!=='string'||!binary.trim()||binary.includes('\0'))throw fail('invalid_binary','Specify one CLI executable');
   return binary;
 }
 
-function mapping(version) {
+function mapping() {
   return 'Native Unelos tools: '+Object.keys(toolSchemas).map(name=>'unelos_'+name).join(', ')+'.\n'
-    +(version==='v1'?'Native worker: task(subagent_type=nativeAgent, prompt=workerPrompt, task_id for continuation).'
-      :'Native worker: subagent(agent=nativeAgent, prompt=workerPrompt, sessionID for continuation).\n'
-        +'Parallel workers: in one turn call subagent(agent=workerPrompts[i].nativeAgent, prompt=workerPrompts[i].prompt, background=true) for every entry before waiting; continue one worker with its sessionID.');
+    +'Native worker: subagent(agent=nativeAgent, prompt=workerPrompt, sessionID for continuation).\n'
+    +'Parallel workers: in one turn call subagent(agent=workerPrompts[i].nativeAgent, prompt=workerPrompts[i].prompt, background=true) for every entry before waiting; continue one worker with its sessionID.';
 }
 
-function nativePackage(value,version) {
+function nativePackage(value:CliResult) {
   return {...value,...(value.workerPrompt&&value.packet?.agent?{nativeAgent:'unelos-'+value.packet.agent}:{}),
     ...(value.workerPrompts?.length?{workerPrompts:value.workerPrompts.map(w=>({...w,nativeAgent:'unelos-'+w.agent}))}:{}),
-    harnessInstructions:mapping(version)};
+    harnessInstructions:mapping()};
 }
 
-function bridge(binary,version,get,update,directory) {
-  const changes=new Map(); // Only serialize metadata check/write; CLI work never holds this queue.
-  function change(id,fn) {
+function bridge(binary:string,get:(id:SessionID)=>Promise<Session>,update:(id:SessionID,metadata:Metadata)=>Promise<unknown>,directory:(session:Session)=>string) {
+  const changes=new Map<SessionID,Promise<unknown>>(); // Only serialize metadata check/write; CLI work never holds this queue.
+  function change<T>(id:SessionID,fn:()=>Promise<T>) {
     const next=(changes.get(id)??Promise.resolve()).catch(()=>{}).then(fn);
     changes.set(id,next);
     return next.finally(()=>{if(changes.get(id)===next)changes.delete(id);});
   }
-  async function session(id) {
+  async function session(id:SessionID) {
     const value=await get(id);if(value?.id!==id)throw fail('session_lookup_failed','Native session unavailable');
     if(value.parentID!=null)throw fail('child_controller','Workers cannot operate the Unelos controller');
     return value;
   }
-  async function project(id) {
-    const value=await session(id);const active=value.metadata?.[OWNER];
+  async function project(id:SessionID) {
+    const value=await session(id);const active=(value.metadata as Metadata)?.[OWNER];
     if(!active?.enabled)throw fail('controller_inactive','Activate /unelos in the main session first');
     const path=await realpath(directory(value));
     if(active.project!==path)throw fail('project_changed','Project changed; reactivate /unelos');
     return {path,active,value};
   }
-  async function current(id,active) {
+  async function current(id:SessionID,active:Active) {
     const state=await project(id);
     if(state.active.entryId!==active.entryId)throw fail('entry_superseded','Entry superseded; explicitly select a run again');
     return state.value;
   }
   return {
-    async command(id,text) {
+    async command(id:SessionID,text:string) {
       const words=text.trim().split(/\s+/).filter(Boolean);
       const keyword=words.length===1?words[0]:null;
       const entry=await change(id,async()=>{
@@ -104,20 +112,12 @@ function bridge(binary,version,get,update,directory) {
       });
       if(!entry)return 'Unelos disabled for this session.';
       const {path,active}=entry;
-       const result=nativePackage(await callCli(binary,path,['execution',active.mode==='new'?'new':'runs','--json']),version);
-       if(version==='v1'&&active.mode==='new'){
-         result.unavailableWorkflows=[];
-         for(const workflow of result.workflows??[]){
-           const inspection=await callCli(binary,path,['inspect',workflow,'--json']);
-           if(inspection.nodes?.some(node=>node.kind==='parallel'))result.unavailableWorkflows.push({workflow,reason:'Parallel nodes require OpenCode V2'});
-         }
-         result.workflows=(result.workflows??[]).filter(workflow=>!result.unavailableWorkflows.some(item=>item.workflow===workflow));
-       }
+       const result=nativePackage(await callCli(binary,path,['execution',active.mode==='new'?'new':'runs','--json']));
       await current(id,active);
       return JSON.stringify({...result,requestedAction:text});
     },
-    async execute(name,input,context) {
-      const {path,active}=await project(context.sessionID);let argv,control;
+    async execute(name:string,input:ToolInput,context:ToolContext) {
+      const {path,active}=await project(context.sessionID);let argv:(string|undefined)[],control:CompletionControl|undefined;
       const entry=['start','resume'].includes(name);
       if(entry){
         if(active.runId||active.mode!==(name==='start'?'new':'resume'))throw fail('invalid_entry','Use /unelos for a fresh start or /unelos resume to select an existing run');
@@ -125,37 +125,33 @@ function bridge(binary,version,get,update,directory) {
         if(!active.runId)throw fail('run_unbound','Start or explicitly resume a run first');
         if(input.expected&&input.expected.runId!==active.runId||name==='rename'&&input.runId!==active.runId)throw fail('stale_execution','Input identity does not match this session\'s selected run');
        }
-       if(version==='v1'&&name==='start'){
-         const inspection=await callCli(binary,path,['inspect',input.workflow,'--json'],undefined,context.signal??context.abort);
-         if(inspection.nodes?.some(node=>node.kind==='parallel'))throw fail('unsupported_workflow','Parallel nodes require OpenCode V2');
-       }
       switch(name){
         case 'next':argv=['execution','next','--run',active.runId];break;
         case 'start':argv=['execution','start',input.workflow,...(input.name?['--name',input.name]:[])];break;
         case 'resume':argv=['execution','resume','--run',input.runId];break;
         case 'complete':case 'approve':case 'reject':
-          argv=['execution',name,'--run',active.runId];control={expected:input.expected,resultText:input.resultText??null,summary:input.summary??null,outcome:input.outcome??null,reason:input.reason??null};break;
+          argv=['execution',name,'--run',active.runId];control={expected:input.expected!,resultText:input.resultText??null,summary:input.summary??null,outcome:input.outcome??null,reason:input.reason??null};break;
         case 'status':argv=['status','--run',active.runId];break;
         case 'inspect':argv=['inspect',input.workflow,...(input.node?['--node',input.node]:[])];break;
         case 'rename':argv=['rename',input.name,'--run',active.runId];break;
         default:throw fail('invalid_tool','Unknown Unelos tool');
       }
-      const result=await callCli(binary,path,[...argv,'--json'],control,context.signal??context.abort);
+      const result=await callCli(binary,path,[...argv,'--json'] as string[],control,context.signal);
       if(entry){
         try{
           if(typeof result.runId!=='string'||!result.runId.trim()||name==='resume'&&result.runId!==input.runId)throw fail('invalid_cli_json','CLI returned no valid selected run ID');
           await change(context.sessionID,async()=>{
             const value=await current(context.sessionID,active);
-            if(value.metadata[OWNER].runId)throw fail('entry_superseded','Entry already bound; select a run again');
-            await update(context.sessionID,{...value.metadata,[OWNER]:{...active,runId:result.runId}});
+            if((value.metadata as Metadata)[OWNER]!.runId)throw fail('entry_superseded','Entry already bound; select a run again');
+            await update(context.sessionID,{...value.metadata,[OWNER]:{...active,runId:result.runId as string}});
           });
         }catch(error){
           if(name==='start')throw fail('mutation_uncertain',`Run ${result.runId??'(unknown)'} may have been created but binding failed; explicitly reconcile with /unelos resume; never retry start`);
-          if(['controller_inactive','project_changed','entry_superseded'].includes(error.code))throw fail('entry_superseded','Resume entry superseded; select a run again');
+          if(error instanceof Error && 'code' in error && ['controller_inactive','project_changed','entry_superseded'].includes(String(error.code)))throw fail('entry_superseded','Resume entry superseded; select a run again');
           throw error;
         }
       }
-      return nativePackage(result,version);
+      return nativePackage(result);
     },
   };
 }
@@ -163,26 +159,13 @@ function bridge(binary,version,get,update,directory) {
 export default {
   id:OWNER,
   async setup(ctx) {
-    const native=bridge(binaryOption(ctx.options),'v2',id=>ctx.session.get({sessionID:id}),
+    const native=bridge(binaryOption(ctx.options),id=>ctx.session.get({sessionID:id}),
       (id,metadata)=>ctx.session.update({sessionID:id,metadata}),s=>s.location.directory);
     await ctx.tool.transform(editor=>{
-      for(const [name,input] of Object.entries(toolSchemas))editor.add({name:'unelos_'+name,description:descriptions[name],input,
-        execute:async(args,context)=>({content:JSON.stringify(await native.execute(name,args,context))})});
+      for(const [name,input] of Object.entries(toolSchemas))editor.add({name:'unelos_'+name,description:descriptions[name as keyof typeof descriptions],input,
+        execute:async(args,context)=>({content:JSON.stringify(await native.execute(name,args as ToolInput,context))})});
     });
     await ctx.command.transform(editor=>editor.add({name:'unelos',description:'Activate the Unelos controller',
-      execute:async({sessionID,prompt,delivery})=>ctx.session.prompt({...prompt,sessionID,delivery,text:await native.command(sessionID,prompt.text)})}));
+      execute:async({sessionID,prompt,delivery})=>{await ctx.session.prompt({...prompt,sessionID,delivery,text:await native.command(sessionID,prompt.text)});}}));
   },
-  async server({client},options) {
-    const get=async id=>{const result=await client.session.get({path:{id}});if(result.error)throw fail('session_lookup_failed','Native session unavailable');return result.data;};
-    const native=bridge(binaryOption(options),'v1',get,async(id,metadata)=>{
-      const result=await client.session.update({path:{id},body:{metadata}});if(result.error)throw fail('activation_failed','Native activation failed');
-    },s=>s.directory);
-    const {registerV1}=await import('./v1.js');
-    return {tool:await registerV1(options,descriptions,native.execute),
-      'command.execute.before':async(input,output)=>{
-        if(input.command!=='unelos')return;
-        const part=output.parts.find(p=>p.type==='text');if(!part)throw fail('delivery_text_missing','Command needs text');
-        part.text=await native.command(input.sessionID,input.arguments);
-      }};
-  },
-};
+} satisfies Plugin.Plugin;

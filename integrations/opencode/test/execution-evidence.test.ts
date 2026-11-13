@@ -1,6 +1,7 @@
-import test from 'node:test';
+import {test} from 'vitest';
 import assert from 'node:assert/strict';
-import { verifyExecutionEvidence } from './execution-evidence.mjs';
+import { verifyExecutionEvidence } from './execution-evidence.ts';
+import type {ExecutionEvidence} from './execution-evidence.ts';
 
 test('execution acceptance rejects absent evidence rather than trusting passed flags', () => {
   for (const evidence of [{}, { passed:true }, { timeline:[], native:{passed:true} }]) {
@@ -23,7 +24,7 @@ test('synthetic checker fixture rejects changed Task continuation and missing in
     {event:'review-original',identity:{taskId:'task-5'},nativeHandle:'worker-2'},
     {event:'finished',identity:{kind:'finished'}},
   ];
-  const evidence={inspection:{nodes:[{id:'interview',execution:'main'},{id:'plan',execution:'main'},
+  const evidence:ExecutionEvidence={inspection:{nodes:[{id:'interview',execution:'main'},{id:'plan',execution:'main'},
     {id:'implement',execution:'subagent'},{id:'review',execution:'subagent',next:{passed:'finish',changes_requested:'implement'}},
     {id:'approve-plan',next:{approved:'implement',rejected:'plan'}},{id:'finish'}],edges:Array(7).fill({})},timeline,
     snapshots:{ledger:'## Brief\nChange heading\nAdd check'},
@@ -38,9 +39,9 @@ test('synthetic checker fixture rejects changed Task continuation and missing in
     evidence.native.workers.push({handle,taskId,deliveredExecutorText:'Exact packet',expectedExecutorText:'Exact packet',ledgerPath:'/private/ledger',controllerInstructions:'Private controller',actualModel:{id:'model'},selectedModel:{id:'model'},requiredTools:['read'],actualTools:['read'],writes:['/report']});
   }
   assert.equal(verifyExecutionEvidence(evidence),true);
-  for (const change of [e=>e.timeline[2].identity={...id,taskId:'later'},e=>e.interactive.blocker='No TUI',
-    e=>e.native.workers[0].writes.push('/private/ledger'),e=>e.native.userMessages[0].text='Different answer',
-    e=>e.native.helperCalls[0].freshIdentity={...id,taskId:'later'}]) {
+  for (const change of [(e:ExecutionEvidence)=>e.timeline[2].identity={...id,taskId:'later'},(e:ExecutionEvidence)=>e.interactive.blocker='No TUI',
+    (e:ExecutionEvidence)=>e.native.workers[0].writes.push('/private/ledger'),(e:ExecutionEvidence)=>e.native.userMessages[0].text='Different answer',
+    (e:ExecutionEvidence)=>e.native.helperCalls[0].freshIdentity={...id,taskId:'later'}]) {
     const bad=structuredClone(evidence);change(bad);assert.throws(()=>verifyExecutionEvidence(bad));
   }
 });

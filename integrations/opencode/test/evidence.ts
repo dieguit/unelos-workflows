@@ -8,25 +8,57 @@ import fs from 'node:fs';
 import path from 'node:path';
 // Historical T15 evidence format; independent of the current thin adapter.
 const CONTEXT_TAG = '<unelos-opencode-context>\n';
+interface Packet {
+  ledgerPath:string;
+  controllerInstructions:string;
+  skills:{id:string;directory:string}[];
+  [key:string]:unknown;
+}
+interface Capture {
+  role:string;
+  sessionID:string;
+  blocks:string[];
+  text:string;
+}
+interface ToolCall {
+  sessionID:string;
+  tool:string;
+  input?:{path?:string;filePath?:string};
+  status:string;
+}
+interface Verdict {
+  workerPacket:Record<string,unknown>;
+  workerText:string;
+  brief:string;
+  recoverySessionIDs:string[];
+}
+interface Preflight {
+  required:string;
+  error:{code:string;message:string};
+  executorWorkStarted:boolean;
+  stateBefore:unknown;
+  stateAfter:unknown;
+}
 
 const root = process.argv[2];
 if (!root) throw new Error('Pass a redacted native evidence directory');
-const read = name => fs.readFileSync(path.join(root, name), 'utf8');
-const json = name => JSON.parse(read(name));
-const verdict = json('verdict-input.json');
-const main = json('main-next.json');
-const before = json('next-before.json');
+const read = (name:string) => fs.readFileSync(path.join(root, name), 'utf8');
+const json = <T=unknown>(name:string):T => JSON.parse(read(name));
+const verdict = json<Verdict>('verdict-input.json');
+const main = json<Packet>('main-next.json');
+const before = json<Packet>('next-before.json');
 const after = json('next-after.json');
 assert.deepEqual(after, before, 'Recovery changed the authoritative packet');
 // Independent projection, rather than comparing a helper with itself.
 const { ledgerPath, controllerInstructions, ...expected } = before;
+void controllerInstructions;
 assert.deepEqual(verdict.workerPacket, expected);
 assert.ok(!('ledgerPath' in verdict.workerPacket));
 assert.ok(!('controllerInstructions' in verdict.workerPacket));
 assert.ok(verdict.workerText.includes(JSON.stringify(expected, null, 2)));
 assert.ok(verdict.workerText.includes(verdict.brief));
 assert.ok(!verdict.workerText.includes('UNELOS_T15_UNRELATED'));
-const snapshots = read('context.jsonl').trim().split('\n').map(line => JSON.parse(line));
+const snapshots:Capture[] = read('context.jsonl').trim().split('\n').map(line => JSON.parse(line));
 const controllers = snapshots.filter(row => row.role === 'active-controller');
 assert.ok(controllers.length > 0, 'No active-controller request captured');
 for (const item of controllers) {
@@ -34,6 +66,8 @@ for (const item of controllers) {
   assert.ok(!item.blocks.join('\n').includes('UNELOS_T15_UNRELATED'));
 }
 const { ledgerPath: mainLedger, controllerInstructions: mainDuties, ...mainExecutor } = main;
+void mainLedger;
+void mainDuties;
 assert.ok(controllers.some(row => row.blocks.some(text => text.includes(JSON.stringify(mainExecutor, null, 2)))));
 const child = snapshots.find(row => row.role === 'worker');
 assert.ok(child, 'No worker request captured');
@@ -47,7 +81,7 @@ for (const name of ['outline', 'review']) {
   assert.deepEqual(fs.readFileSync(path.join(root, name + '-after.md')),
     fs.readFileSync(path.join(root, name + '-before.md')));
 }
-const brief = text => {
+const brief = (text:string) => {
   const section = text.split(/^## Brief[ \t]*\r?$/m)[1];
   assert.ok(section, 'Ledger has no Brief section');
   return section.split(/^##[ \t]+/m)[0].trim();
@@ -57,19 +91,19 @@ assert.ok(savedBrief);
 assert.equal(brief(read('ledger-after.md')), savedBrief);
 assert.equal(verdict.brief, savedBrief);
 assert.ok(verdict.recoverySessionIDs.length > 0);
-const calls = json('tool-calls.json');
-const calledPath = call => call.input?.path ?? call.input?.filePath;
+const calls = json<ToolCall[]>('tool-calls.json');
+const calledPath = (call:ToolCall) => call.input?.path ?? call.input?.filePath;
 assert.ok(calls.some(call => verdict.recoverySessionIDs.includes(call.sessionID)
   && call.tool === 'read' && call.status === 'completed' && calledPath(call) === ledgerPath));
 assert.ok(controllers.some(row => verdict.recoverySessionIDs.includes(row.sessionID)
   && row.text.includes(savedBrief)));
-const checklist = before.skills.find(skill => skill.id === 'readability').directory + '/checklist.md';
+const checklist = before.skills.find(skill => skill.id === 'readability')!.directory + '/checklist.md';
 assert.ok(calls.some(call => call.sessionID === child.sessionID && call.tool === 'read'
   && call.status === 'completed' && calledPath(call) === checklist));
 const ordinary = snapshots.filter(row => row.role === 'ordinary');
 assert.ok(ordinary.length > 0);
 assert.ok(ordinary.every(row => !row.blocks.some(text => text.startsWith(CONTEXT_TAG))));
-const rejected = json('preflight.json');
+const rejected = json<Preflight[]>('preflight.json');
 for (const required of ['model', 'tools', 'mcps']) {
   const probe = rejected.find(item => item.required === required);
   assert.ok(probe, 'Missing requirement-rejection evidence: ' + required);

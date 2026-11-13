@@ -2,7 +2,7 @@
   "name": "unelos-opencode",
   "version": "0.1.0",
   "type": "module",
-  "exports": { ".": "./index.js" },
-  "files": ["index.js", "v1.js", "commands/unelos.md", "README.md"],
-  "scripts": { "test": "node --test test/*.test.js" }
+  "exports": { ".": "./index.ts" },
+  "files": ["index.ts", "commands/unelos.md", "README.md"],
+  "scripts": { "test": "vitest run" }
 }

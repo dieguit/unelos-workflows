@@ -8,8 +8,8 @@ const FILES: &[(&str, &[u8])] = &[
         include_bytes!("../../../../integrations/opencode/package.json"),
     ),
     (
-        "index.js",
-        include_bytes!("../../../../integrations/opencode/index.js"),
+        "index.ts",
+        include_bytes!("../../../../integrations/opencode/index.ts"),
     ),
     (
         "commands/unelos.md",
@@ -101,16 +101,20 @@ impl HarnessAdapter for OpenCode {
             &path,
         )?;
         let mut state = read_state()?;
-        let files = FILES
+        let mut files = FILES
             .iter()
             .map(|(name, _)| root.join(name))
             .collect::<Vec<_>>();
+        let legacy = root.join("index.js");
+        if legacy.exists() {
+            files.push(legacy.clone());
+        }
         let global = global_config::config_dir()?;
         for file in &files {
             crate::check_install_path(&global, file.strip_prefix(&global).unwrap())?;
         }
         // Record ownership before writes so a partially failed install can be uninstalled.
-        let record = match state.get(self.id()) {
+        let mut record = match state.get(self.id()) {
             Some(old) if old.version == INTEGRATION_VERSION && old.files == files => old.clone(),
             _ => Installed {
                 version: INTEGRATION_VERSION.into(),
@@ -126,6 +130,12 @@ impl HarnessAdapter for OpenCode {
         for (name, bytes) in FILES {
             atomic_write(&root.join(name), bytes)?;
         }
+        if record.files.contains(&legacy) {
+            fs::remove_file(&legacy).map_err(io_error)?;
+            record.files.retain(|file| file != &legacy);
+            state.insert(self.id().into(), record.clone());
+            write_state(&state)?;
+        }
         atomic_write(&path, edited.as_bytes())?;
         Ok(record)
     }
@@ -137,7 +147,9 @@ impl HarnessAdapter for OpenCode {
         let mut state = read_state()?;
         if let Some(record) = state.get(self.id()) {
             for file in &record.files {
-                if !FILES.iter().any(|(name, _)| root.join(name) == *file) {
+                if !FILES.iter().any(|(name, _)| root.join(name) == *file)
+                    && *file != root.join("index.js")
+                {
                     return Err(error(
                         "invalid_harness_state",
                         format!("Unowned file: {file}"),
@@ -199,7 +211,13 @@ pub(super) fn migrate_project(root: &Utf8Path) -> Result<bool> {
     // Only known bundled files are removed; preserve user-created files in these directories.
     let mut files = Vec::new();
     for dir in ["unelos", "thin-plugin", "plugin"] {
-        for name in ["package.json", "index.js", "v1.js", "commands/unelos.md"] {
+        for name in [
+            "package.json",
+            "index.js",
+            "index.ts",
+            "v1.js",
+            "commands/unelos.md",
+        ] {
             files.push(Utf8PathBuf::from(".unelos/opencode").join(dir).join(name));
         }
     }
