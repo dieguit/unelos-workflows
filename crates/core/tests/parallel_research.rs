@@ -176,7 +176,12 @@ fn parallel_result_parser_accepts_finished_subsets() {
         parse_parallel_results(&frames(&[two.clone(), one.clone()]), &expected, &keys).unwrap();
     assert_eq!(results[0].worker_key.as_deref(), Some("worker-1"));
     assert_eq!(results.len(), 2);
-    assert_eq!(parse_parallel_results(&frames(std::slice::from_ref(&one)), &expected, &keys).unwrap().len(), 1);
+    assert_eq!(
+        parse_parallel_results(&frames(std::slice::from_ref(&one)), &expected, &keys)
+            .unwrap()
+            .len(),
+        1
+    );
     assert!(
         parse_parallel_results(&frames(&[one.clone(), one.clone()]), &expected, &keys)
             .unwrap_err()
@@ -264,7 +269,6 @@ fn complete(
     execution_mutate(root, "r-000001", ExecutionOperation::Complete, control)
 }
 
-
 /// Starts the run and completes `scope`, returning the parallel package.
 fn parallel(root: &Utf8Path) -> ExecutionPackage {
     let scope = execution_start(root, WORKFLOW, Some("research-check")).unwrap();
@@ -332,9 +336,16 @@ fn partial_frames_never_complete_the_parent() {
     for attempt in 1..=3 {
         let error = complete(&root, &first).unwrap_err();
         assert!(error.to_string().contains("worker-1"));
-        assert_eq!(error.to_string().contains("Stop and tell the user."), attempt == 3);
+        assert_eq!(
+            error.to_string().contains("Stop and tell the user."),
+            attempt == 3
+        );
     }
-    let next = complete(&root, &parent_control(&remaining, &[("worker-2", "FINISHED")])).unwrap();
+    let next = complete(
+        &root,
+        &parent_control(&remaining, &[("worker-2", "FINISHED")]),
+    )
+    .unwrap();
     assert_eq!(packet_json(&next)["nodeId"], "synthesis");
 }
 
@@ -354,7 +365,12 @@ fn missing_aggregate_or_worker_report_blocks_completion() {
         .unwrap()
         .to_owned();
     std::fs::remove_file(&frontend).unwrap();
-    assert_eq!(complete(&root, &parent_control(&package, &[])).unwrap_err().code(), "missing_output");
+    assert_eq!(
+        complete(&root, &parent_control(&package, &[]))
+            .unwrap_err()
+            .code(),
+        "missing_output"
+    );
 }
 
 #[test]

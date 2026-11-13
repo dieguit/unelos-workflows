@@ -1,9 +1,9 @@
+use indexmap::IndexMap;
 use serde::{
     de::{DeserializeOwned, MapAccess, SeqAccess, Visitor},
     Deserialize, Deserializer, Serialize,
 };
 use std::collections::BTreeMap;
-use indexmap::IndexMap;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,11 +93,23 @@ struct AgentWire {
         skip_serializing_if = "Option::is_none"
     )]
     instructions_file: Option<String>,
-    #[serde(default, deserialize_with = "strict_strings", skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "strict_strings",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     skills: Vec<String>,
-    #[serde(default, deserialize_with = "strict_strings", skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "strict_strings",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     mcps: Vec<String>,
-    #[serde(default, deserialize_with = "strict_strings", skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "strict_strings",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     tools: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     model: Option<AgentModel>,

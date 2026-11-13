@@ -27,7 +27,10 @@ fn assert_fixture(loaded: &LoadedProject, root: &Utf8Path) {
     );
     assert_eq!(
         loaded.definitions.agents["engineer"].model,
-        Some(unelos_core::AgentModel::Harness { harness: "opencode".into(), model: "example-provider/example-model".into() })
+        Some(unelos_core::AgentModel::Harness {
+            harness: "opencode".into(),
+            model: "example-provider/example-model".into()
+        })
     );
     assert_eq!(
         loaded.workflow,

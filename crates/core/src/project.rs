@@ -39,7 +39,10 @@ impl LoadedProject {
                 .ok_or_else(|| ProjectValidationError {
                     path: self.workflow_source.clone(),
                     field: format!("{field}.task"),
-                    cause: match id.strip_prefix("global/") { Some(id) => format!("Global task {id:?} not found"), None => format!("unknown Task Definition {id:?}") },
+                    cause: match id.strip_prefix("global/") {
+                        Some(id) => format!("Global task {id:?} not found"),
+                        None => format!("unknown Task Definition {id:?}"),
+                    },
                 }),
             crate::TaskSelection::Inline(task) => Ok((task, format!("{field}.taskDefinition"))),
         }
@@ -271,7 +274,12 @@ fn summarize_authoring<T>(
     summarize: impl Fn(&Utf8Path, &Utf8Path, &str) -> Result<T, ProjectLoadError>,
     broken: impl Fn(String, String) -> T,
 ) -> Result<Vec<T>, ProjectLoadError> {
-    let path = bounded_path(authoring_root, Utf8Path::new(directory), authoring_root, directory)?;
+    let path = bounded_path(
+        authoring_root,
+        Utf8Path::new(directory),
+        authoring_root,
+        directory,
+    )?;
     let entries = match fs::read_dir(&path) {
         Ok(entries) => entries,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -302,7 +310,7 @@ fn summarize_authoring<T>(
                     path: path.join(id),
                     source,
                 })
-                .and_then(|()| summarize(&authoring_root, &path, id))
+                .and_then(|()| summarize(authoring_root, &path, id))
                 .unwrap_or_else(|error| broken(id.to_owned(), error.to_string()))
         })
         .collect())
@@ -358,10 +366,20 @@ pub fn task_summaries(project_root: &Utf8Path) -> Result<Vec<TaskSummary>, Proje
 }
 
 pub fn global_task_summaries() -> Result<Vec<TaskSummary>, String> {
-    summarize_authoring(&crate::task_document::global_root()?, "tasks", summarize_task, broken_task).map_err(|e| e.to_string())
+    summarize_authoring(
+        &crate::task_document::global_root()?,
+        "tasks",
+        summarize_task,
+        broken_task,
+    )
+    .map_err(|e| e.to_string())
 }
 
-fn summarize_task(authoring_root: &Utf8Path, directory: &Utf8Path, id: &str) -> Result<TaskSummary, ProjectLoadError> {
+fn summarize_task(
+    authoring_root: &Utf8Path,
+    directory: &Utf8Path,
+    id: &str,
+) -> Result<TaskSummary, ProjectLoadError> {
     let relative = Utf8PathBuf::from("tasks").join(id);
     let entry = bounded_path(authoring_root, &relative, directory, id)?;
     if !safe_id(id) {
@@ -393,12 +411,12 @@ fn summarize_task(authoring_root: &Utf8Path, directory: &Utf8Path, id: &str) -> 
 
 fn broken_task(name: String, problem: String) -> TaskSummary {
     TaskSummary {
-    name,
-    description: None,
-    skills: Vec::new(),
-    outcomes: Vec::new(),
-    problem: Some(problem),
-        }
+        name,
+        description: None,
+        skills: Vec::new(),
+        outcomes: Vec::new(),
+        problem: Some(problem),
+    }
 }
 
 /// Summarize each `.unelos/skills/<id>/SKILL.md`; a broken skill is a row with `problem`.
@@ -605,7 +623,10 @@ fn load_authoring_candidate(
         agent_sources.insert(id.clone(), source);
         definitions.agents.insert(id, agent);
     }
-    let text = match candidate { Some(text) => text.to_owned(), None => read(&workflow_source)? };
+    let text = match candidate {
+        Some(text) => text.to_owned(),
+        None => read(&workflow_source)?,
+    };
     let mut workflow = parse_workflow_definition(workflow_source.as_str(), &text)?;
     if workflow.name != workflow_name {
         return Err(ProjectLoadError::NameMismatch {
@@ -636,15 +657,34 @@ fn load_authoring_candidate(
         for (field, selection) in selections {
             if let TaskSelection::Named(name) = selection {
                 if let Some(id) = name.strip_prefix("global/") {
-                    if !safe_id(id) { return Err(diagnostic(&workflow_source, "task", "invalid global task ID")); }
+                    if !safe_id(id) {
+                        return Err(diagnostic(
+                            &workflow_source,
+                            "task",
+                            "invalid global task ID",
+                        ));
+                    }
                     if !definitions.task_definitions.contains_key(name) {
-                        let root = crate::task_document::global_root().map_err(|e| diagnostic(&workflow_source, "task", e))?;
-                        let source = bounded_path(&root, &Utf8PathBuf::from("tasks").join(id).join("task.yaml"), &workflow_source, "task")?;
+                        let root = crate::task_document::global_root()
+                            .map_err(|e| diagnostic(&workflow_source, "task", e))?;
+                        let source = bounded_path(
+                            &root,
+                            &Utf8PathBuf::from("tasks").join(id).join("task.yaml"),
+                            &workflow_source,
+                            "task",
+                        )?;
                         match read(&source) {
                             Ok(text) => {
                                 let mut task = parse_task_definition(source.as_str(), &text)?;
                                 // Global dependencies are not project-relative install inputs; runtime uses resolved text.
-                                resolve_instructions(&root, &source, "instructionsFile", &task.instructions_file, &mut task.instructions, &mut BTreeMap::new())?;
+                                resolve_instructions(
+                                    &root,
+                                    &source,
+                                    "instructionsFile",
+                                    &task.instructions_file,
+                                    &mut task.instructions,
+                                    &mut BTreeMap::new(),
+                                )?;
                                 definitions.task_definitions.insert(name.clone(), task);
                                 task_sources.insert(name.clone(), source);
                             }

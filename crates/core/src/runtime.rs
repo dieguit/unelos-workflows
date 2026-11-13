@@ -14,8 +14,8 @@ mod execution;
 mod gates;
 mod rename;
 mod resume;
-mod store;
 mod runs_ui;
+mod store;
 pub use runs_ui::{delete_run, get_run, list_runs, read_run_artifact, RunDetails, RunListItem};
 
 pub use commands::{approve_node, complete_node, reject_node};

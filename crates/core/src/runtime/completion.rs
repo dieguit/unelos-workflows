@@ -25,7 +25,10 @@ pub fn complete(
     let candidate = prepare_completion(&project, &state, expected_execution_id, outcome, reason)?;
     artifacts::prepare_work_directories(
         &candidate,
-        &project.project_root.join(".unelos/runs").join(&state.run_id),
+        &project
+            .project_root
+            .join(".unelos/runs")
+            .join(&state.run_id),
     )?;
     store.update(&candidate)?;
     store.run(&candidate.run_id)

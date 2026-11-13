@@ -148,7 +148,11 @@ fn validate_references(
         return Err(ProjectValidationError {
             path: project.workflow_source.clone(),
             field: format!("{field}.agent"),
-            cause: if agent.trim().is_empty() { "Pick an agent".into() } else { format!("unknown Agent {agent:?}") },
+            cause: if agent.trim().is_empty() {
+                "Pick an agent".into()
+            } else {
+                format!("unknown Agent {agent:?}")
+            },
         });
     }
     Ok(())

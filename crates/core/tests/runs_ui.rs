@@ -69,7 +69,10 @@ fn artifacts_are_scoped_and_delete_removes_the_run() {
     };
     let path = &record.outputs[0].path;
     assert!(read_run_artifact(&root, &state.run_id, path).is_err());
-    assert!(!get_run(&root, &state.run_id).unwrap().existing_artifact_paths.contains(&path.to_string()));
+    assert!(!get_run(&root, &state.run_id)
+        .unwrap()
+        .existing_artifact_paths
+        .contains(&path.to_string()));
     std::fs::write(path, "report").unwrap();
     let details = get_run(&root, &state.run_id).unwrap();
     assert!(details.existing_artifact_paths.contains(&path.to_string()));
@@ -77,8 +80,14 @@ fn artifacts_are_scoped_and_delete_removes_the_run() {
     assert_eq!(json["runId"], state.run_id);
     assert!(json.get("state").is_none());
     assert!(json["existingArtifactPaths"].is_array());
-    assert!(std::fs::read_to_string(root.join(".unelos/runs").join(&state.run_id).join("state.json"))
-        .unwrap().find("existingArtifactPaths").is_none());
+    assert!(std::fs::read_to_string(
+        root.join(".unelos/runs")
+            .join(&state.run_id)
+            .join("state.json")
+    )
+    .unwrap()
+    .find("existingArtifactPaths")
+    .is_none());
     assert_eq!(
         read_run_artifact(&root, &state.run_id, path).unwrap(),
         "report"
@@ -98,7 +107,11 @@ fn artifacts_are_scoped_and_delete_removes_the_run() {
     old.as_object_mut().unwrap().remove("startedAt");
     old.as_object_mut().unwrap().remove("updatedAt");
     std::fs::write(&state_path, serde_json::to_vec(&old).unwrap()).unwrap();
-    assert!(get_run(&root, &state.run_id).unwrap().state.started_at.is_none());
+    assert!(get_run(&root, &state.run_id)
+        .unwrap()
+        .state
+        .started_at
+        .is_none());
     delete_run(&root, &state.run_id).unwrap();
     assert!(!state_path.parent().unwrap().exists());
 }
@@ -124,10 +137,15 @@ fn artifact_symlinks_are_rejected() {
 fn non_regular_and_unreadable_artifacts_cannot_be_read() {
     let (_temp, root) = fixture();
     let state = start_workflow(&root, "simple-plan-execute-review", None).unwrap();
-    let CurrentWork::Task(record) = &state.current else { panic!() };
+    let CurrentWork::Task(record) = &state.current else {
+        panic!()
+    };
     let path = &record.outputs[0].path;
     std::fs::create_dir(path).unwrap();
-    assert!(!get_run(&root, &state.run_id).unwrap().existing_artifact_paths.contains(&path.to_string()));
+    assert!(!get_run(&root, &state.run_id)
+        .unwrap()
+        .existing_artifact_paths
+        .contains(&path.to_string()));
     assert!(read_run_artifact(&root, &state.run_id, path).is_err());
     std::fs::remove_dir(path).unwrap();
     std::fs::write(path, [0xff]).unwrap();

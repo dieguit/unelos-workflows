@@ -23,8 +23,13 @@ fn human_names_slugify_and_collisions_are_clear() {
     assert_eq!(first.name, "api-cleanup");
     let second = start_workflow(&root, "implement-feature", None).unwrap();
     let error = rename_run(&root, &second.run_id, "API Cleanup!").unwrap_err();
-    assert!(matches!(error, unelos_core::RuntimeError::Collision { name } if name == "api-cleanup"));
-    assert_eq!(rename_run(&root, &second.run_id, "CON").unwrap().name, "con-run");
+    assert!(
+        matches!(error, unelos_core::RuntimeError::Collision { name } if name == "api-cleanup")
+    );
+    assert_eq!(
+        rename_run(&root, &second.run_id, "CON").unwrap().name,
+        "con-run"
+    );
     let renamed = rename_run(&root, &second.run_id, "a".repeat(80).as_str()).unwrap();
     assert_eq!(renamed.name.len(), 64);
 }
@@ -42,14 +47,19 @@ fn rename_keeps_rendered_delegated_prompt_paths_valid() {
     let run_id = package.run_id.as_deref().unwrap();
     let prompt = package.worker_prompt.as_ref().unwrap();
     let before = status(&root, run_id).unwrap();
-    let CurrentWork::Task(record) = &before.current else { panic!("task") };
+    let CurrentWork::Task(record) = &before.current else {
+        panic!("task")
+    };
     let output = &record.outputs[0].path;
     assert!(prompt.contains(output.as_str()));
     let renamed = rename_run(&root, run_id, "API Cleanup!").unwrap();
     assert_eq!(renamed.name, "api-cleanup");
     assert_eq!(before.current, renamed.current);
     fs::write(output, "Worker output after rename").unwrap();
-    assert_eq!(fs::read_to_string(output).unwrap(), "Worker output after rename");
+    assert_eq!(
+        fs::read_to_string(output).unwrap(),
+        "Worker output after rename"
+    );
     assert!(root.join(".unelos/runs").join(run_id).is_dir());
     assert!(!root.join(".unelos/rename.json").exists());
 }
@@ -175,7 +185,10 @@ fn rename_validates_name_id_collision_and_same_name_settlement() {
 fn legacy_state_without_naming_metadata_can_be_renamed() {
     let (_temp, root) = project_copy();
     let started = start_workflow(&root, "implement-feature", Some("legacy-run")).unwrap();
-    let path = root.join(".unelos/runs").join(&started.run_id).join("state.json");
+    let path = root
+        .join(".unelos/runs")
+        .join(&started.run_id)
+        .join("state.json");
     let mut saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
     saved.as_object_mut().unwrap().remove("namingPending");
     fs::write(&path, serde_json::to_vec(&saved).unwrap()).unwrap();

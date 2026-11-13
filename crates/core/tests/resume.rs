@@ -64,9 +64,24 @@ fn fresh_entry_never_selects_history_and_resume_is_read_only() {
     assert_eq!(serde_json::to_value(&fresh).unwrap()["entryMode"], "new");
     let catalog = execution_runs(&root).unwrap();
     assert_eq!(catalog.runs.len(), 2);
-    assert_eq!(catalog.controller_instructions, format!("{}\n{}", include_str!("../src/instructions/controller.md"), include_str!("../src/instructions/controller-resume.md")));
+    assert_eq!(
+        catalog.controller_instructions,
+        format!(
+            "{}\n{}",
+            include_str!("../src/instructions/controller.md"),
+            include_str!("../src/instructions/controller-resume.md")
+        )
+    );
     let resumed = execution_resume(&root, a_id).unwrap();
-    assert_eq!(resumed.controller_instructions, format!("{}\n{}\n{}", include_str!("../src/instructions/controller.md"), include_str!("../src/instructions/controller-main-task.md"), include_str!("../src/instructions/controller-resume.md")));
+    assert_eq!(
+        resumed.controller_instructions,
+        format!(
+            "{}\n{}\n{}",
+            include_str!("../src/instructions/controller.md"),
+            include_str!("../src/instructions/controller-main-task.md"),
+            include_str!("../src/instructions/controller-resume.md")
+        )
+    );
     assert_eq!(resumed.run_id.as_deref(), Some(a_id));
     assert!(resumed.resume_context.as_ref().unwrap().ledger.exists);
     assert_eq!(
@@ -137,12 +152,14 @@ fn empty_output_is_distinct_from_missing_and_missing_input_blocks_dispatch() {
     let resumed = execution_resume(&root, &state.run_id).unwrap();
     assert!(resumed.resume_context.unwrap().reports[0].exists);
     std::fs::remove_file(path).unwrap();
-    assert!(!execution_resume(&root, &state.run_id)
-        .unwrap()
-        .resume_context
-        .unwrap()
-        .reports[0]
-        .exists);
+    assert!(
+        !execution_resume(&root, &state.run_id)
+            .unwrap()
+            .resume_context
+            .unwrap()
+            .reports[0]
+            .exists
+    );
     let plan = finish_main(&root, &state);
     std::fs::remove_file(path).unwrap();
     let before = std::fs::read(

@@ -24,19 +24,45 @@ fn summaries_read_frontmatter_description_and_isolate_broken_skills() {
         ".unelos/skills/rust/SKILL.md",
         "---\nname: Rust conventions\ndescription: Follow Rust conventions.\nother: kept\n---\n# Rust\n",
     );
-    write(&root, ".unelos/skills/crlf/SKILL.md", "---\r\ndescription: Windows file\r\n---\r\nBody\r\n");
-    write(&root, ".unelos/skills/plain/SKILL.md", "# Plain\nNo frontmatter.\n");
-    write(&root, ".unelos/skills/empty-front/SKILL.md", "---\n---\nBody\n");
+    write(
+        &root,
+        ".unelos/skills/crlf/SKILL.md",
+        "---\r\ndescription: Windows file\r\n---\r\nBody\r\n",
+    );
+    write(
+        &root,
+        ".unelos/skills/plain/SKILL.md",
+        "# Plain\nNo frontmatter.\n",
+    );
+    write(
+        &root,
+        ".unelos/skills/empty-front/SKILL.md",
+        "---\n---\nBody\n",
+    );
     write(&root, ".unelos/skills/my.skill/SKILL.md", "Dotted id\n");
-    write(&root, ".unelos/skills/bad-yaml/SKILL.md", "---\ndescription: [\n---\n");
-    write(&root, ".unelos/skills/bad-type/SKILL.md", "---\ndescription: [a]\n---\n");
+    write(
+        &root,
+        ".unelos/skills/bad-yaml/SKILL.md",
+        "---\ndescription: [\n---\n",
+    );
+    write(
+        &root,
+        ".unelos/skills/bad-type/SKILL.md",
+        "---\ndescription: [a]\n---\n",
+    );
     fs::create_dir_all(root.join(".unelos/skills/missing")).unwrap();
     write(&root, ".unelos/skills/README.md", "not a skill");
 
     let result = skill_summaries(&root).unwrap();
     let rows: Vec<_> = result
         .iter()
-        .map(|s| (s.name.as_str(), s.description.as_deref(), s.problem.is_some()))
+        .map(|s| {
+            (
+                s.name.as_str(),
+                s.description.as_deref(),
+                s.problem.is_some(),
+            )
+        })
         .collect();
     assert_eq!(
         rows,
