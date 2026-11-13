@@ -73,9 +73,9 @@ pub fn parse_source_spec(spec: &str) -> Result<SourceSpec, InstallError> {
         return Err(fail("invalid_source", "Enter a source"));
     }
     let path = if spec == "~" || spec.starts_with("~/") {
-        let home = std::env::var("HOME")
-            .map_err(|_| fail("invalid_source", "Cannot expand ~ without HOME"))?;
-        Utf8PathBuf::from(home).join(spec.strip_prefix("~/").unwrap_or(""))
+        let home = crate::global_config::home()
+            .ok_or_else(|| fail("invalid_source", "Cannot expand ~ without HOME"))?;
+        home.join(spec.strip_prefix("~/").unwrap_or(""))
     } else {
         Utf8PathBuf::from(spec)
     };

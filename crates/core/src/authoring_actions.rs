@@ -446,10 +446,8 @@ fn make_global(project: &Utf8Path, kind: &str, id: &str) -> Result<(), String> {
             }
             format!("mcps/{id}.yaml")
         } else {
-            authoring_path(&root, kind, id)?
-                .strip_prefix(&root)
-                .unwrap()
-                .to_string()
+            authoring_path(&root, kind, id)?;
+            format!("{kind}/{id}")
         };
         let source = crate::project::bounded_path(&root, Utf8Path::new(&relative), &root, kind)
             .map_err(|e| e.to_string())?;
