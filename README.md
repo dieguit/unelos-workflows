@@ -195,7 +195,7 @@ cargo nextest run --locked -p unelos-core -p unelos-cli
 cargo test --locked -p unelos-core --doc
 ```
 
-For the desktop adapter, use `bun run tauri dev` or `bun run tauri build` with the
+For the desktop adapter, use `pnpm tauri dev` or `pnpm tauri build` with the
 platform's Tauri prerequisites installed. Rust artifacts and `Cargo.lock` now
 live at the workspace root. `reqwest` is reserved in workspace dependencies for
 shared HTTP operations when a real command needs them; no HTTP wrapper or
