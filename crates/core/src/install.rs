@@ -34,13 +34,13 @@ pub struct InstallError {
     pub message: String,
 }
 
-fn fail(code: &'static str, message: impl Into<String>) -> InstallError {
+pub(crate) fn fail(code: &'static str, message: impl Into<String>) -> InstallError {
     InstallError {
         code,
         message: message.into(),
     }
 }
-fn io_error(error: io::Error) -> InstallError {
+pub(crate) fn io_error(error: io::Error) -> InstallError {
     fail("install_io_failed", error.to_string())
 }
 
@@ -66,7 +66,9 @@ pub(crate) fn resolve_agent_model(model: &crate::AgentModel) -> Result<String, I
 
 use crate::project::safe_id;
 
-fn references(project: &LoadedProject) -> (BTreeSet<String>, BTreeMap<String, (bool, bool)>) {
+pub(crate) fn references(
+    project: &LoadedProject,
+) -> (BTreeSet<String>, BTreeMap<String, (bool, bool)>) {
     let mut tasks = BTreeSet::new();
     let mut agents = BTreeMap::new();
     let mut add = |task: &TaskSelection, agent: &str, execution: Execution| {
@@ -174,7 +176,10 @@ pub fn export_workflow_agents(
     export(&project)
 }
 
-fn load_install_source(root: &Utf8Path, workflow: &str) -> Result<LoadedProject, InstallError> {
+pub(crate) fn load_install_source(
+    root: &Utf8Path,
+    workflow: &str,
+) -> Result<LoadedProject, InstallError> {
     checked_path(root, Utf8Path::new(".unelos"))?;
     if root.join(".unelos").exists() {
         return crate::load_project(root, workflow)
@@ -214,24 +219,71 @@ pub fn install_workflow(
             agents: export(&project)?,
         });
     };
-    let project = load_install_source(source, workflow)?;
-    crate::validate_project(&project)
-        .map_err(|error| fail("invalid_project", error.to_string()))?;
-    let agents = export(&project)?;
-    check_project_init(root)?;
+    let plan = crate::plan_import(root, source, source.as_str(), &BTreeMap::new())?;
+    if plan.workflow.id != workflow {
+        return Err(fail(
+            "invalid_project",
+            format!(
+                "Source workflow {:?} does not match requested workflow {workflow:?}",
+                plan.workflow.id
+            ),
+        ));
+    }
+    if !plan.conflicts.is_empty() {
+        return Err(fail(
+            "import_collision",
+            format!(
+                "Existing authoring differs: {}",
+                plan.conflicts
+                    .iter()
+                    .map(|c| c.key.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        ));
+    }
+    match crate::commit_import(root, source, source.as_str(), &BTreeMap::new())? {
+        crate::ImportOutcome::Imported {
+            workflow, agents, ..
+        } => Ok(WorkflowInstall { workflow, agents }),
+        crate::ImportOutcome::Conflicts(plan) => Err(fail(
+            "import_collision",
+            format!(
+                "Existing authoring differs: {}",
+                plan.conflicts
+                    .iter()
+                    .map(|c| c.key.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        )),
+    }
+}
+
+pub(crate) fn collect_import_files(
+    project: &LoadedProject,
+    workflow: &str,
+) -> Result<BTreeMap<Utf8PathBuf, Vec<u8>>, InstallError> {
     let mut files = BTreeMap::new();
     let authoring = &project.authoring_root;
-    for agent in &agents {
+    let (tasks, agent_ids) = references(project);
+    for agent in agent_ids.keys().map(|id| &project.definitions.agents[id]) {
         for id in &agent.mcps {
             if id.starts_with("global/") {
                 continue;
             }
             let relative = Utf8PathBuf::from(format!("mcps/{id}.yaml"));
             let path = checked_path(authoring, &relative)?;
-            files.insert(relative, fs::read(path).map_err(io_error)?);
+            let bytes = fs::read(path).map_err(|error| match error.kind() {
+                io::ErrorKind::NotFound => fail(
+                    "invalid_project",
+                    format!("MCP {id:?} is referenced but {relative} is missing"),
+                ),
+                _ => io_error(error),
+            })?;
+            files.insert(relative, bytes);
         }
     }
-    let (tasks, agent_ids) = references(&project);
     let mut selected_sources = BTreeSet::from([project.workflow_source.clone()]);
     for id in &tasks {
         if id.starts_with("global/") {
@@ -296,6 +348,7 @@ pub fn install_workflow(
             .keys()
             .flat_map(|id| project.definitions.agents[id].skills.iter().cloned()),
     );
+    skill_ids.retain(|id| !id.starts_with("global/"));
     let skills = crate::skills::resolve_authoring_skills(authoring, &skill_ids)
         .map_err(|e| fail("invalid_skill", e.to_string()))?;
     for skill in skills {
@@ -305,33 +358,10 @@ pub fn install_workflow(
             &mut files,
         )?;
     }
-    // Validate all imported destinations before any write; native generated profiles overwrite separately.
-    for (relative, bytes) in &files {
-        let relative = Utf8PathBuf::from(".unelos").join(relative);
-        let path = checked_path(root, &relative)?;
-        match fs::read(&path) {
-            Ok(existing) if existing != *bytes => {
-                return Err(fail(
-                    "import_collision",
-                    format!("Existing authoring differs: {relative}"),
-                ))
-            }
-            Ok(_) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(io_error(error)),
-        }
-    }
-    for (relative, bytes) in files {
-        write_install_file(root, &Utf8PathBuf::from(".unelos").join(relative), &bytes)?;
-    }
-    initialize_project(root)?;
-    Ok(WorkflowInstall {
-        workflow: workflow.into(),
-        agents,
-    })
+    Ok(files)
 }
 
-fn collect_files(
+pub(crate) fn collect_files(
     root: &Utf8Path,
     relative: &Utf8Path,
     files: &mut BTreeMap<Utf8PathBuf, Vec<u8>>,
@@ -360,7 +390,10 @@ fn collect_files(
     Ok(())
 }
 
-fn checked_path(root: &Utf8Path, relative: &Utf8Path) -> Result<Utf8PathBuf, InstallError> {
+pub(crate) fn checked_path(
+    root: &Utf8Path,
+    relative: &Utf8Path,
+) -> Result<Utf8PathBuf, InstallError> {
     let mut path = root.to_owned();
     for component in relative.components() {
         let Utf8Component::Normal(part) = component else {

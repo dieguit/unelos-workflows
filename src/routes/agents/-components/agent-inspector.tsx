@@ -1,6 +1,6 @@
 import { BusyContent } from "@/components/busy-content"
 import { useDelayedFlag } from "@/hooks/use-delayed-flag"
-import { useCallback } from "react"
+import { useCallback, type ReactNode } from "react"
 import { McpPicker } from "./mcp-picker"
 import { Link } from "@tanstack/react-router"
 import { PanelRightCloseIcon, PencilIcon, XIcon } from "lucide-react"
@@ -13,11 +13,13 @@ import {
   FieldLabel,
   FieldTitle,
 } from "@/components/ui/field"
-import { listGlobalMcps, listMcps, listSkills, type AgentDocument } from "@/lib/projects"
+import { listAllSkills } from "@/hooks/skill-fetchers"
+import { listGlobalMcps, listMcps, type AgentDocument } from "@/lib/projects"
 import type { AgentForm } from "../-hooks/use-agent-form"
 import { useLazy } from "@/hooks/use-lazy"
 import { AgentModelPicker } from "./model-picker"
 import { SkillPicker } from "@/components/skill-picker"
+import { SkillLink } from "@/components/skill-link"
 
 export function AgentInspector({
   root,
@@ -33,7 +35,9 @@ export function AgentInspector({
   onEdit,
   onClose,
   onRetry,
+  footer,
 }: {
+  footer?: ReactNode
   root: string
   originalId: string | null
   form: AgentForm
@@ -49,7 +53,7 @@ export function AgentInspector({
   onRetry: () => void
 }) {
   const visualSaving = useDelayedFlag(saving)
-  const fetchSkills = useCallback(() => listSkills(root), [root])
+  const fetchSkills = useCallback(() => listAllSkills(root), [root])
   const skills = useLazy(fetchSkills)
   const fetchMcps = useCallback(async () => {
     const [project, global] = await Promise.all([listMcps(root), listGlobalMcps()])
@@ -193,12 +197,10 @@ export function AgentInspector({
                               key={`${i}-${skill}`}
                               className="flex h-7 min-w-0 items-center gap-1 rounded-md border pr-0.5 pl-1.5 font-mono text-xs"
                             >
-                              <span
+                              <SkillLink
+                                skill={skill}
                                 className="min-w-0 flex-1 truncate text-sm"
-                                title={skill}
-                              >
-                                {skill}
-                              </span>
+                              />
                               <Button
                                 variant="ghost"
                                 size="icon-sm"
@@ -309,6 +311,9 @@ export function AgentInspector({
           </form>
         ) : null}
       </div>
+      {footer ? (
+        <footer className="shrink-0 border-t p-3">{footer}</footer>
+      ) : null}
     </aside>
   )
 }

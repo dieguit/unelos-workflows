@@ -358,8 +358,214 @@ pub fn remove_task(root: &Utf8Path, id: &str) -> Result<(), String> {
 pub fn duplicate_global_task(id: &str, new_id: &str) -> Result<(), String> {
     duplicate_at(&crate::task_document::global_root()?, "tasks", id, new_id)
 }
+pub fn duplicate_global_skill(id: &str, new_id: &str) -> Result<(), String> {
+    duplicate_at(&crate::task_document::global_root()?, "skills", id, new_id)
+}
+
+pub fn remove_global_skill(project: Option<&Utf8Path>, id: &str) -> Result<(), String> {
+    let root = crate::task_document::global_root()?;
+    let source = authoring_path(&root, "skills", id)?;
+    check_tree(&source)?;
+    let reference = format!("global/{id}");
+    let mut files = Vec::new();
+    crate::skill_document::collect(&root, "tasks", &mut files)?;
+    for file in files {
+        let text = fs::read_to_string(&file).map_err(|e| e.to_string())?;
+        let task = crate::parse_task_definition(file.as_str(), &text).map_err(|e| e.to_string())?;
+        task_reference(&root, &file, &task, "skills", &reference, &source)?;
+    }
+    if let Some(project) = project {
+        references(project, "skills", &reference, &source)?;
+    }
+    remove_directory(&source)
+}
 pub fn remove_global_task(id: &str) -> Result<(), String> {
     let source = authoring_path(&crate::task_document::global_root()?, "tasks", id)?;
     check_tree(&source)?;
     remove_directory(&source)
+}
+
+pub fn make_skill_global(root: &Utf8Path, id: &str) -> Result<(), String> {
+    make_global(root, "skills", id)
+}
+pub fn make_mcp_global(root: &Utf8Path, id: &str) -> Result<(), String> {
+    make_global(root, "mcps", id)
+}
+pub fn make_task_global(root: &Utf8Path, id: &str) -> Result<(), String> {
+    make_global(root, "tasks", id)
+}
+
+fn make_global(project: &Utf8Path, kind: &str, id: &str) -> Result<(), String> {
+    let root = crate::project::absolute_root(project)
+        .map_err(|e| e.to_string())?
+        .join(".unelos");
+    let global = crate::task_document::global_root()?;
+    let mut items = vec![(kind.to_owned(), id.to_owned())];
+    if kind == "tasks" {
+        let source = authoring_path(&root, kind, id)?.join("task.yaml");
+        let task = crate::parse_task_definition(
+            source.as_str(),
+            &fs::read_to_string(&source).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+        let mut dependencies = BTreeMap::new();
+        crate::project::resolve_instructions(
+            &root,
+            &source,
+            "instructionsFile",
+            &task.instructions_file,
+            &mut String::new(),
+            &mut dependencies,
+        )
+        .map_err(|e| e.to_string())?;
+        if dependencies
+            .values()
+            .flatten()
+            .any(|file| !root.join(file).starts_with(source.parent().unwrap()))
+        {
+            return Err("instructions file outside the task folder; move it inside first".into());
+        }
+        for skill in task
+            .skills
+            .into_iter()
+            .filter(|skill| !skill.starts_with("global/"))
+        {
+            if !items
+                .iter()
+                .any(|(kind, id)| kind == "skills" && id == &skill)
+            {
+                items.push(("skills".into(), skill));
+            }
+        }
+    }
+    let mut moves = Vec::new();
+    for (kind, id) in &items {
+        let relative = if kind == "mcps" {
+            if !crate::project::safe_id(id) {
+                return Err(format!("Invalid MCP ID {id:?}"));
+            }
+            format!("mcps/{id}.yaml")
+        } else {
+            authoring_path(&root, kind, id)?;
+            format!("{kind}/{id}")
+        };
+        let source = crate::project::bounded_path(&root, Utf8Path::new(&relative), &root, kind)
+            .map_err(|e| e.to_string())?;
+        let target = crate::project::bounded_path(&global, Utf8Path::new(&relative), &global, kind)
+            .map_err(|e| e.to_string())?;
+        if fs::symlink_metadata(&target).is_ok() {
+            let label = match kind.as_str() {
+                "skills" => "Skill",
+                "mcps" => "MCP",
+                _ => "Task",
+            };
+            return Err(format!("Global {label} {id:?} already exists"));
+        }
+        absent(&target)?;
+        check_tree(&source)?;
+        let definition = match kind.as_str() {
+            "skills" => source.join("SKILL.md"),
+            "tasks" => source.join("task.yaml"),
+            _ => source.clone(),
+        };
+        let text = fs::read_to_string(&definition).map_err(|e| e.to_string())?;
+        match kind.as_str() {
+            "skills" => {
+                crate::skill_document::get_skill(project, id)?;
+            }
+            "tasks" => {
+                crate::parse_task_definition(definition.as_str(), &text)
+                    .map_err(|e| e.to_string())?;
+            }
+            _ => {
+                crate::mcp_document::get_mcp(project, id)?;
+            }
+        }
+        moves.push((source, target));
+    }
+    let mut edits = Vec::new();
+    for directory in ["agents", "tasks", "workflows"] {
+        let mut files = Vec::new();
+        crate::skill_document::collect(&root, directory, &mut files)?;
+        for file in files {
+            let original = fs::read_to_string(&file).map_err(|e| e.to_string())?;
+            match directory {
+                "agents" => {
+                    crate::parse_agent_definition(file.as_str(), &original)
+                        .map_err(|e| e.to_string())?;
+                }
+                "tasks" => {
+                    crate::parse_task_definition(file.as_str(), &original)
+                        .map_err(|e| e.to_string())?;
+                }
+                _ => {
+                    crate::parse_workflow_definition(file.as_str(), &original)
+                        .map_err(|e| e.to_string())?;
+                }
+            }
+            let mut updated = original.clone();
+            for (kind, id) in &items {
+                let field = match kind.as_str() {
+                    "skills" => "skills",
+                    "mcps" if directory == "agents" => "mcps",
+                    "tasks" if directory == "workflows" => "task",
+                    _ => continue,
+                };
+                updated = crate::skill_document::reference_field_edit(
+                    &updated,
+                    id,
+                    &format!("global/{id}"),
+                    field,
+                )?;
+            }
+            if updated != original {
+                edits.push((file, original, updated));
+            }
+        }
+    }
+    let result = (|| {
+        for (source, target) in &moves {
+            fs::create_dir_all(target.parent().unwrap()).map_err(|e| e.to_string())?;
+            copy_tree(source, target)?;
+        }
+        for (file, _, updated) in &edits {
+            crate::skill_document::atomic_write(file, updated)?;
+            for (source, target) in &moves {
+                if let Ok(relative) = file.strip_prefix(source) {
+                    crate::skill_document::atomic_write(&target.join(relative), updated)?;
+                }
+            }
+        }
+        Ok::<_, String>(())
+    })();
+    if let Err(error) = result {
+        let mut failures = Vec::new();
+        for (file, original, _) in &edits {
+            if let Err(e) = crate::skill_document::atomic_write(file, original) {
+                failures.push(e);
+            }
+        }
+        for (_, target) in &moves {
+            let cleanup = if target.is_dir() {
+                fs::remove_dir_all(target)
+            } else {
+                fs::remove_file(target)
+            };
+            if let Err(e) = cleanup {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    failures.push(e.to_string());
+                }
+            }
+        }
+        return Err(format!("{error}; rollback errors: {failures:?}"));
+    }
+    // shortcut: source deletion can partially progress after publication; use recoverable trash before requiring full multi-item rollback.
+    for (source, _) in moves {
+        if source.is_dir() {
+            remove_directory(&source)?;
+        } else {
+            fs::remove_file(source).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
 }

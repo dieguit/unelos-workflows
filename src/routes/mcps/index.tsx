@@ -6,6 +6,7 @@ import { McpsError, McpsPage } from "@/components/mcps-page"
 import {
   getMcp,
   listMcps,
+  makeMcpGlobal,
   removeMcp,
   requireProject,
   saveMcp,
@@ -49,6 +50,7 @@ function McpsRoute() {
         get: (id) => getMcp(root, id),
         save: (id, doc) => saveMcp(root, id, doc),
         remove: (id) => removeMcp(root, id),
+        makeGlobal: (id) => makeMcpGlobal(root, id),
       }}
     />
   )

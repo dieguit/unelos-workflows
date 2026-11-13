@@ -402,5 +402,8 @@ pub fn save_global_task(
     original_id: Option<&str>,
     task: TaskDocument,
 ) -> Result<TaskDocument, String> {
+    if task.skills.iter().any(|id| !id.starts_with("global/")) {
+        return Err("Global tasks can only reference global Skills".into());
+    }
     save_at(&global_root()?, original_id, task, None, &BTreeMap::new())
 }

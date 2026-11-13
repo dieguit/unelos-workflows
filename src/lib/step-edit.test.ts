@@ -105,5 +105,3 @@ test("global task refs", () => {
   expect(taskLabel("global/review")).toBe("Global task review")
   expect(taskLabel("review")).toBe("Task review")
 })
-
-

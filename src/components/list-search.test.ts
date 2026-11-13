@@ -20,4 +20,3 @@ test("ListSearch renders labelled search and polite live count", () => {
   expect(html).toMatch(/<span[^>]*data-list-count[^>]*aria-live="polite"[^>]*>1 of 2 agents<\/span>/)
   expect(html).toMatch(/<kbd[^>]*>\/<\/kbd>/)
 })
-

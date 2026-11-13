@@ -142,6 +142,10 @@ export function AppSidebar() {
           <CableIcon aria-hidden="true" className={iconClass} />
           Global MCPs
         </Link>
+        <Link to="/global-skills" data-section="global-skills" className={linkClass}>
+          <BookOpenIcon aria-hidden="true" className={iconClass} />
+          Global skills
+        </Link>
       </nav>
       <footer className="mt-auto flex flex-col gap-0.5 border-t pt-2">
         <button

@@ -1,4 +1,5 @@
 mod harnesses;
+mod imports;
 mod model_mappings;
 mod projects;
 mod runs;
@@ -37,6 +38,7 @@ fn external_navigation_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(imports::ImportSessions::default())
         .plugin(
             tauri_plugin_log::Builder::new()
                 .targets([
@@ -54,6 +56,10 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            imports::import_prepare,
+            imports::import_plan,
+            imports::import_commit,
+            imports::import_cancel,
             runs::list_runs,
             runs::get_run,
             runs::delete_run,
@@ -79,6 +85,12 @@ pub fn run() {
             projects::get_global_mcp,
             projects::save_global_mcp,
             projects::remove_global_mcp,
+            projects::list_global_skills,
+            projects::get_global_skill,
+            projects::create_global_skill,
+            projects::save_global_skill,
+            projects::duplicate_global_skill,
+            projects::remove_global_skill,
             projects::save_task,
             harnesses::install_harness,
             harnesses::uninstall_harness,
@@ -94,6 +106,9 @@ pub fn run() {
             projects::remove_agent,
             projects::remove_task,
             projects::remove_skill,
+            projects::make_skill_global,
+            projects::make_mcp_global,
+            projects::make_task_global,
             projects::remove_workflow,
             projects::get_workflow,
             projects::validate_workflow,
@@ -108,6 +123,7 @@ pub fn run() {
             projects::remove_global_task,
             projects::list_skills,
             projects::get_skill,
+            projects::create_skill,
             projects::save_skill
         ])
         .on_page_load(|webview, payload| {

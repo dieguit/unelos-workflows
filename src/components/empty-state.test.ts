@@ -15,4 +15,3 @@ test("EmptyState dashed uses h2 title; plain uses p title, no border", () => {
   expect(plain).not.toMatch(/border/)
   expect(plain).toMatch(/<p class="text-base">No match<\/p>/)
 })
-

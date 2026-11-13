@@ -422,8 +422,24 @@ fn broken_task(name: String, problem: String) -> TaskSummary {
 /// Summarize each `.unelos/skills/<id>/SKILL.md`; a broken skill is a row with `problem`.
 /// IDs follow `resolve_skills`, so `safe_id` is not applied.
 pub fn skill_summaries(project_root: &Utf8Path) -> Result<Vec<SkillSummary>, ProjectLoadError> {
-    summarize_definitions(
-        project_root,
+    let root = absolute_root(project_root)
+        .map_err(|source| ProjectLoadError::Root {
+            path: project_root.to_owned(),
+            source,
+        })?
+        .join(".unelos");
+    let settings = bounded_path(&root, Utf8Path::new("project.yaml"), &root, "project")?;
+    parse_project_settings(settings.as_str(), &read(&settings)?)?;
+    skill_summaries_at(&root)
+}
+
+pub fn global_skill_summaries() -> Result<Vec<SkillSummary>, String> {
+    skill_summaries_at(&crate::task_document::global_root()?).map_err(|e| e.to_string())
+}
+
+fn skill_summaries_at(authoring_root: &Utf8Path) -> Result<Vec<SkillSummary>, ProjectLoadError> {
+    summarize_authoring(
+        authoring_root,
         "skills",
         |authoring_root, directory, id| {
             let relative = Utf8PathBuf::from(format!("skills/{id}"));

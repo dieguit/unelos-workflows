@@ -1,5 +1,6 @@
-import { PlusIcon } from "lucide-react"
-import type { ReactNode } from "react"
+import { DownloadIcon, PlusIcon } from "lucide-react"
+import { useEffect, type ReactNode } from "react"
+import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import {
   ListBody,
@@ -21,15 +22,28 @@ export function NewWorkflowButton({ onClick, disabled }: { onClick?: () => void;
   )
 }
 
+export function ImportWorkflowButton({ onClick, label = "Import" }: { onClick?: () => void; label?: string }) {
+  return (
+    <Button variant="secondary" disabled={!onClick} onClick={onClick}>
+      <DownloadIcon /> {label}
+    </Button>
+  )
+}
+
 export function WorkflowsTable({
   workflows,
   onOpen,
   actions,
+  highlight,
 }: {
   workflows: WorkflowSummary[]
   onOpen: (file: string) => void
   actions: (workflow: WorkflowSummary) => ReactNode
+  highlight?: string
 }) {
+  useEffect(() => {
+    if (highlight) document.querySelector(`[data-file="${CSS.escape(highlight)}"]`)?.scrollIntoView({ block: "nearest" })
+  }, [highlight])
   return (
     <ListTable>
       <ListHeader>
@@ -44,7 +58,8 @@ export function WorkflowsTable({
         {workflows.map((w) => (
           <ListRow
             key={w.file}
-            className="cursor-pointer"
+            data-file={w.file}
+            className={cn("cursor-pointer transition-colors duration-700", w.file === highlight && "bg-primary-muted")}
             onClick={() => onOpen(w.file)}
             onKeyDown={(e) => {
               if (

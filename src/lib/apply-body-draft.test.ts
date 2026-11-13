@@ -13,4 +13,3 @@ test("Apply updates only the draft and closes the editor", () => {
   save()
   expect(persisted).toBe("after")
 })
-

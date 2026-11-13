@@ -17,7 +17,7 @@ import {
 import type { SkillSummary } from "@/lib/projects"
 import { PickerStatus } from "@/components/picker-status"
 
-/** "Add skill" popover listing project skills not yet referenced. */
+/** "Add skill" popover listing skills not yet referenced. */
 export function SkillPicker({
   skills,
   error,
@@ -51,12 +51,12 @@ export function SkillPicker({
       </PopoverTrigger>
       <PopoverContent align="start" className="w-72 p-0">
         <Command>
-          <CommandInput placeholder="Search project skills…" />
+          <CommandInput placeholder="Search skills…" />
           <CommandList>
             {options ? (
               <>
                 <CommandEmpty>
-                  {options.length ? "No skills match." : "No more project skills."}
+                  {options.length ? "No skills match." : "No more skills."}
                 </CommandEmpty>
                 <CommandGroup>
                   {options.map((s) => (

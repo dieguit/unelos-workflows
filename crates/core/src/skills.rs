@@ -60,17 +60,29 @@ pub(crate) fn resolve_authoring_skills(
     let mut skills = Vec::new();
     for id in ordered_ids {
         let id = id.as_ref();
-        if id.is_empty() || matches!(id, "." | "..") || id.contains(['/', '\\', ':', '\0']) {
+        let local_id = id.strip_prefix("global/").unwrap_or(id);
+        if crate::skill_document::valid_id(local_id).is_err() {
             return Err(SkillResolveError::InvalidId { id: id.to_owned() });
         }
         if !seen.insert(id) {
             continue;
         }
-        let directory = authoring_root.join("skills").join(id);
+        let global_root;
+        let root = if id.starts_with("global/") {
+            global_root =
+                crate::task_document::global_root().map_err(|error| SkillResolveError::Root {
+                    path: authoring_root.to_owned(),
+                    source: io::Error::other(error),
+                })?;
+            &global_root
+        } else {
+            authoring_root
+        };
+        let directory = root.join("skills").join(local_id);
         let path = directory.join("SKILL.md");
         crate::check_install_path(
-            authoring_root,
-            &Utf8PathBuf::from("skills").join(id).join("SKILL.md"),
+            root,
+            &Utf8PathBuf::from("skills").join(local_id).join("SKILL.md"),
         )
         .map_err(|error| SkillResolveError::Read {
             id: id.into(),

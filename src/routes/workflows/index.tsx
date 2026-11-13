@@ -1,4 +1,5 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
+import { TriangleAlertIcon } from "lucide-react"
 import { toast } from "sonner"
 import { createFileRoute, useRouter } from "@tanstack/react-router"
 import { Button } from "@/components/ui/button"
@@ -15,9 +16,11 @@ import {
 import { filterWorkflows } from "./-lib/filter"
 import { workflowSettingsSchema } from "./-lib/workflow-settings-schema"
 import {
+  ImportWorkflowButton,
   NewWorkflowButton,
   WorkflowsTable,
 } from "./-components/workflows-table"
+import { ImportDialog } from "./-components/import-dialog"
 import { NoResults, NoWorkflows } from "./-components/workflows-empty"
 import { WorkflowEditor } from "./-components/workflow-editor"
 
@@ -31,12 +34,17 @@ export const Route = createFileRoute("/workflows/")({
   errorComponent: WorkflowsError,
 })
 
-function Header({ onCreate, creating }: { onCreate?: () => void; creating?: boolean }) {
+function Header({ onCreate, creating, onImport }: { onCreate?: () => void; creating?: boolean; onImport?: () => void }) {
   return (
     <PageHeader
       title="Workflows"
       description="Reusable process definitions for this project. Open one to edit its settings."
-      action={<NewWorkflowButton onClick={onCreate} disabled={creating} />}
+      action={
+        <div className="flex gap-2">
+          <ImportWorkflowButton onClick={onImport} />
+          <NewWorkflowButton onClick={onCreate} disabled={creating} />
+        </div>
+      }
     />
   )
 }
@@ -63,7 +71,44 @@ function WorkflowsHome() {
       setCreating(false)
     }
   }
+  const [importing, setImporting] = useState(false)
+  const [highlight, setHighlight] = useState<string>()
+  useEffect(() => {
+    if (!highlight) return
+    const timer = setTimeout(() => setHighlight(undefined), 2000)
+    return () => clearTimeout(timer)
+  }, [highlight])
   const shown = filterWorkflows(workflows, query)
+  const importDialog = importing ? (
+    <ImportDialog
+      root={data.root}
+      onClose={() => setImporting(false)}
+      onImported={async ({ workflow, warningCount }) => {
+        setImporting(false)
+        setQuery("")
+        await router.invalidate()
+        setHighlight(`${workflow}.yaml`)
+        toast.success(
+          <>
+            Imported <code className="font-mono">{workflow}</code>
+          </>,
+          {
+            description:
+              warningCount > 0 ? (
+                <span className="flex items-center gap-1.5 text-warning">
+                  <TriangleAlertIcon aria-hidden className="size-3.5" />
+                  {warningCount} {warningCount === 1 ? "warning" : "warnings"} to fix
+                </span>
+              ) : undefined,
+            closeButton: true,
+            duration: 8000,
+            classNames: { actionButton: "!bg-primary-muted !text-primary" },
+            action: { label: "Open", onClick: () => setSelected({ root: data.root, id: workflow }) },
+          }
+        )
+      }}
+    />
+  ) : null
 
   if (data.root !== project.path)
     return (
@@ -86,14 +131,15 @@ function WorkflowsHome() {
   if (workflows.length === 0)
     return (
       <div className="flex flex-col gap-6">
-        <Header onCreate={create} creating={creating} />
-        <NoWorkflows onCreate={create} creating={creating} />
+        <Header onCreate={create} creating={creating} onImport={() => setImporting(true)} />
+        <NoWorkflows onCreate={create} creating={creating} onImport={() => setImporting(true)} />
+        {importDialog}
       </div>
     )
 
   return (
     <div className="flex flex-col gap-4">
-      <Header onCreate={create} creating={creating} />
+      <Header onCreate={create} creating={creating} onImport={() => setImporting(true)} />
       <ListSearch
         noun="workflow"
         value={query}
@@ -107,6 +153,7 @@ function WorkflowsHome() {
       ) : (
         <WorkflowsTable
           workflows={shown}
+          highlight={highlight}
           onOpen={(file) =>
             setSelected({ root: data.root, id: file.replace(/\.ya?ml$/i, "") })
           }
@@ -130,6 +177,7 @@ function WorkflowsHome() {
           }}
         />
       )}
+      {importDialog}
     </div>
   )
 }

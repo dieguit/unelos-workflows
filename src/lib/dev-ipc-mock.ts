@@ -182,6 +182,88 @@ const harnessModels = {
   groq: ["llama-3.3-70b-versatile", "qwen/qwen3-32b", "openai/gpt-oss-120b"],
 }
 
+// Mock modes: import-clean | import-mcp (default) | import-conflicts | import-many | import-source-error | import-commit-fail | import-commit-conflicts
+const importMode = mode?.startsWith("import-") ? mode.slice(7) : "mcp"
+const importSessions = new Map<string, { source: string; commits: number }>()
+const importCancelled = new Set<string>()
+const NAME_FORMAT = /^[a-z0-9]+(-[a-z0-9]+)*$/
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+type MockPlan = {
+  source: string
+  workflow: { id: string; description?: string }
+  items: { kind: string; id: string }[]
+  reused: string[]
+  mcps: { id: string; command?: string; url?: string }[]
+  warnings: { kind: string; message: string }[]
+  conflicts: { key: string; kind: string; id: string; suggested: string; reason: string; causedBy?: string; error?: string }[]
+}
+
+function importPlan(root: string, source: string, renames: Record<string, string>, extraTaken: string[] = []): MockPlan {
+  const withMcps = importMode === "mcp" || importMode === "commit-fail" || importMode === "commit-conflicts"
+  const items = [
+    { kind: "workflow", id: importMode === "conflicts" ? "investigate-bug" : "research" },
+    { kind: "agent", id: importMode === "conflicts" ? "engineer" : "researcher" },
+    { kind: "task", id: "review-change" },
+    { kind: "skill", id: importMode === "conflicts" ? "code-review" : "web-search" },
+    ...(withMcps ? [{ kind: "mcp", id: "github" }, { kind: "mcp", id: "search" }] : []),
+  ]
+  if (importMode === "many") for (let i = 1; i <= 12; i++) items.push({ kind: "skill", id: `lint-${i}` })
+  const authoring = authoringFor(root)
+  const existing: Record<string, string[]> = {
+    workflow: workflowsFor(root).map((w) => w.document.id),
+    agent: authoring.agents.map((a) => a.name),
+    skill: [...authoring.skills.map((s) => s.name), ...extraTaken, ...(importMode === "many" ? Array.from({ length: 12 }, (_, i) => `lint-${i + 1}`) : [])],
+    task: [],
+    mcp: [],
+  }
+  const base: [string, string, string, string?][] = items
+    .filter((i) => existing[i.kind].includes(i.id))
+    .map((i) => [`${i.kind}:${i.id}`, i.kind, i.id])
+  const skillRenamed = importMode === "conflicts" && renames["skill:code-review"] !== "code-review"
+  const cascaded: [string, string, string, string?][] = skillRenamed ? [["task:review-change", "task", "review-change", "skill:code-review"]] : []
+  const rows = [...base, ...cascaded]
+  const incoming = (kind: string) => items.filter((i) => i.kind === kind).map((i) => i.id)
+  const taken = new Set<string>()
+  const suggested = (kind: string, id: string) => {
+    let n = 2
+    while (existing[kind].includes(`${id}-${n}`) || incoming(kind).includes(`${id}-${n}`) || taken.has(`${kind}:${id}-${n}`)) n++
+    taken.add(`${kind}:${id}-${n}`)
+    return `${id}-${n}`
+  }
+  const prefilled = rows.map(([key, kind, id]) => [key, suggested(kind, id)] as const)
+  const finalName = (key: string, fallback: string) => renames[key] ?? fallback
+  const names = rows.map(([key], i) => finalName(key, prefilled[i][1]))
+  const conflicts = rows.map(([key, kind, id, causedBy], i) => {
+    const name = names[i]
+    const fixed = incoming(kind).filter((x) => !rows.some((r) => r[0] === `${kind}:${x}`))
+    const error = !name
+      ? "Enter a name"
+      : !NAME_FORMAT.test(name)
+        ? "Use lowercase letters, numbers and dashes"
+        : existing[kind].includes(name)
+          ? `A ${kind} named “${name}” already exists`
+          : fixed.includes(name) || names.some((n, j) => j !== i && n === name && rows[j][1] === kind)
+            ? `Two items can’t both be named “${name}”`
+            : undefined
+    return { key, kind, id, suggested: prefilled[i][1], reason: causedBy ? "referencesRenamed" : "exists", ...(causedBy ? { causedBy } : {}), ...(error ? { error } : {}) }
+  })
+  return {
+    source,
+    workflow: { id: items[0].id, description: "Research a topic, triage findings and produce a sourced summary." },
+    items,
+    reused: importMode === "clean" ? ["skill:planning"] : importMode === "conflicts" ? [] : ["skill:planning", "agent:reviewer"],
+    mcps: withMcps ? [{ id: "github", url: "https://api.githubcopilot.com/mcp/" }, { id: "search", command: "npx -y @modelcontextprotocol/server-brave-search@0.6.2" }, { id: "fetch", command: "uvx mcp-server-fetch==2025.4.7 --ignore-robots-txt --user-agent unelos-research" }] : [],
+    warnings: importMode === "clean" || importMode === "conflicts"
+      ? []
+      : [
+          { kind: "missingGlobal", message: "Uses global skill `global/tdd`, which isn’t installed on this machine" },
+          { kind: "unresolvedModel", message: "Agent `reviewer` uses model `claude-x`, which isn’t mapped" },
+        ],
+    conflicts,
+  }
+}
+
 export function installDevIpcMock() {
   mockIPC(async (cmd, args) => {
     const path = (args as { path?: string })?.path
@@ -523,6 +605,55 @@ export function installDevIpcMock() {
         Object.assign(h, cmd === "install_harness" ? { installed: true, updateAvailable: false, integrationVersion: "0.0.1" } : { installed: false, updateAvailable: false, integrationVersion: null })
         return structuredClone(harnesses)
       }
+      case "import_prepare": {
+        const { id, source } = args as { id: string; source: string }
+        importCancelled.delete(id)
+        await sleep(/^[a-z]+:\/\//.test(source) ? 1800 : 500)
+        if (importCancelled.has(id)) throw "Cancelled"
+        if (importMode === "source-error") {
+          if (/^[a-z]+:\/\//.test(source)) throw "Couldn’t clone repository: authentication failed\nCheck that git can reach this repository with your credentials, or clone it yourself and choose the local folder."
+          throw "This folder must contain exactly one workflow (found 3)\nFound research, triage and release-notes. Point to the subfolder of the one you want, e.g. ~/projects/agent-workflows/research."
+        }
+        importSessions.set(id, { source, commits: 0 })
+        return importPlan(root, source, {})
+      }
+      case "import_plan": {
+        const { id, renames } = args as { id: string; renames: Record<string, string> }
+        const session = importSessions.get(id)
+        if (!session) throw "Import session expired"
+        return importPlan(root, session.source, renames)
+      }
+      case "import_commit": {
+        const { id, renames } = args as { id: string; renames: Record<string, string> }
+        const session = importSessions.get(id)
+        if (!session) throw "Import session expired"
+        await sleep(900)
+        session.commits++
+        if (importMode === "commit-fail" && session.commits === 1) throw "Couldn’t write skills/code-review-2/SKILL.md: no space left on device (os error 28)\nFree up space, then retry. Your names and choices are kept."
+        if (importMode === "commit-conflicts" && session.commits === 1) return { status: "conflicts", plan: importPlan(root, session.source, renames, ["web-search"]) }
+        const plan = importPlan(root, session.source, renames)
+        if (plan.conflicts.some((c) => c.error)) return { status: "conflicts", plan }
+        const key = `workflow:${plan.workflow.id}`
+        const name = renames[key] ?? plan.conflicts.find((c) => c.key === key)?.suggested ?? plan.workflow.id
+        workflowsFor(root).push({
+          summary: { name, file: `${name}.yaml`, description: plan.workflow.description ?? null, steps: 2, problem: null },
+          document: {
+            id: name, name, description: plan.workflow.description ?? null, start: "end",
+            steps: [{ id: "end", originalId: "end", label: "end", kind: "end", title: null, agent: null, execution: null, task: null, routes: [], workers: [], inputs: [], outputs: [] }],
+            issues: [],
+          },
+        })
+        importSessions.delete(id)
+        return { status: "imported", workflow: name, warningCount: plan.warnings.length }
+      }
+      case "import_cancel": {
+        const { id } = args as { id: string }
+        importCancelled.add(id)
+        importSessions.delete(id)
+        return null
+      }
+      case "plugin:dialog|open":
+        return `${home}/projects/agent-workflows`
       case "plugin:opener|reveal_item_in_dir":
         return null
     }

@@ -4,7 +4,7 @@ import { PencilIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { SkillPicker } from "@/components/skill-picker"
 import { useLazy } from "@/hooks/use-lazy"
-import { listSkills } from "@/lib/projects"
+import { listAllSkills } from "@/hooks/skill-fetchers"
 import type { WorkflowForm } from "../-hooks/use-workflow-form"
 import { humanize } from "@/lib/step-edit"
 import { StepIconBox } from "@/components/flow/step-card"
@@ -50,7 +50,7 @@ export function StepPanel({
   onRemove: () => void
 }) {
   const steps = useStore(form.store, (s) => s.values.steps)
-  const fetchSkills = useCallback(() => listSkills(root), [root])
+  const fetchSkills = useCallback(() => listAllSkills(root), [root])
   const skills = useLazy(fetchSkills)
   const agents = useAgents(root)
   const step = steps[index]
