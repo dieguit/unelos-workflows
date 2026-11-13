@@ -129,6 +129,38 @@ function AgentsHome() {
     else if (id === null) setLoaded(true)
   }
 
+  const closeIf = (id: string) => {
+    if (selected !== id) return
+    ++request.current
+    setSelected(undefined)
+    setEditor(null)
+    setLoaded(false)
+    form.reset(emptyAgent)
+    setBaseline(emptyAgent)
+  }
+  const actions = (id: string, variant?: "footer") => (
+    <ListActions
+      variant={variant}
+      kind="Agent"
+      name={id}
+      nameSchema={agentSchema.shape.id}
+      disabled={visualSaving}
+      beforeRemove={async () =>
+        selected !== id ||
+        (!saving && (!(dirty || editorDirty) || (await askDiscard())))
+      }
+      duplicate={async (newId) => {
+        await duplicateAgent(root, id, newId)
+        void router.invalidate()
+      }}
+      remove={async () => {
+        await removeAgent(root, id)
+        closeIf(id)
+        void router.invalidate()
+      }}
+    />
+  )
+
   if (root !== project.path)
     return (
       <div className="flex flex-col gap-6">
@@ -191,35 +223,7 @@ function AgentsHome() {
               selected={selected ?? undefined}
               onSelect={(id) => void select(id)}
               onCreate={() => void select(null)}
-              actions={(id) => (
-                <ListActions
-                  kind="Agent"
-                  name={id}
-                  nameSchema={agentSchema.shape.id}
-                  disabled={visualSaving}
-                  beforeRemove={async () =>
-                    selected !== id ||
-                    (!saving &&
-                      (!(dirty || editorDirty) || (await askDiscard())))
-                  }
-                  duplicate={async (newId) => {
-                    await duplicateAgent(root, id, newId)
-                    void router.invalidate()
-                  }}
-                  remove={async () => {
-                    await removeAgent(root, id)
-                    if (selected === id) {
-                      ++request.current
-                      setSelected(undefined)
-                      setEditor(null)
-                      setLoaded(false)
-                      form.reset(emptyAgent)
-                      setBaseline(emptyAgent)
-                    }
-                    void router.invalidate()
-                  }}
-                />
-              )}
+              actions={(id) => actions(id)}
               query={query}
               onClear={() => {
                 setQuery("")
@@ -235,6 +239,7 @@ function AgentsHome() {
           root={root}
           originalId={selected}
           form={form}
+          footer={typeof selected === "string" && loaded ? actions(selected, "footer") : undefined}
           draft={loaded ? draft : undefined}
           dirty={dirty}
           loading={!loaded && !loadError}

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { SkillPicker } from "@/components/skill-picker"
 import { useLazy } from "@/hooks/use-lazy"
-import { listSkills } from "@/lib/projects"
+import { listAllSkills } from "@/hooks/skill-fetchers"
 import type { WorkflowForm } from "../../-hooks/use-workflow-form"
 import { addWorker, humanize, slugify, taskRef, workerTitle } from "@/lib/step-edit"
 import { StepIconBox } from "@/components/flow/step-card"
@@ -109,7 +109,7 @@ export function WorkerPanel({ root, form, index, worker: at, showErrors, disable
   onRemove: () => void
 }) {
   const steps = useStore(form.store, (s) => s.values.steps)
-  const fetchSkills = useCallback(() => listSkills(root), [root])
+  const fetchSkills = useCallback(() => listAllSkills(root), [root])
   const skills = useLazy(fetchSkills)
   const agents = useAgents(root)
   const loadAgents = agents.load
@@ -120,7 +120,6 @@ export function WorkerPanel({ root, form, index, worker: at, showErrors, disable
   const { task } = worker
   const named = task.source === "named" ? task.id : null
   const title = workerTitle(worker)
-  const inherited = agents.data?.find((a) => a.name === worker.agent)?.skills ?? []
   const parent = humanize(step.id)
   return (
     <>
@@ -191,7 +190,7 @@ export function WorkerPanel({ root, form, index, worker: at, showErrors, disable
             {(field) => {
               const list = field.state.value
               return (
-                <Section label="Task skills" source={named}>
+                <Section label="Skills" source={named}>
                   <SkillChips skills={list} onRemove={named ? undefined : (i) => field.removeValue(i)} />
                   {named ? (
                     !list.length && <p className="text-sm text-muted-foreground">None</p>
@@ -208,23 +207,6 @@ export function WorkerPanel({ root, form, index, worker: at, showErrors, disable
               )
             }}
           </form.Field>
-          <Section
-            label="Agent skills"
-            action={
-              worker.agent && (
-                <span className="flex items-center gap-1 truncate text-xs text-muted-foreground">
-                  <LockIcon aria-hidden="true" className="size-3" />
-                  From Agent · <span className="font-mono">{worker.agent}</span>
-                </span>
-              )
-            }
-          >
-            {inherited.length ? (
-              <SkillChips skills={inherited} />
-            ) : (
-              <p className="text-sm text-muted-foreground">{worker.agent ? "None" : "Choose an Agent to see its skills."}</p>
-            )}
-          </Section>
         </div>
         <Section
           label="Input"

@@ -1,6 +1,6 @@
 import { BusyContent } from "@/components/busy-content"
 import { useDelayedFlag } from "@/hooks/use-delayed-flag"
-import { useCallback } from "react"
+import { useCallback, type ReactNode } from "react"
 import { useStore } from "@tanstack/react-form"
 import { PanelRightCloseIcon, PencilIcon, PlusIcon, XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -16,6 +16,7 @@ import {
 import type { SkillSummary, TaskDocument } from "@/lib/projects"
 import { useLazy } from "@/hooks/use-lazy"
 import { SkillPicker } from "@/components/skill-picker"
+import { SkillLink } from "@/components/skill-link"
 import type { TaskForm } from "@/hooks/use-task-form"
 
 export function TaskInspector({
@@ -35,7 +36,9 @@ export function TaskInspector({
   onRetry,
   onOutcomeAdd,
   onOutcomeRemove,
+  footer,
 }: {
+  footer?: ReactNode
   /** Skills offered by the picker; null when no project is open to pick from. */
   fetchSkills: (() => Promise<SkillSummary[]>) | null
   /** Shown under the title, e.g. "tasks/review" or "Project Task". */
@@ -216,12 +219,10 @@ export function TaskInspector({
                               key={`${i}-${skill}`}
                               className="flex h-7 min-w-0 items-center gap-1 rounded-md border pr-0.5 pl-1.5 font-mono text-xs"
                             >
-                              <span
+                              <SkillLink
+                                skill={skill}
                                 className="min-w-0 flex-1 truncate text-sm"
-                                title={skill}
-                              >
-                                {skill}
-                              </span>
+                              />
                               <Button
                                 variant="ghost"
                                 size="icon-sm"
@@ -350,6 +351,9 @@ export function TaskInspector({
           </form>
         ) : null}
       </div>
+      {footer ? (
+        <footer className="shrink-0 border-t p-3">{footer}</footer>
+      ) : null}
     </aside>
   )
 }

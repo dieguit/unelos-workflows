@@ -37,6 +37,8 @@ type McpsApi = {
   get: (id: string) => Promise<McpDocument>
   save: (originalId: string | null, mcp: McpDocument) => Promise<McpDocument>
   remove: (id: string) => Promise<void>
+  /** Project scope only. */
+  makeGlobal?: (id: string) => Promise<void>
 }
 
 export function McpsPage({
@@ -118,6 +120,42 @@ export function McpsPage({
   }
   const shown = mcps.filter((m) =>
     m.name.toLowerCase().includes(query.trim().toLowerCase())
+  )
+  const closeIf = (name: string) => {
+    if (selected !== name) return
+    ++request.current
+    setSelected(undefined)
+    setLoaded(false)
+    setDraft(emptyMcp)
+    setBaseline(emptyMcp)
+  }
+  const actions = (name: string, variant?: "footer") => (
+    <ListActions
+      variant={variant}
+      kind="MCP"
+      name={name}
+      nameSchema={z.string()}
+      disabled={visualSaving}
+      beforeRemove={async () =>
+        selected !== name || (!saving && (!dirty || (await discard.ask())))
+      }
+      remove={async () => {
+        await api.remove(name)
+        closeIf(name)
+        void router.invalidate()
+      }}
+      makeGlobal={
+        api.makeGlobal &&
+        (async () => {
+          await api.makeGlobal!(name)
+          closeIf(name)
+          void router.invalidate()
+        })
+      }
+      openGlobal={() =>
+        void router.navigate({ to: "/global-mcps", search: { mcp: name } })
+      }
+    />
   )
   return (
     <div
@@ -215,27 +253,7 @@ export function McpsPage({
                       {m.target ? <Truncated text={m.target} /> : "—"}
                     </ListCell>
                     <ListCell>
-                      <ListActions
-                        kind="MCP"
-                        name={m.name}
-                        nameSchema={z.string()}
-                        disabled={visualSaving}
-                        beforeRemove={async () =>
-                          selected !== m.name ||
-                          (!saving && (!dirty || (await discard.ask())))
-                        }
-                        remove={async () => {
-                          await api.remove(m.name)
-                          if (selected === m.name) {
-                            ++request.current
-                            setSelected(undefined)
-                            setLoaded(false)
-                            setDraft(emptyMcp)
-                            setBaseline(emptyMcp)
-                          }
-                          void router.invalidate()
-                        }}
-                      />
+                      {actions(m.name)}
                     </ListCell>
                   </ListRow>
                 ))}
@@ -317,6 +335,11 @@ export function McpsPage({
               </div>
             )}
           </div>
+          {typeof selected === "string" && loaded && (
+            <footer className="shrink-0 border-t p-3">
+              {actions(selected, "footer")}
+            </footer>
+          )}
         </aside>
       )}
       {discard.dialog}

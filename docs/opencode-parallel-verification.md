@@ -1,5 +1,7 @@
 # T17 parallel dispatch — OpenCode V2 verification
 
+> Historical: `examples/parallel-research` was replaced by `examples/council`.
+
 Checked 2026-10-16. One real-model run of `examples/parallel-research` on
 OpenCode V2. All operator choices (workflow selection, interview answers, the
 worker's view question, gate rejection and approval) were **assistant-scripted

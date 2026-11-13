@@ -1,4 +1,5 @@
-import { useCallback, type ReactNode } from "react"
+import { listGlobalPrefixedSkills } from "@/hooks/skill-fetchers"
+import { type ReactNode } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { z } from "zod"
 import { PageHeader } from "@/components/page-header"
@@ -7,7 +8,6 @@ import {
   duplicateGlobalTask,
   getGlobalTask,
   listGlobalTasks,
-  listSkills,
   removeGlobalTask,
   saveGlobalTask,
 } from "@/lib/projects"
@@ -41,15 +41,11 @@ const api = {
 function GlobalTasksRoute() {
   const { tasks } = Route.useLoaderData()
   const { task } = Route.useSearch()
-  const { project } = Route.useRouteContext()
-  const root = project?.path
-  // Skill names resolve per project; the open project (if any) supplies the picker list.
-  const fetchSkills = useCallback(() => listSkills(root!), [root])
   return (
     <TasksPage
       tasks={tasks}
       initial={task}
-      fetchSkills={root ? fetchSkills : null}
+      fetchSkills={listGlobalPrefixedSkills}
       scope={{ path: "global", label: "Global Task" }}
       header={Header}
       api={api}

@@ -22,6 +22,8 @@ export type TasksApi = {
   save: (originalId: string | null, task: TaskDocument, renames: Record<string, string>) => Promise<TaskDocument>
   duplicate: (id: string, newId: string) => Promise<void>
   remove: (id: string) => Promise<void>
+  /** Project scope only. */
+  makeGlobal?: (id: string) => Promise<void>
 }
 
 /** List + inspector for a task store: the open project's tasks or the machine-wide global ones. */
@@ -126,6 +128,53 @@ export function TasksPage({
     else if (id === null) setLoaded(true)
   }
 
+  const closeIf = (id: string) => {
+    if (selected !== id) return
+    ++request.current
+    setSelected(undefined)
+    setEditor(null)
+    setLoaded(false)
+    form.reset(emptyTask)
+    originals.current = []
+    setBaseline(emptyTask)
+  }
+  const actions = (id: string, variant?: "footer") => (
+    <ListActions
+      variant={variant}
+      kind="Task"
+      name={id}
+      nameSchema={taskSchema.shape.id}
+      disabled={visualSaving}
+      beforeRemove={async () =>
+        selected !== id ||
+        (!saving && (!(dirty || editorDirty) || (await askDiscard())))
+      }
+      duplicate={async (newId) => {
+        await api.duplicate(id, newId)
+        void router.invalidate()
+      }}
+      remove={async () => {
+        await api.remove(id)
+        closeIf(id)
+        void router.invalidate()
+      }}
+      makeGlobal={
+        api.makeGlobal &&
+        (async () => {
+          await api.makeGlobal!(id)
+          closeIf(id)
+          void router.invalidate()
+        })
+      }
+      makeGlobalSkills={async () =>
+        (await api.get(id)).skills.filter((s) => !s.startsWith("global/"))
+      }
+      openGlobal={() =>
+        void router.navigate({ to: "/global-tasks", search: { task: id } })
+      }
+    />
+  )
+
   return (
     <div inert={saving} className="-mx-8 -mt-6 -mb-8 flex h-[calc(100%+3.5rem)]">
       <div className="min-w-0 flex-1 overflow-y-auto px-8 pt-6 pb-8">
@@ -180,36 +229,7 @@ export function TasksPage({
               selected={selected ?? undefined}
               onSelect={(id) => void select(id)}
               onCreate={() => void select(null)}
-              actions={(id) => (
-                <ListActions
-                  kind="Task"
-                  name={id}
-                  nameSchema={taskSchema.shape.id}
-                  disabled={visualSaving}
-                  beforeRemove={async () =>
-                    selected !== id ||
-                    (!saving &&
-                      (!(dirty || editorDirty) || (await askDiscard())))
-                  }
-                  duplicate={async (newId) => {
-                    await api.duplicate(id, newId)
-                    void router.invalidate()
-                  }}
-                  remove={async () => {
-                    await api.remove(id)
-                    if (selected === id) {
-                      ++request.current
-                      setSelected(undefined)
-                      setEditor(null)
-                      setLoaded(false)
-                      form.reset(emptyTask)
-                      originals.current = []
-                      setBaseline(emptyTask)
-                    }
-                    void router.invalidate()
-                  }}
-                />
-              )}
+              actions={(id) => actions(id)}
               query={query}
               onClear={() => {
                 setQuery("")
@@ -226,6 +246,7 @@ export function TasksPage({
           scope={scope}
           originalId={selected}
           form={form}
+          footer={typeof selected === "string" && loaded ? actions(selected, "footer") : undefined}
           onOutcomeAdd={() => originals.current.push(null)}
           onOutcomeRemove={(i) => originals.current.splice(i, 1)}
           draft={loaded ? draft : undefined}

@@ -1,10 +1,11 @@
 //! Shared application logic for the CLI and desktop adapters.
 
 mod authoring_actions;
+pub use authoring_actions::{make_skill_global, make_mcp_global, make_task_global};
 mod context;
 pub use authoring_actions::{
-    duplicate_agent, duplicate_global_task, duplicate_skill, duplicate_task, duplicate_workflow,
-    remove_agent, remove_global_task, remove_skill, remove_task, remove_workflow,
+    duplicate_agent, duplicate_global_skill, duplicate_global_task, duplicate_skill, duplicate_task, duplicate_workflow,
+    remove_agent, remove_global_skill, remove_global_task, remove_skill, remove_task, remove_workflow,
 };
 mod workflow_document;
 pub use workflow_document::{
@@ -43,12 +44,18 @@ mod definitions;
 mod execution;
 mod graph;
 mod install;
+mod import;
+pub use import::{
+    apply_renames, commit_import, fetch_source, parse_source_spec, plan_import, FetchedSource,
+    ImportConflict, ImportItem, ImportKind, ImportMcp, ImportOutcome, ImportPlan, ImportWarning,
+    ImportWorkflow, SourceSpec,
+};
 mod project;
 mod runtime;
 mod settings;
 mod skill_document;
 mod skills;
-pub use skill_document::{get_skill, save_skill, SaveSkillResult, SkillDocument};
+pub use skill_document::{create_global_skill, create_skill, get_global_skill, get_skill, save_global_skill, save_skill, SaveSkillResult, SkillDocument};
 mod validation;
 mod work;
 
@@ -69,7 +76,7 @@ pub use install::{
     install_workflow, write_install_file, AgentExport, InstallError, WorkflowInstall,
 };
 pub use project::{
-    agent_summaries, global_task_summaries, list_workflows, load_project, skill_summaries,
+    agent_summaries, global_skill_summaries, global_task_summaries, list_workflows, load_project, skill_summaries,
     task_summaries, workflow_summaries, AgentSummary, LoadedProject, ProjectLoadError,
     SkillSummary, TaskSummary, WorkflowSummary,
 };

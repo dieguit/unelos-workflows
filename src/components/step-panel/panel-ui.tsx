@@ -2,6 +2,7 @@ import type { ReactNode } from "react"
 import { CircleAlertIcon, PlusIcon, XIcon } from "lucide-react"
 import { cn } from "cn"
 import { Button } from "@/components/ui/button"
+import { SkillLink } from "@/components/skill-link"
 import { Field, FieldLabel, FieldTitle } from "@/components/ui/field"
 import { taskRef } from "@/lib/step-edit"
 
@@ -135,7 +136,7 @@ export function SkillChips({ skills, onRemove }: { skills: string[]; onRemove?: 
             !onRemove && "pr-1.5"
           )}
         >
-          {skill}
+          <SkillLink skill={skill} />
           {onRemove && <RemoveButton label={`Remove ${skill}`} onClick={() => onRemove(i)} />}
         </li>
       ))}

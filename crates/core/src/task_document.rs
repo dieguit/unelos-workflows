@@ -201,4 +201,9 @@ pub fn save_task_with_outcome_renames(root: &Utf8Path, original_id: Option<&str>
     save_at(&root.join(".unelos"), original_id, task, Some(&root), &renames)
 }
 pub fn get_global_task(id: &str) -> Result<TaskDocument, String> { get_at(&global_root()?, id) }
-pub fn save_global_task(original_id: Option<&str>, task: TaskDocument) -> Result<TaskDocument, String> { save_at(&global_root()?, original_id, task, None, &BTreeMap::new()) }
+pub fn save_global_task(original_id: Option<&str>, task: TaskDocument) -> Result<TaskDocument, String> {
+    if task.skills.iter().any(|id| !id.starts_with("global/")) {
+        return Err("Global tasks can only reference global Skills".into());
+    }
+    save_at(&global_root()?, original_id, task, None, &BTreeMap::new())
+}

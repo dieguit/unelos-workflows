@@ -1,3 +1,4 @@
+import { listAllSkills } from "@/hooks/skill-fetchers"
 import { useCallback } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { z } from "zod"
@@ -6,8 +7,8 @@ import { TasksError, TasksPage } from "@/components/tasks-page"
 import {
   duplicateTask,
   getTask,
-  listSkills,
   listTasks,
+  makeTaskGlobal,
   removeTask,
   requireProject,
   saveTask,
@@ -41,7 +42,7 @@ function TasksRoute() {
   const { root, tasks } = Route.useLoaderData()
   const { project } = Route.useRouteContext()
   const { task } = Route.useSearch()
-  const fetchSkills = useCallback(() => listSkills(root), [root])
+  const fetchSkills = useCallback(() => listAllSkills(root), [root])
   if (root !== project.path)
     return (
       <div className="flex flex-col gap-6">
@@ -62,6 +63,7 @@ function TasksRoute() {
         save: (originalId, t, renames) => saveTask(root, originalId, t, renames),
         duplicate: (id, newId) => duplicateTask(root, id, newId),
         remove: (id) => removeTask(root, id),
+        makeGlobal: (id) => makeTaskGlobal(root, id),
       }}
     />
   )

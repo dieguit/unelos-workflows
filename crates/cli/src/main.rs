@@ -1,7 +1,7 @@
 use camino::Utf8PathBuf;
 use clap::{Parser, Subcommand};
 use std::{
-    io::{self, Read, Write},
+    io::{self, IsTerminal, Read, Write},
     process::ExitCode,
 };
 use unelos_core::{
@@ -12,6 +12,7 @@ use unelos_core::{
     RuntimeError, Settings, SettingsError,
 };
 
+mod import;
 mod init;
 mod opencode;
 mod runtime_output;
@@ -48,7 +49,13 @@ enum Command {
     Install {
         workflow: String,
         #[arg(long)]
-        source: Option<Utf8PathBuf>,
+        source: Option<String>,
+        #[arg(long)]
+        rename: Vec<String>,
+        #[arg(long)]
+        trust_mcps: bool,
+        #[arg(long)]
+        accept_suggested: bool,
         #[arg(long, value_enum)]
         opencode: Option<opencode::Version>,
     },
@@ -241,6 +248,12 @@ impl Error {
     }
 
     fn exit_code(&self) -> ExitCode {
+        if self.code() == "import_conflicts" {
+            return ExitCode::from(3);
+        }
+        if self.code() == "mcp_trust_required" {
+            return ExitCode::from(4);
+        }
         match self {
             Self::Settings(_)
             | Self::ProjectLoad(_)
@@ -295,18 +308,21 @@ fn run(cli: &Cli) -> Result<(), Error> {
             workflow,
             source,
             opencode,
+            rename,
+            trust_mcps,
+            accept_suggested,
         } => {
+            let renames = import::parse_renames(rename)?;
             let selected = init::install_version(&cli.project, *opencode)?;
+            if let Some(source) = source {
+                return import::install(cli, source, renames, *trust_mcps, *accept_suggested, selected);
+            }
             if selected.is_some() {
-                let agents = unelos_core::export_workflow_agents(
-                    source.as_deref().unwrap_or(&cli.project),
-                    workflow,
-                )?;
+                let agents = unelos_core::export_workflow_agents(&cli.project, workflow)?;
                 opencode::check_agents(&cli.project, &agents)?;
                 unelos_core::check_opencode_mcps(&cli.project, workflow, &agents)?;
             }
-            let installed =
-                unelos_core::install_workflow(&cli.project, source.as_deref(), workflow)?;
+            let installed = unelos_core::install_workflow(&cli.project, None, workflow)?;
             let native_agents = match selected {
                 Some(version) => {
                     unelos_core::write_opencode_mcps(&cli.project, workflow, &installed.agents)?;

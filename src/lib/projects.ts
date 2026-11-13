@@ -122,6 +122,8 @@ export const listSkills = (root: string) =>
   trackedInvoke<SkillSummary[]>("list_skills", { root })
 export const getSkill = (root: string, id: string) =>
   trackedInvoke<SkillDocument>("get_skill", { root, id })
+export const createSkill = (root: string, name: string, description: string, body: string): Promise<SkillDocument> =>
+  trackedInvoke<SkillDocument>("create_skill", { root, name, description, body })
 export const saveSkill = (
   root: string,
   id: string,
@@ -216,3 +218,13 @@ export const listGlobalMcps = () => trackedInvoke<McpSummary[]>("list_global_mcp
 export const getGlobalMcp = (id: string) => trackedInvoke<McpDocument>("get_global_mcp", { id })
 export const saveGlobalMcp = withBuild((_root: string | null, originalId: string | null, mcp: McpDocument) => trackedInvoke<McpDocument>("save_global_mcp", { originalId, mcp }))
 export const removeGlobalMcp = withBuild((root: string | null, id: string) => trackedInvoke<void>("remove_global_mcp", { root, id }))
+export const listGlobalSkills = () => trackedInvoke<SkillSummary[]>("list_global_skills")
+export const getGlobalSkill = (id: string) => trackedInvoke<SkillDocument>("get_global_skill", { id })
+export const createGlobalSkill = (name: string, description: string, body: string): Promise<SkillDocument> => trackedInvoke<SkillDocument>("create_global_skill", { name, description, body })
+export const saveGlobalSkill = withBuild((root: string | null, id: string, skill: { name: string; description: string; body: string }) => trackedInvoke<SkillSaveResult>("save_global_skill", { root, id, ...skill }))
+export const duplicateGlobalSkill = (id: string, newId: string) => trackedInvoke<void>("duplicate_global_skill", { id, newId })
+export const removeGlobalSkill = withBuild((root: string | null, id: string) => trackedInvoke<void>("remove_global_skill", { root, id }))
+
+export const makeSkillGlobal = (root: string, id: string) => trackedInvoke<void>("make_skill_global", { root, id })
+export const makeTaskGlobal = (root: string, id: string) => trackedInvoke<void>("make_task_global", { root, id })
+export const makeMcpGlobal = withBuild((root: string, id: string) => trackedInvoke<void>("make_mcp_global", { root, id }))

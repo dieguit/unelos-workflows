@@ -18,6 +18,55 @@ fn source() -> TempDir {
     temp
 }
 
+#[test]
+fn source_import_conflicts_renames_and_invalid_arguments() {
+    let target = TempDir::new().unwrap();
+    let source = source();
+    assert!(install(&target, Some(&source), "v2").status.success());
+    let path = source.path().join("agents/simple-implementer/agent.yaml");
+    let text = fs::read_to_string(&path).unwrap().replace("\r\n", "\n");
+    fs::write(&path, text.replace("instructionsFile: instructions.md", "instructions: Changed")).unwrap();
+    let run = |rename: &str| cargo_bin_cmd!("unelos")
+        .arg("--project").arg(target.path())
+        .args(["install", "simple-plan-execute-review", "--json", "--opencode", "v2", "--source"])
+        .arg(source.path()).args(["--rename", rename]).output().unwrap();
+    let output = run("agent:simple-implementer=simple-implementer");
+    assert_eq!(output.status.code(), Some(3), "{output:?}");
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["status"], "conflicts");
+    let output = run("agent:simple-implementer=imported-implementer");
+    assert_eq!(output.status.code(), Some(3), "cascaded conflicts need --rename or --accept-suggested: {output:?}");
+    let output = cargo_bin_cmd!("unelos")
+        .arg("--project").arg(target.path())
+        .args(["install", "simple-plan-execute-review", "--json", "--opencode", "v2", "--accept-suggested", "--source"])
+        .arg(source.path()).args(["--rename", "agent:simple-implementer=imported-implementer"]).output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert!(target.path().join(".unelos/agents/imported-implementer/agent.yaml").exists());
+    assert!(target.path().join(".opencode/agents/unelos-imported-implementer.md").exists());
+    let output = run("agent-broken");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid_rename"));
+}
+
+#[test]
+fn source_mcps_require_explicit_trust() {
+    let target = TempDir::new().unwrap();
+    let source = source();
+    let path = source.path().join("agents/simple-implementer/agent.yaml");
+    let text = fs::read_to_string(&path).unwrap().replace("\r\n", "\n");
+    fs::write(path, text.replace("instructionsFile:", "mcps: [browser]\ninstructionsFile:")).unwrap();
+    fs::create_dir_all(source.path().join("mcps")).unwrap();
+    fs::write(source.path().join("mcps/browser.yaml"), "type: local\ncommand: [npx, browser]\n").unwrap();
+    let output = cargo_bin_cmd!("unelos").arg("--project").arg(target.path())
+        .args(["install", "simple-plan-execute-review", "--json", "--source"])
+        .arg(source.path()).output().unwrap();
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert!(error.to_string().contains("mcp_trust_required"));
+    assert!(error.to_string().contains("npx browser"));
+    assert!(!target.path().join(".unelos/workflows").exists());
+}
+
 fn install(target: &TempDir, source: Option<&TempDir>, version: &str) -> std::process::Output {
     let mut command = cargo_bin_cmd!("unelos");
     command.arg("--project").arg(target.path()).args([
@@ -26,6 +75,8 @@ fn install(target: &TempDir, source: Option<&TempDir>, version: &str) -> std::pr
         "--opencode",
         version,
         "--json",
+        "--trust-mcps",
+        "--accept-suggested",
     ]);
     if let Some(source) = source {
         command.arg("--source").arg(source.path());
@@ -133,7 +184,7 @@ fn missing_mcp_and_source_collisions_are_explicit() {
     .unwrap();
     let missing = install(&target, Some(&source), "v2");
     assert!(!missing.status.success());
-    assert!(String::from_utf8_lossy(&missing.stderr).contains("missing_mcp"), "{missing:?}");
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("is referenced but mcps/"), "{missing:?}");
     assert!(!target
         .path()
         .join(".opencode/agents/unelos-simple-implementer.md")
@@ -150,7 +201,7 @@ fn missing_mcp_and_source_collisions_are_explicit() {
         ),
     )
     .unwrap();
-    assert!(!install(&target, Some(&source), "v2").status.success());
+    assert!(install(&target, Some(&source), "v2").status.success());
     assert_eq!(fs::read(target_path).unwrap(), before);
 }
 
@@ -213,7 +264,7 @@ fn global_mcps_use_bare_keys_and_reject_project_collisions() {
     let run = || cargo_bin_cmd!("unelos")
         .env("UNELOS_CONFIG_DIR", global.path())
         .arg("--project").arg(target.path())
-        .args(["install", "simple-plan-execute-review", "--opencode", "v2", "--json", "--source"])
+        .args(["install", "simple-plan-execute-review", "--opencode", "v2", "--json", "--trust-mcps", "--accept-suggested", "--source"])
         .arg(source.path()).output().unwrap();
     let output = run();
     assert!(output.status.success(), "{output:?}");

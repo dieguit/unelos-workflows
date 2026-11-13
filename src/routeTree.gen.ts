@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from "./routes/__root"
 import { Route as IndexRouteImport } from "./routes/index"
 import { Route as AgentsIndexRouteImport } from "./routes/agents/index"
 import { Route as GlobalMcpsIndexRouteImport } from "./routes/global-mcps/index"
+import { Route as GlobalSkillsIndexRouteImport } from "./routes/global-skills/index"
 import { Route as GlobalTasksIndexRouteImport } from "./routes/global-tasks/index"
 import { Route as HarnessesIndexRouteImport } from "./routes/harnesses/index"
 import { Route as McpsIndexRouteImport } from "./routes/mcps/index"
@@ -36,6 +37,11 @@ const AgentsIndexRoute = AgentsIndexRouteImport.update({
 const GlobalMcpsIndexRoute = GlobalMcpsIndexRouteImport.update({
   id: "/global-mcps/",
   path: "/global-mcps/",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GlobalSkillsIndexRoute = GlobalSkillsIndexRouteImport.update({
+  id: "/global-skills/",
+  path: "/global-skills/",
   getParentRoute: () => rootRouteImport,
 } as any)
 const GlobalTasksIndexRoute = GlobalTasksIndexRouteImport.update({
@@ -93,6 +99,7 @@ export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
   "/agents/": typeof AgentsIndexRoute
   "/global-mcps/": typeof GlobalMcpsIndexRoute
+  "/global-skills/": typeof GlobalSkillsIndexRoute
   "/global-tasks/": typeof GlobalTasksIndexRoute
   "/harnesses/": typeof HarnessesIndexRoute
   "/mcps/": typeof McpsIndexRoute
@@ -108,6 +115,7 @@ export interface FileRoutesByTo {
   "/": typeof IndexRoute
   "/agents": typeof AgentsIndexRoute
   "/global-mcps": typeof GlobalMcpsIndexRoute
+  "/global-skills": typeof GlobalSkillsIndexRoute
   "/global-tasks": typeof GlobalTasksIndexRoute
   "/harnesses": typeof HarnessesIndexRoute
   "/mcps": typeof McpsIndexRoute
@@ -124,6 +132,7 @@ export interface FileRoutesById {
   "/": typeof IndexRoute
   "/agents/": typeof AgentsIndexRoute
   "/global-mcps/": typeof GlobalMcpsIndexRoute
+  "/global-skills/": typeof GlobalSkillsIndexRoute
   "/global-tasks/": typeof GlobalTasksIndexRoute
   "/harnesses/": typeof HarnessesIndexRoute
   "/mcps/": typeof McpsIndexRoute
@@ -141,6 +150,7 @@ export interface FileRouteTypes {
     | "/"
     | "/agents/"
     | "/global-mcps/"
+    | "/global-skills/"
     | "/global-tasks/"
     | "/harnesses/"
     | "/mcps/"
@@ -156,6 +166,7 @@ export interface FileRouteTypes {
     | "/"
     | "/agents"
     | "/global-mcps"
+    | "/global-skills"
     | "/global-tasks"
     | "/harnesses"
     | "/mcps"
@@ -171,6 +182,7 @@ export interface FileRouteTypes {
     | "/"
     | "/agents/"
     | "/global-mcps/"
+    | "/global-skills/"
     | "/global-tasks/"
     | "/harnesses/"
     | "/mcps/"
@@ -187,6 +199,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AgentsIndexRoute: typeof AgentsIndexRoute
   GlobalMcpsIndexRoute: typeof GlobalMcpsIndexRoute
+  GlobalSkillsIndexRoute: typeof GlobalSkillsIndexRoute
   GlobalTasksIndexRoute: typeof GlobalTasksIndexRoute
   HarnessesIndexRoute: typeof HarnessesIndexRoute
   McpsIndexRoute: typeof McpsIndexRoute
@@ -220,6 +233,13 @@ declare module "@tanstack/react-router" {
       path: "/global-mcps"
       fullPath: "/global-mcps/"
       preLoaderRoute: typeof GlobalMcpsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/global-skills/": {
+      id: "/global-skills/"
+      path: "/global-skills"
+      fullPath: "/global-skills/"
+      preLoaderRoute: typeof GlobalSkillsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/global-tasks/": {
@@ -299,6 +319,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgentsIndexRoute: AgentsIndexRoute,
   GlobalMcpsIndexRoute: GlobalMcpsIndexRoute,
+  GlobalSkillsIndexRoute: GlobalSkillsIndexRoute,
   GlobalTasksIndexRoute: GlobalTasksIndexRoute,
   HarnessesIndexRoute: HarnessesIndexRoute,
   McpsIndexRoute: McpsIndexRoute,
