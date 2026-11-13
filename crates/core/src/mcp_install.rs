@@ -51,7 +51,10 @@ pub(crate) fn plan_replace(
         let id = reference.strip_prefix("global/").unwrap_or(reference);
         if let Some(previous) = scopes.insert(id, reference) {
             if previous != reference {
-                return Err(error("mcp_collision", format!("Project and global MCP share ID {id:?}")));
+                return Err(error(
+                    "mcp_collision",
+                    format!("Project and global MCP share ID {id:?}"),
+                ));
             }
         }
     }

@@ -26,7 +26,11 @@ fn finished_control(package: &ExecutionPackage) -> CompletionControl {
 fn write_outputs(package: &ExecutionPackage) {
     let packet = serde_json::to_value(&package.packet).unwrap();
     for output in packet["outputs"].as_array().unwrap() {
-        std::fs::write(output["path"].as_str().unwrap(), format!("Useful report section {:?}\n", package.expected)).unwrap();
+        std::fs::write(
+            output["path"].as_str().unwrap(),
+            format!("Useful report section {:?}\n", package.expected),
+        )
+        .unwrap();
     }
 }
 
@@ -69,7 +73,9 @@ fn unnamed_start_derives_its_name_without_requesting_a_user_name() {
     let (_temp, root) = fixture();
     let fresh = execution_new(&root).unwrap();
     let package = execution_start(&root, "simple-plan-execute-review", None).unwrap();
-    assert!(fresh.controller_instructions.contains("Never ask the user to name the run"));
+    assert!(fresh
+        .controller_instructions
+        .contains("Never ask the user to name the run"));
     assert!(!fresh.controller_instructions.contains("unelos_complete"));
     let run_id = package.run_id.as_deref().unwrap();
     let started = status(&root, run_id).unwrap();
@@ -103,7 +109,13 @@ fn main_and_delegated_packages_deliver_mandatory_controller_completion_policy() 
         } else {
             include_str!("../src/instructions/controller-main-task.md")
         };
-        assert_eq!(package.controller_instructions, format!("{}\n{block}", include_str!("../src/instructions/controller.md")));
+        assert_eq!(
+            package.controller_instructions,
+            format!(
+                "{}\n{block}",
+                include_str!("../src/instructions/controller.md")
+            )
+        );
     }
 }
 
@@ -115,29 +127,62 @@ fn every_state_delivers_only_its_policy_block() {
         (None, "idle"),
         (Some(packet(&root, false)), "main-task"),
         (Some(packet(&delegated_root, true)), "delegated"),
-        (Some(WorkPacket::Parallel(ParallelPacket {
-            kind: "parallel", run_id: "run".into(), task_id: "task".into(),
-            node_id: "parallel".into(), request: String::new(), inputs: vec![],
-            outputs: vec![], feedback: None, workers: vec![], ledger_path: "ledger.md".into(),
-        })), "parallel"),
-        (Some(WorkPacket::HumanGate(GatePacket {
-            kind: "human-gate", run_id: "run".into(), activation_id: "gate".into(),
-            node_id: "gate".into(), artifacts: vec![], ledger_path: "ledger.md".into(),
-        })), "gate"),
-        (Some(WorkPacket::Finished(FinishedPacket {
-            kind: "finished", run_id: "run".into(), node_id: "done".into(),
-            ledger_path: "ledger.md".into(),
-        })), "finished"),
+        (
+            Some(WorkPacket::Parallel(ParallelPacket {
+                kind: "parallel",
+                run_id: "run".into(),
+                task_id: "task".into(),
+                node_id: "parallel".into(),
+                request: String::new(),
+                inputs: vec![],
+                outputs: vec![],
+                feedback: None,
+                workers: vec![],
+                ledger_path: "ledger.md".into(),
+            })),
+            "parallel",
+        ),
+        (
+            Some(WorkPacket::HumanGate(GatePacket {
+                kind: "human-gate",
+                run_id: "run".into(),
+                activation_id: "gate".into(),
+                node_id: "gate".into(),
+                artifacts: vec![],
+                ledger_path: "ledger.md".into(),
+            })),
+            "gate",
+        ),
+        (
+            Some(WorkPacket::Finished(FinishedPacket {
+                kind: "finished",
+                run_id: "run".into(),
+                node_id: "done".into(),
+                ledger_path: "ledger.md".into(),
+            })),
+            "finished",
+        ),
     ];
     for (packet, state) in cases {
         let package = render_execution_package(packet, vec![], None).unwrap();
         let block = std::fs::read_to_string(
             Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join(format!("src/instructions/controller-{state}.md")),
-        ).unwrap();
-        assert_eq!(package.controller_instructions, format!("{}\n{block}", include_str!("../src/instructions/controller.md")));
+        )
+        .unwrap();
+        assert_eq!(
+            package.controller_instructions,
+            format!(
+                "{}\n{block}",
+                include_str!("../src/instructions/controller.md")
+            )
+        );
         let text = serde_json::to_string(&package).unwrap();
-        for forbidden in ["unelos_continue", "complete NODE", "Task done; Unelos run finished"] {
+        for forbidden in [
+            "unelos_continue",
+            "complete NODE",
+            "Task done; Unelos run finished",
+        ] {
             assert!(!text.contains(forbidden), "{state}: {forbidden}");
         }
         if state == "idle" {

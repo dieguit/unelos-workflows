@@ -59,7 +59,10 @@ pub fn get_run(root: &Utf8Path, run_id: &str) -> Result<RunDetails, RuntimeError
         super::store::reject_symlink(path)?;
         match std::fs::metadata(path) {
             Ok(metadata) if metadata.is_file() => {
-                if !existing_artifact_paths.iter().any(|existing| existing == path.as_str()) {
+                if !existing_artifact_paths
+                    .iter()
+                    .any(|existing| existing == path.as_str())
+                {
                     existing_artifact_paths.push(path.to_string());
                 }
             }
@@ -68,7 +71,10 @@ pub fn get_run(root: &Utf8Path, run_id: &str) -> Result<RunDetails, RuntimeError
             Err(error) => return Err(path_error(path, error)),
         }
     }
-    Ok(RunDetails { state, existing_artifact_paths })
+    Ok(RunDetails {
+        state,
+        existing_artifact_paths,
+    })
 }
 
 pub fn delete_run(root: &Utf8Path, run_id: &str) -> Result<(), RuntimeError> {
@@ -112,11 +118,13 @@ fn artifact_paths(state: &RunState) -> impl Iterator<Item = &Utf8Path> {
             };
             Some(record)
         })
-        .flat_map(|record| record
+        .flat_map(|record| {
+            record
                 .inputs
                 .iter()
                 .chain(&record.outputs)
                 .chain(record.worker_reports.iter().map(|r| &r.report))
                 .chain(record.feedback.iter().flat_map(|f| &f.artifacts))
-                .map(|reference| reference.path.as_path()))
+                .map(|reference| reference.path.as_path())
+        })
 }

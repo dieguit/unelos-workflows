@@ -13,7 +13,8 @@ export function AgentModelPicker({ value, onChange }: {
 }) {
   const [open, setOpen] = useState(false)
   const options = useLazy(agentModelOptions)
-  useEffect(() => options.load(), [options.load])
+  const { load } = options
+  useEffect(() => load(), [load])
   const pick = (model: AgentModel | null) => {
     onChange(model)
     setOpen(false)

@@ -7,13 +7,19 @@ use unelos_core::{
 };
 
 fn fixture_project() -> unelos_core::LoadedProject {
-    let root = Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/project");
+    let root = Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("project");
     load_project(&root, "implement-feature").unwrap()
 }
 
 fn runtime_project() -> (TempDir, unelos_core::LoadedProject) {
     let temp = TempDir::new().unwrap();
-    let source = Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/project");
+    let source = Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("project");
     let root = Utf8Path::from_path(temp.path()).unwrap().join("project");
     for path in [
         ".unelos/project.yaml",
@@ -46,11 +52,25 @@ fn runtime_input(root: &Utf8Path) -> TaskRuntimeInput {
         request: "Implement naïve café.\nSecond line.".into(),
         inputs: vec![ArtifactReference {
             name: "plan.md".into(),
-            path: root.join(".unelos/runs/run-1/tasks/task-1/outputs/plan.md"),
+            path: root
+                .join(".unelos")
+                .join("runs")
+                .join("run-1")
+                .join("tasks")
+                .join("task-1")
+                .join("outputs")
+                .join("plan.md"),
         }],
         outputs: vec![ArtifactReference {
             name: "implementation-report.md".into(),
-            path: root.join(".unelos/runs/run-1/tasks/task-3/outputs/report.md"),
+            path: root
+                .join(".unelos")
+                .join("runs")
+                .join("run-1")
+                .join("tasks")
+                .join("task-3")
+                .join("outputs")
+                .join("report.md"),
         }],
         feedback: Some(TransitionFeedback {
             source_node_id: "review".into(),
@@ -95,7 +115,11 @@ fn resolves_the_selected_task_into_deterministic_inspection_json() {
     assert_eq!(value["skills"][1]["id"], "rust");
     assert_eq!(value["skills"].as_array().unwrap().len(), 2);
     for skill in &inspection.context.skills {
-        let expected = project.project_root.join(".unelos/skills").join(&skill.id);
+        let expected = project
+            .project_root
+            .join(".unelos")
+            .join("skills")
+            .join(&skill.id);
         assert_eq!(skill.directory, expected);
         assert_eq!(
             value["skills"][if skill.id == "verification" { 0 } else { 1 }]["directory"],
@@ -178,7 +202,8 @@ fn selected_missing_skill_reports_id_and_native_expected_path() {
         .push("missing-selected".into());
     let expected = project
         .project_root
-        .join(".unelos/skills")
+        .join(".unelos")
+        .join("skills")
         .join("missing-selected")
         .join("SKILL.md");
     let error = inspect_task(&project, "implement").unwrap_err();
@@ -265,24 +290,24 @@ fn builds_deterministic_runtime_packet_without_allocating_artifacts() {
         serde_json::to_vec(&packet).unwrap(),
         serde_json::to_vec(&build_task_packet(&project, input.clone()).unwrap()).unwrap()
     );
-    assert!(!project.project_root.join(".unelos/runs").exists());
+    assert!(!project.project_root.join(".unelos").join("runs").exists());
     assert!(!input.outputs[0].path.exists());
 
     let mut changed = input;
     changed.run_id = "run-2".into();
     changed.task_id = "task-9".into();
-    changed.inputs[0].path = project.project_root.join("opaque/input");
-    changed.outputs[0].path = project.project_root.join("opaque/output");
+    changed.inputs[0].path = project.project_root.join("opaque").join("input");
+    changed.outputs[0].path = project.project_root.join("opaque").join("output");
     let changed = serde_json::to_value(build_task_packet(&project, changed).unwrap()).unwrap();
     assert_eq!(changed["runId"], "run-2");
     assert_eq!(changed["taskId"], "task-9");
     assert_eq!(
         changed["inputs"][0]["path"],
-        project.project_root.join("opaque/input").as_str()
+        project.project_root.join("opaque").join("input").as_str()
     );
     assert_eq!(
         changed["outputs"][0]["path"],
-        project.project_root.join("opaque/output").as_str()
+        project.project_root.join("opaque").join("output").as_str()
     );
 }
 

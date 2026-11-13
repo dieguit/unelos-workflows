@@ -111,7 +111,10 @@ fn export(project: &LoadedProject) -> Result<Vec<AgentExport>, InstallError> {
                 let bare = mcp.strip_prefix("global/").unwrap_or(mcp);
                 if let Some(previous) = scopes.insert(bare.to_owned(), mcp.clone()) {
                     if previous != *mcp {
-                        return Err(fail("mcp_collision", format!("Project and global MCP share ID {bare:?}")));
+                        return Err(fail(
+                            "mcp_collision",
+                            format!("Project and global MCP share ID {bare:?}"),
+                        ));
                     }
                 }
                 let document = if mcp.starts_with("global/") {
@@ -119,12 +122,12 @@ fn export(project: &LoadedProject) -> Result<Vec<AgentExport>, InstallError> {
                 } else {
                     crate::mcp_document::read_mcp(&project.authoring_root, mcp)
                 }
-                    .map_err(|e| {
-                        fail(
-                            "missing_mcp",
-                            format!("Cannot resolve MCP {mcp:?} for agent {id:?}: {e}"),
-                        )
-                    })?;
+                .map_err(|e| {
+                    fail(
+                        "missing_mcp",
+                        format!("Cannot resolve MCP {mcp:?} for agent {id:?}: {e}"),
+                    )
+                })?;
                 mcp_servers.insert(bare.to_owned(), document.server);
             }
             let model = agent.model.as_ref().map(resolve_agent_model).transpose()?;
@@ -220,7 +223,9 @@ pub fn install_workflow(
     let authoring = &project.authoring_root;
     for agent in &agents {
         for id in &agent.mcps {
-            if id.starts_with("global/") { continue; }
+            if id.starts_with("global/") {
+                continue;
+            }
             let relative = Utf8PathBuf::from(format!("mcps/{id}.yaml"));
             let path = checked_path(authoring, &relative)?;
             files.insert(relative, fs::read(path).map_err(io_error)?);

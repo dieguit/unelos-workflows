@@ -85,7 +85,10 @@ fn unparseable_workflow_becomes_problem_row() {
     .unwrap();
     let rows = workflow_summaries(&root).unwrap();
     let garbage = rows.iter().find(|r| r.name == "garbage").unwrap();
-    assert_eq!((garbage.steps, garbage.description.as_deref()), (None, None));
+    assert_eq!(
+        (garbage.steps, garbage.description.as_deref()),
+        (None, None)
+    );
     assert!(garbage.problem.is_some());
 }
 

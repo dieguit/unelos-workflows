@@ -1,0 +1,39 @@
+import { expect, test } from "vitest"
+import { emptyMcp, mcpDocument, mcpDraft } from "./mcp-fields"
+import type { McpDocument } from "@/lib/projects"
+
+test("local MCP fields round-trip and trim names without altering secrets", () => {
+  const document: McpDocument = {
+    id: "github",
+    type: "local",
+    command: ["npx", "-y", "server"],
+    environment: { TOKEN: "{env:TOKEN}" },
+  }
+  expect(mcpDocument(mcpDraft(document))).toEqual(document)
+  expect(
+    mcpDocument({
+      ...emptyMcp,
+      id: " local ",
+      command: " npx  server ",
+      env: [
+        [" TOKEN ", " secret "],
+        ["", "ignored"],
+      ],
+    })
+  ).toEqual({
+    id: "local",
+    type: "local",
+    command: ["npx", "server"],
+    environment: { TOKEN: " secret " },
+  })
+})
+
+test("remote MCP fields round-trip independently of local fields", () => {
+  const document: McpDocument = {
+    id: "remote",
+    type: "remote",
+    url: "https://example.com/mcp",
+    headers: { Authorization: "{env:TOKEN}" },
+  }
+  expect(mcpDocument(mcpDraft(document))).toEqual(document)
+})

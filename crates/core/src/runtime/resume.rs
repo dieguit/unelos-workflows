@@ -18,7 +18,10 @@ pub fn execution_new(root: &Utf8Path) -> Result<ExecutionPackage, ExecutionError
     Ok(package)
 }
 
-fn identity(root: &Utf8Path, state: &RunState) -> Result<Option<ExecutionIdentity>, ExecutionError> {
+fn identity(
+    root: &Utf8Path,
+    state: &RunState,
+) -> Result<Option<ExecutionIdentity>, ExecutionError> {
     let project = crate::load_project(root, &state.workflow_name).map_err(RuntimeError::from)?;
     let packet = packet_for_snapshot(&project, state, false)?;
     Ok(ExecutionIdentity::from_packet(&packet))
@@ -64,11 +67,19 @@ fn read_file(path: &Utf8Path) -> Result<ResumeFile, ExecutionError> {
     super::store::reject_symlink(path)?;
     let exists = match fs::metadata(path) {
         Ok(metadata) if metadata.is_file() => true,
-        Ok(_) => return Err(ExecutionError::protocol("invalid_resume_context", format!("Recovery path is not a regular file: {path}"))),
+        Ok(_) => {
+            return Err(ExecutionError::protocol(
+                "invalid_resume_context",
+                format!("Recovery path is not a regular file: {path}"),
+            ))
+        }
         Err(error) if error.kind() == io::ErrorKind::NotFound => false,
         Err(error) => return Err(super::path_error(path, error).into()),
     };
-    Ok(ResumeFile { path: path.into(), exists })
+    Ok(ResumeFile {
+        path: path.into(),
+        exists,
+    })
 }
 
 pub fn execution_resume(root: &Utf8Path, run_id: &str) -> Result<ExecutionPackage, ExecutionError> {
@@ -129,8 +140,13 @@ pub fn execution_resume(root: &Utf8Path, run_id: &str) -> Result<ExecutionPackag
         }
     }
     let brief = if ledger.exists {
-        read_brief(&fs::read_to_string(&ledger.path).map_err(|error| super::path_error(&ledger.path, error))?)
-    } else { None };
+        read_brief(
+            &fs::read_to_string(&ledger.path)
+                .map_err(|error| super::path_error(&ledger.path, error))?,
+        )
+    } else {
+        None
+    };
     let mut package = render_execution_package(Some(packet), vec![], brief.as_deref())?;
     package.controller_instructions.push('\n');
     package

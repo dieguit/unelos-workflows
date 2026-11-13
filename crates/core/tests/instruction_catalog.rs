@@ -43,7 +43,10 @@ fn catalog_sources_are_delivered_with_runtime_paths_kept_separate() {
                 outputs: record.outputs.clone(),
                 feedback: record.feedback.clone(),
             },
-            ledger_path: root.join(".unelos/runs").join(&state.run_id).join("ledger.md"),
+            ledger_path: root
+                .join(".unelos/runs")
+                .join(&state.run_id)
+                .join("ledger.md"),
         },
     )
     .unwrap();
@@ -57,7 +60,9 @@ fn catalog_sources_are_delivered_with_runtime_paths_kept_separate() {
     assert_eq!(task.packet.outputs[0].name, "implementation-report.md");
     assert_eq!(
         task.packet.outputs[0].path,
-        root.join(".unelos/runs").join(&state.run_id).join("implement/implementation-report.md")
+        root.join(".unelos/runs")
+            .join(&state.run_id)
+            .join("implement/implementation-report.md")
     );
     for path in [
         task.packet.outputs[0].path.clone(),
@@ -73,7 +78,10 @@ fn catalog_sources_are_delivered_with_runtime_paths_kept_separate() {
         .unwrap();
         assert_eq!(
             package.controller_instructions,
-            format!("{controller}\n{}", fs::read_to_string(source.join("controller-delegated.md")).unwrap())
+            format!(
+                "{controller}\n{}",
+                fs::read_to_string(source.join("controller-delegated.md")).unwrap()
+            )
         );
         let prompt = package.worker_prompt.unwrap();
         assert!(prompt.ends_with(

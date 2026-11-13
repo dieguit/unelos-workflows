@@ -108,12 +108,16 @@ function ModelMappingsHome() {
   const busy = submitting || deleting
   const visualBusy = useDelayedFlag(busy)
   const dirty = !isDefaultValue
+  const [errorContext, setErrorContext] = useState({ selected, creating, mappings })
+  if (errorContext.selected !== selected || errorContext.creating !== creating || errorContext.mappings !== mappings) {
+    setErrorContext({ selected, creating, mappings })
+    setError(undefined)
+  }
   useEffect(() => {
     form.reset({
       alias: creating ? "" : (selected ?? ""),
       models: creating || !selected ? {} : mappings[selected],
     })
-    setError(undefined)
   }, [selected, creating, mappings, form])
   const projectChangeApproved = useProjectDiscardGuard(busy, dirty, discard.ask)
   useBlocker({

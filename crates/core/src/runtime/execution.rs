@@ -34,7 +34,9 @@ pub(super) fn package_from_state(
 
 pub(super) fn filter_receipts(package: &mut ExecutionPackage, state: &RunState) {
     if let CurrentWork::Parallel(record) = &state.current {
-        package.worker_prompts.retain(|prompt| !record.worker_receipts.contains_key(&prompt.key));
+        package
+            .worker_prompts
+            .retain(|prompt| !record.worker_receipts.contains_key(&prompt.key));
     }
 }
 
@@ -197,8 +199,14 @@ fn execution_mutate_inner(
                     }
                     let keys: Vec<String> =
                         parallel.workers.iter().map(|w| w.key.clone()).collect();
-                    let results = if control.result_text.as_deref().unwrap_or("").trim().is_empty()
-                        && record.worker_receipts.len() == keys.len() {
+                    let results = if control
+                        .result_text
+                        .as_deref()
+                        .unwrap_or("")
+                        .trim()
+                        .is_empty()
+                        && record.worker_receipts.len() == keys.len()
+                    {
                         vec![]
                     } else {
                         parse_parallel_results(text()?, &control.expected, &keys)?
@@ -206,19 +214,37 @@ fn execution_mutate_inner(
                     for result in &results {
                         let key = result.worker_key.as_ref().unwrap();
                         if record.worker_receipts.contains_key(key) {
-                            return Err(ExecutionError::protocol("invalid_worker_result", format!("workerKey {key:?} already has a receipt")));
+                            return Err(ExecutionError::protocol(
+                                "invalid_worker_result",
+                                format!("workerKey {key:?} already has a receipt"),
+                            ));
                         }
-                        let report = record.worker_reports.iter().find(|r| &r.key == key).unwrap();
-                        artifacts::require_nonempty_file(&report.report.path).map_err(|cause| ExecutionError::protocol("missing_output", format!("{}: {cause}", report.report.path)))?;
+                        let report = record
+                            .worker_reports
+                            .iter()
+                            .find(|r| &r.key == key)
+                            .unwrap();
+                        artifacts::require_nonempty_file(&report.report.path).map_err(|cause| {
+                            ExecutionError::protocol(
+                                "missing_output",
+                                format!("{}: {cause}", report.report.path),
+                            )
+                        })?;
                     }
-                    let CurrentWork::Parallel(record) = &mut state.current else { unreachable!() };
+                    let CurrentWork::Parallel(record) = &mut state.current else {
+                        unreachable!()
+                    };
                     for result in results {
-                        record.worker_receipts.insert(result.worker_key.clone().unwrap(), result);
+                        record
+                            .worker_receipts
+                            .insert(result.worker_key.clone().unwrap(), result);
                     }
                     record.invalid_worker_results = 0;
                     // Save receipts even when the aggregates still need writing.
                     store.update(&state)?;
-                    let CurrentWork::Parallel(record) = &state.current else { unreachable!() };
+                    let CurrentWork::Parallel(record) = &state.current else {
+                        unreachable!()
+                    };
                     if record.worker_receipts.len() != keys.len() {
                         return package_from_state(&project, &state);
                     }
@@ -226,7 +252,10 @@ fn execution_mutate_inner(
                 }
                 _ => unreachable!(),
             };
-            let record = match &state.current { CurrentWork::Task(r) | CurrentWork::Parallel(r) => r, _ => unreachable!() };
+            let record = match &state.current {
+                CurrentWork::Task(r) | CurrentWork::Parallel(r) => r,
+                _ => unreachable!(),
+            };
             for output in record
                 .outputs
                 .iter()
@@ -312,10 +341,18 @@ fn execution_mutate_inner(
     Ok(package)
 }
 
-
-pub fn execution_mutate(root: &Utf8Path, run_id: &str, operation: ExecutionOperation, control: &CompletionControl) -> Result<ExecutionPackage, ExecutionError> {
+pub fn execution_mutate(
+    root: &Utf8Path,
+    run_id: &str,
+    operation: ExecutionOperation,
+    control: &CompletionControl,
+) -> Result<ExecutionPackage, ExecutionError> {
     let result = execution_mutate_inner(root, run_id, operation, control);
-    if let Err(ExecutionError::Protocol { code: "invalid_worker_result", message }) = &result {
+    if let Err(ExecutionError::Protocol {
+        code: "invalid_worker_result",
+        message,
+    }) = &result
+    {
         let store = store::RunStore::open(root)?;
         let mut state = store.run(run_id)?;
         assert_identity(&state, &control.expected)?;
@@ -324,11 +361,18 @@ pub fn execution_mutate(root: &Utf8Path, run_id: &str, operation: ExecutionOpera
             let stop = record.invalid_worker_results >= 3;
             store.update(&state)?;
             if stop {
-                return Err(ExecutionError::protocol("invalid_worker_result", format!("{message}. Stop and tell the user.")));
+                return Err(ExecutionError::protocol(
+                    "invalid_worker_result",
+                    format!("{message}. Stop and tell the user."),
+                ));
             }
         }
     }
-    if result.as_ref().err().is_some_and(|error| error.code() != "invalid_worker_result") {
+    if result
+        .as_ref()
+        .err()
+        .is_some_and(|error| error.code() != "invalid_worker_result")
+    {
         let store = store::RunStore::open(root)?;
         let mut state = store.run(run_id)?;
         if assert_identity(&state, &control.expected).is_ok() {

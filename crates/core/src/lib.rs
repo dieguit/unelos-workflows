@@ -8,8 +8,8 @@ pub use authoring_actions::{
 };
 mod workflow_document;
 pub use workflow_document::{
-    create_workflow, get_workflow, save_workflow, validate_workflow, StepTask, WorkflowDocument, WorkflowDraft,
-    WorkflowIssue, WorkflowRoute, WorkflowSettings, WorkflowStep, WorkflowWorker,
+    create_workflow, get_workflow, save_workflow, validate_workflow, StepTask, WorkflowDocument,
+    WorkflowDraft, WorkflowIssue, WorkflowRoute, WorkflowSettings, WorkflowStep, WorkflowWorker,
 };
 mod task_document;
 pub use task_document::{
@@ -18,17 +18,25 @@ pub use task_document::{
 };
 
 mod agent_document;
+mod harness_build;
 mod mcp_document;
 mod mcp_install;
 pub mod opencode_agents;
-mod harness_build;
-pub use harness_build::{get_project_settings, save_project_settings, build_harness_config, auto_build_harness, HarnessBuild};
 pub use agent_document::{
     agent_model_options, get_agent, save_agent, AgentDocument, AgentModelOptions,
     HarnessModelOptions,
 };
-pub use mcp_document::{get_mcp, mcp_summaries, save_mcp, get_global_mcp, global_mcp_summaries, save_global_mcp, remove_mcp, remove_global_mcp, McpDocument, McpServer, McpSummary};
-pub use mcp_install::{check_opencode_mcps, uninstall_opencode_mcps, write_opencode_mcps, replace_opencode_mcps};
+pub use harness_build::{
+    auto_build_harness, build_harness_config, get_project_settings, save_project_settings,
+    HarnessBuild,
+};
+pub use mcp_document::{
+    get_global_mcp, get_mcp, global_mcp_summaries, mcp_summaries, remove_global_mcp, remove_mcp,
+    save_global_mcp, save_mcp, McpDocument, McpServer, McpSummary,
+};
+pub use mcp_install::{
+    check_opencode_mcps, replace_opencode_mcps, uninstall_opencode_mcps, write_opencode_mcps,
+};
 mod model_mappings;
 pub use model_mappings::{
     delete_model_mapping, list_model_mappings, save_model_mapping, ModelMappings,
@@ -74,11 +82,11 @@ pub use project::{
     SkillSummary, TaskSummary, WorkflowSummary,
 };
 pub use runtime::{
-    approve, approve_node, complete, complete_node, confirm_outputs, execution_mutate,
-    execution_new, execution_next, execution_resume, execution_runs, execution_start, list_runs,
-    next, prepare_work, reject, reject_node, rename_run, start, start_workflow, status,
-    verify_outputs, verify_work_outputs, CompletedExecution, CurrentWork, ExecutionRecord,
-    RunState, RuntimeError, RunDetails, RunListItem, get_run, delete_run, read_run_artifact,
+    approve, approve_node, complete, complete_node, confirm_outputs, delete_run, execution_mutate,
+    execution_new, execution_next, execution_resume, execution_runs, execution_start, get_run,
+    list_runs, next, prepare_work, read_run_artifact, reject, reject_node, rename_run, start,
+    start_workflow, status, verify_outputs, verify_work_outputs, CompletedExecution, CurrentWork,
+    ExecutionRecord, RunDetails, RunListItem, RunState, RuntimeError,
 };
 pub use settings::{Settings, SettingsError};
 pub use skills::{resolve_skills, ResolvedSkill, SkillResolveError};

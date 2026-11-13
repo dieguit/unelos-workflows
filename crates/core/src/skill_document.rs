@@ -230,6 +230,117 @@ pub(crate) fn collect(
     Ok(())
 }
 
+pub(crate) fn atomic_write(path: &Utf8Path, text: &str) -> Result<(), String> {
+    let temp = path.with_extension("unelos-tmp");
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp)
+        .map_err(|e| e.to_string())?;
+    let result = (|| {
+        file.write_all(text.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temp, path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(temp);
+    }
+    result.map_err(|e: std::io::Error| e.to_string())
+}
+
+pub fn save_skill(
+    root: &Utf8Path,
+    id: &str,
+    name: &str,
+    description: &str,
+    body: &str,
+) -> Result<SaveSkillResult, String> {
+    valid_id(id)?;
+    valid_id(name)?;
+    let project = crate::project::absolute_root(root).map_err(|e| e.to_string())?;
+    let root = project.join(".unelos");
+    let source = bounded(&root, &format!("skills/{id}/SKILL.md"))?;
+    let directory = bounded(&root, &format!("skills/{id}"))?;
+    let target = bounded(&root, &format!("skills/{name}"))?;
+    let text = fs::read_to_string(&source).map_err(|e| e.to_string())?;
+    let (mut metadata, _) = split(&text)?;
+    metadata.insert(Value::from("name"), Value::from(name));
+    metadata.remove(Value::from("description"));
+    let description = (!description.trim().is_empty()).then(|| description.to_owned());
+    if let Some(description) = &description {
+        metadata.insert(Value::from("description"), Value::from(description.clone()));
+    }
+    let content = format!(
+        "---\n{}---\n{body}",
+        serde_yaml_ng::to_string(&metadata).map_err(|e| e.to_string())?
+    );
+    let mut edits = Vec::new();
+    if name != id {
+        if target.exists() {
+            return Err(format!("Skill {name:?} already exists"));
+        }
+        let mut files = Vec::new();
+        for category in ["agents", "tasks", "workflows"] {
+            collect(&root, category, &mut files)?;
+        }
+        files.sort();
+        for file in files {
+            let original = fs::read_to_string(&file).map_err(|e| e.to_string())?;
+            let updated =
+                reference_edit(&original, id, name).map_err(|e| format!("{file}: {e}"))?;
+            if original != updated {
+                edits.push((file, original, updated));
+            }
+        }
+    }
+    // Roll back completed writes on ordinary I/O errors; no cross-file crash transaction.
+    let mut written = 0;
+    let mut renamed = false;
+    let result = (|| {
+        if name != id {
+            fs::rename(&directory, &target).map_err(|e| e.to_string())?;
+            renamed = true;
+        }
+        for (path, _, updated) in &edits {
+            atomic_write(path, updated)?;
+            written += 1;
+        }
+        atomic_write(&target.join("SKILL.md"), &content)
+    })();
+    if let Err(error) = result {
+        let mut rollback_errors = Vec::new();
+        for (path, original, _) in edits[..written].iter().rev() {
+            if let Err(e) = atomic_write(path, original) {
+                rollback_errors.push(e);
+            }
+        }
+        if renamed {
+            if let Err(e) = fs::rename(&target, &directory) {
+                rollback_errors.push(e.to_string());
+            }
+        }
+        return Err(format!("{error}; rollback errors: {rollback_errors:?}"));
+    }
+    Ok(SaveSkillResult {
+        skill: SkillDocument {
+            name: name.into(),
+            description,
+            body: body.into(),
+        },
+        updated_references: edits
+            .iter()
+            .map(|(p, _, _)| {
+                p.strip_prefix(&project)
+                    .unwrap()
+                    .iter()
+                    .collect::<Vec<_>>()
+                    .join("/")
+            })
+            .collect(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -341,109 +452,4 @@ mod tests {
         assert_eq!(get_skill(&root, "old").unwrap().body, "Body");
         assert!(!root.join(".unelos/skills/new").exists());
     }
-}
-
-pub(crate) fn atomic_write(path: &Utf8Path, text: &str) -> Result<(), String> {
-    let temp = path.with_extension("unelos-tmp");
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&temp)
-        .map_err(|e| e.to_string())?;
-    let result = (|| {
-        file.write_all(text.as_bytes())?;
-        file.sync_all()?;
-        drop(file);
-        fs::rename(&temp, path)
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(temp);
-    }
-    result.map_err(|e: std::io::Error| e.to_string())
-}
-
-pub fn save_skill(
-    root: &Utf8Path,
-    id: &str,
-    name: &str,
-    description: &str,
-    body: &str,
-) -> Result<SaveSkillResult, String> {
-    valid_id(id)?;
-    valid_id(name)?;
-    let project = crate::project::absolute_root(root).map_err(|e| e.to_string())?;
-    let root = project.join(".unelos");
-    let source = bounded(&root, &format!("skills/{id}/SKILL.md"))?;
-    let directory = bounded(&root, &format!("skills/{id}"))?;
-    let target = bounded(&root, &format!("skills/{name}"))?;
-    let text = fs::read_to_string(&source).map_err(|e| e.to_string())?;
-    let (mut metadata, _) = split(&text)?;
-    metadata.insert(Value::from("name"), Value::from(name));
-    metadata.remove(Value::from("description"));
-    let description = (!description.trim().is_empty()).then(|| description.to_owned());
-    if let Some(description) = &description {
-        metadata.insert(Value::from("description"), Value::from(description.clone()));
-    }
-    let content = format!(
-        "---\n{}---\n{body}",
-        serde_yaml_ng::to_string(&metadata).map_err(|e| e.to_string())?
-    );
-    let mut edits = Vec::new();
-    if name != id {
-        if target.exists() {
-            return Err(format!("Skill {name:?} already exists"));
-        }
-        let mut files = Vec::new();
-        for category in ["agents", "tasks", "workflows"] {
-            collect(&root, category, &mut files)?;
-        }
-        files.sort();
-        for file in files {
-            let original = fs::read_to_string(&file).map_err(|e| e.to_string())?;
-            let updated =
-                reference_edit(&original, id, name).map_err(|e| format!("{file}: {e}"))?;
-            if original != updated {
-                edits.push((file, original, updated));
-            }
-        }
-    }
-    // Roll back completed writes on ordinary I/O errors; no cross-file crash transaction.
-    let mut written = 0;
-    let mut renamed = false;
-    let result = (|| {
-        if name != id {
-            fs::rename(&directory, &target).map_err(|e| e.to_string())?;
-            renamed = true;
-        }
-        for (path, _, updated) in &edits {
-            atomic_write(path, updated)?;
-            written += 1;
-        }
-        atomic_write(&target.join("SKILL.md"), &content)
-    })();
-    if let Err(error) = result {
-        let mut rollback_errors = Vec::new();
-        for (path, original, _) in edits[..written].iter().rev() {
-            if let Err(e) = atomic_write(path, original) {
-                rollback_errors.push(e);
-            }
-        }
-        if renamed {
-            if let Err(e) = fs::rename(&target, &directory) {
-                rollback_errors.push(e.to_string());
-            }
-        }
-        return Err(format!("{error}; rollback errors: {rollback_errors:?}"));
-    }
-    Ok(SaveSkillResult {
-        skill: SkillDocument {
-            name: name.into(),
-            description,
-            body: body.into(),
-        },
-        updated_references: edits
-            .iter()
-            .map(|(p, _, _)| p.strip_prefix(&project).unwrap().to_string())
-            .collect(),
-    })
 }

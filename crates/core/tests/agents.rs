@@ -15,8 +15,9 @@ struct AgentList {
 }
 
 fn agent_summaries(root: &Utf8Path) -> Result<AgentList, unelos_core::ProjectLoadError> {
-    let (problems, agents): (Vec<_>, Vec<_>) =
-        summaries(root)?.into_iter().partition(|a| a.problem.is_some());
+    let (problems, agents): (Vec<_>, Vec<_>) = summaries(root)?
+        .into_iter()
+        .partition(|a| a.problem.is_some());
     Ok(AgentList {
         agents,
         problems: problems
@@ -71,7 +72,13 @@ fn summaries_isolate_bad_agents_and_preserve_metadata() {
             .collect::<Vec<_>>(),
         ["engineer", "zeta"]
     );
-    assert_eq!(result.agents[0].model, Some(unelos_core::AgentModel::Harness { harness: "opencode".into(), model: "provider/model".into() }));
+    assert_eq!(
+        result.agents[0].model,
+        Some(unelos_core::AgentModel::Harness {
+            harness: "opencode".into(),
+            model: "provider/model".into()
+        })
+    );
     assert_eq!(result.agents[0].skills, ["rust"]);
     assert_eq!(result.agents[0].mcps, ["github"]);
     assert!(result.agents[1].model.is_none());
@@ -265,7 +272,8 @@ fn ordinary_files_in_agents_directory_are_ignored() {
     assert!(result.problems.is_empty());
 }
 
-#[cfg(unix)]
+// macOS (APFS) rejects non-UTF-8 file names, so the fixture can't be created there.
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn invalid_utf8_child_is_isolated() {
     use std::{ffi::OsStr, os::unix::ffi::OsStrExt};

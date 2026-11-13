@@ -9,7 +9,13 @@ fn fixture() -> (TempDir, Utf8PathBuf) {
     let root = Utf8Path::from_path(temp.path()).unwrap().to_owned();
     install_workflow(
         &root,
-        Some(&Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/parallel-research")),
+        Some(
+            &Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join("..")
+                .join("examples")
+                .join("parallel-research"),
+        ),
         WORKFLOW,
     )
     .unwrap();
@@ -57,7 +63,11 @@ fn parallel_packet(root: &Utf8Path) -> WorkPacket {
                 feedback: record.feedback.clone(),
             },
             worker_reports: record.worker_reports.clone(),
-            ledger_path: root.join(".unelos/runs/parallel-check/ledger.md"),
+            ledger_path: root
+                .join(".unelos")
+                .join("runs")
+                .join("parallel-check")
+                .join("ledger.md"),
         },
     )
     .unwrap()
@@ -91,9 +101,13 @@ fn frames(values: &[serde_json::Value]) -> String {
 #[test]
 fn parallel_first_start_renders_worker_prompts_without_brief() {
     let (_temp, root) = fixture();
-    let path = root.join(".unelos/workflows/parallel-research.yaml");
+    let path = root
+        .join(".unelos")
+        .join("workflows")
+        .join("parallel-research.yaml");
     let yaml = std::fs::read_to_string(&path)
         .unwrap()
+        .replace("\r\n", "\n")
         .replace("start: scope", "start: parallel-research")
         .replace("    inputs: [brief.md]\n", "");
     std::fs::write(path, yaml).unwrap();
@@ -176,7 +190,12 @@ fn parallel_result_parser_accepts_finished_subsets() {
         parse_parallel_results(&frames(&[two.clone(), one.clone()]), &expected, &keys).unwrap();
     assert_eq!(results[0].worker_key.as_deref(), Some("worker-1"));
     assert_eq!(results.len(), 2);
-    assert_eq!(parse_parallel_results(&frames(std::slice::from_ref(&one)), &expected, &keys).unwrap().len(), 1);
+    assert_eq!(
+        parse_parallel_results(&frames(std::slice::from_ref(&one)), &expected, &keys)
+            .unwrap()
+            .len(),
+        1
+    );
     assert!(
         parse_parallel_results(&frames(&[one.clone(), one.clone()]), &expected, &keys)
             .unwrap_err()
@@ -264,7 +283,6 @@ fn complete(
     execution_mutate(root, "r-000001", ExecutionOperation::Complete, control)
 }
 
-
 /// Starts the run and completes `scope`, returning the parallel package.
 fn parallel(root: &Utf8Path) -> ExecutionPackage {
     let scope = execution_start(root, WORKFLOW, Some("research-check")).unwrap();
@@ -300,18 +318,22 @@ fn parallel_package_binds_flat_readable_paths() {
     }
     assert_eq!(packet["kind"], "parallel");
     assert_eq!(package.worker_prompts.len(), 2);
-    let run = root.join(".unelos/runs/r-000001/parallel-research");
+    let run = root
+        .join(".unelos")
+        .join("runs")
+        .join("r-000001")
+        .join("parallel-research");
     assert_eq!(
-        packet["outputs"][0]["path"],
-        run.join("research-summary.md").as_str()
+        Utf8Path::new(packet["outputs"][0]["path"].as_str().unwrap()),
+        run.join("research-summary.md")
     );
     assert_eq!(
-        packet["workers"][0]["outputs"][0]["path"],
-        run.join("backend-researcher/result.md").as_str()
+        Utf8Path::new(packet["workers"][0]["outputs"][0]["path"].as_str().unwrap()),
+        run.join("backend-researcher").join("result.md")
     );
     assert_eq!(
-        packet["workers"][1]["outputs"][0]["path"],
-        run.join("frontend-researcher/result.md").as_str()
+        Utf8Path::new(packet["workers"][1]["outputs"][0]["path"].as_str().unwrap()),
+        run.join("frontend-researcher").join("result.md")
     );
 }
 
@@ -332,9 +354,16 @@ fn partial_frames_never_complete_the_parent() {
     for attempt in 1..=3 {
         let error = complete(&root, &first).unwrap_err();
         assert!(error.to_string().contains("worker-1"));
-        assert_eq!(error.to_string().contains("Stop and tell the user."), attempt == 3);
+        assert_eq!(
+            error.to_string().contains("Stop and tell the user."),
+            attempt == 3
+        );
     }
-    let next = complete(&root, &parent_control(&remaining, &[("worker-2", "FINISHED")])).unwrap();
+    let next = complete(
+        &root,
+        &parent_control(&remaining, &[("worker-2", "FINISHED")]),
+    )
+    .unwrap();
     assert_eq!(packet_json(&next)["nodeId"], "synthesis");
 }
 
@@ -354,7 +383,12 @@ fn missing_aggregate_or_worker_report_blocks_completion() {
         .unwrap()
         .to_owned();
     std::fs::remove_file(&frontend).unwrap();
-    assert_eq!(complete(&root, &parent_control(&package, &[])).unwrap_err().code(), "missing_output");
+    assert_eq!(
+        complete(&root, &parent_control(&package, &[]))
+            .unwrap_err()
+            .code(),
+        "missing_output"
+    );
 }
 
 #[test]
