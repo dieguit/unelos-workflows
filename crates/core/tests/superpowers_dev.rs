@@ -55,7 +55,11 @@ fn complete(root: &Utf8Path, state: &RunState, outcome: Option<&str>) -> RunStat
         panic!("expected task at {}", node(state))
     };
     for output in &record.outputs {
-        std::fs::write(&output.path, format!("{} {} report\n", record.node_id, record.execution_id)).unwrap();
+        std::fs::write(
+            &output.path,
+            format!("{} {} report\n", record.node_id, record.execution_id),
+        )
+        .unwrap();
     }
     complete_node(root, &state.run_id, &record.node_id, outcome).unwrap()
 }

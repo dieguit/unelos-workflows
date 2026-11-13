@@ -6,11 +6,21 @@ use std::io::Write;
 
 pub fn create_workflow(root: &Utf8Path) -> Result<String, String> {
     for number in 1u64.. {
-        let id = if number == 1 { "new-workflow".to_owned() } else { format!("new-workflow-{number}") };
+        let id = if number == 1 {
+            "new-workflow".to_owned()
+        } else {
+            format!("new-workflow-{number}")
+        };
         let path = source(root, &id)?;
         fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
-        if path.with_extension("yml").exists() { continue; }
-        let mut file = match fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+        if path.with_extension("yml").exists() {
+            continue;
+        }
+        let mut file = match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
             Ok(file) => file,
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(error) => return Err(error.to_string()),
@@ -169,23 +179,6 @@ fn user_message(message: &str) -> String {
         c.to_uppercase().chain(chars).collect::<String>()
             + if message.ends_with('.') { "" } else { "." }
     })
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn user_message_hides_paths_and_positions() {
-        assert_eq!(
-            super::user_message(
-                "/home/x/.unelos/workflows/a.yaml: nodes: missing field `agent` at line 5 column 3"
-            ),
-            "Missing required field `agent`."
-        );
-        assert_eq!(
-            super::user_message("start step missing"),
-            "Start step missing."
-        );
-    }
 }
 
 fn title(task: &crate::TaskSelection) -> String {
@@ -646,4 +639,21 @@ pub fn save_workflow(
         result?;
     }
     Ok(document)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn user_message_hides_paths_and_positions() {
+        assert_eq!(
+            super::user_message(
+                "/home/x/.unelos/workflows/a.yaml: nodes: missing field `agent` at line 5 column 3"
+            ),
+            "Missing required field `agent`."
+        );
+        assert_eq!(
+            super::user_message("start step missing"),
+            "Start step missing."
+        );
+    }
 }

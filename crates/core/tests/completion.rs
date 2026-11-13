@@ -142,7 +142,9 @@ fn completion_routes_a_correction_loop_with_fresh_ids_and_feedback() {
     );
 
     confirm_outputs(&root, &state.run_id, "task-4").unwrap();
-    let error = complete(&root, &state.run_id, "task-4", None, None).unwrap_err().to_string();
+    let error = complete(&root, &state.run_id, "task-4", None, None)
+        .unwrap_err()
+        .to_string();
     assert!(error.contains("Unchanged outputs"));
     assert!(error.contains("record in a report how the feedback was addressed"));
     confirm_current(&root, &state, "implementation v1");

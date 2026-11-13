@@ -595,12 +595,7 @@ fn rejected_mutations_emit_structured_errors_without_changing_state() {
     let before = fs::read(&state_path).unwrap();
     for (args, code) in [
         (
-            vec![
-                "rename",
-                "!!!",
-                "--run",
-                started["runId"].as_str().unwrap(),
-            ],
+            vec!["rename", "!!!", "--run", started["runId"].as_str().unwrap()],
             "invalid_run_name",
         ),
         (

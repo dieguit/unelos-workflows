@@ -73,12 +73,17 @@ fn discovery_errors_name_the_actual_file() {
         let (_temp, root) = project();
         put(&root, relative, contents);
         let error = load_project(&root, "demo").unwrap_err().to_string();
-        assert!(error.contains(detail), "{error}");
+        assert!(error.replace('\\', "/").contains(detail), "{error}");
     }
     let (_temp, root) = project();
-    fs::create_dir_all(root.join(".unelos/agents/missing")).unwrap();
+    fs::create_dir_all(root.join(".unelos").join("agents").join("missing")).unwrap();
     let error = load_project(&root, "demo").unwrap_err().to_string();
-    assert!(error.contains("agents/missing/agent.yaml"), "{error}");
+    assert!(
+        error
+            .replace('\\', "/")
+            .contains("agents/missing/agent.yaml"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -109,18 +114,34 @@ fn instruction_paths_and_reads_are_bounded_and_diagnostic() {
         "directory",
     ] {
         let (_temp, root) = project();
-        fs::create_dir_all(root.join(".unelos/tasks/shared/directory")).unwrap();
+        fs::create_dir_all(
+            root.join(".unelos")
+                .join("tasks")
+                .join("shared")
+                .join("directory"),
+        )
+        .unwrap();
         put(
             &root,
             ".unelos/tasks/shared/task.yaml",
             &format!("instructionsFile: '{path}'\n"),
         );
         let error = load_project(&root, "demo").unwrap_err().to_string();
-        assert!(error.contains("tasks/shared/task.yaml"), "{error}");
+        assert!(
+            error.replace('\\', "/").contains("tasks/shared/task.yaml"),
+            "{error}"
+        );
         assert!(error.contains("instructionsFile"), "{error}");
     }
     let (_temp, root) = project();
-    fs::write(root.join(".unelos/tasks/shared/instructions.md"), [0xff]).unwrap();
+    fs::write(
+        root.join(".unelos")
+            .join("tasks")
+            .join("shared")
+            .join("instructions.md"),
+        [0xff],
+    )
+    .unwrap();
     let error = load_project(&root, "demo").unwrap_err().to_string();
     assert!(error.contains("instructions.md"), "{error}");
     assert!(error.contains("instructionsFile"), "{error}");
@@ -153,12 +174,25 @@ fn symlinked_instructions_and_definition_folders_cannot_escape() {
         let outside = TempDir::new().unwrap();
         fs::write(outside.path().join("task.yaml"), "instructions: external").unwrap();
         if folder {
-            std::os::unix::fs::symlink(outside.path(), root.join(".unelos/tasks/escape")).unwrap();
+            std::os::unix::fs::symlink(
+                outside.path(),
+                root.join(".unelos").join("tasks").join("escape"),
+            )
+            .unwrap();
         } else {
-            fs::remove_file(root.join(".unelos/tasks/shared/instructions.md")).unwrap();
+            fs::remove_file(
+                root.join(".unelos")
+                    .join("tasks")
+                    .join("shared")
+                    .join("instructions.md"),
+            )
+            .unwrap();
             std::os::unix::fs::symlink(
                 outside.path().join("task.yaml"),
-                root.join(".unelos/tasks/shared/instructions.md"),
+                root.join(".unelos")
+                    .join("tasks")
+                    .join("shared")
+                    .join("instructions.md"),
             )
             .unwrap();
         }
@@ -198,12 +232,12 @@ fn init_creates_folder_scaffold_and_preserves_settings() {
     for directory in ["tasks", "agents", "workflows", "skills"] {
         assert!(root.join(".unelos").join(directory).is_dir());
     }
-    let settings = fs::read_to_string(root.join(".unelos/project.yaml")).unwrap();
+    let settings = fs::read_to_string(root.join(".unelos").join("project.yaml")).unwrap();
     parse_project_settings("project.yaml", &settings).unwrap();
     put(root, ".unelos/project.yaml", "# user settings\n{}\n");
     initialize_project(root).unwrap();
     assert_eq!(
-        fs::read_to_string(root.join(".unelos/project.yaml")).unwrap(),
+        fs::read_to_string(root.join(".unelos").join("project.yaml")).unwrap(),
         "# user settings\n{}\n"
     );
 }
@@ -212,7 +246,7 @@ fn init_creates_folder_scaffold_and_preserves_settings() {
 fn inline_tasks_are_local_and_use_workflow_relative_instructions() {
     let (_temp, root) = project();
     put(&root, ".unelos/workflows/local.md", "LOCAL_MARKER\n");
-    let yaml = fs::read_to_string(root.join(".unelos/workflows/demo.yaml"))
+    let yaml = fs::read_to_string(root.join(".unelos").join("workflows").join("demo.yaml"))
         .unwrap()
         .replace(
             "task: shared",
@@ -265,7 +299,7 @@ fn parallel_inline_workers_keep_isolated_context_and_referencing_diagnostics() {
         "nodes.work.tasks[1].taskDefinition"
     );
     assert_eq!(value["workers"][1]["key"], "worker-2");
-    let yaml = fs::read_to_string(root.join(".unelos/workflows/demo.yaml"))
+    let yaml = fs::read_to_string(root.join(".unelos").join("workflows").join("demo.yaml"))
         .unwrap()
         .replace("agent: worker", "agent: missing");
     put(&root, ".unelos/workflows/demo.yaml", &yaml);
@@ -273,7 +307,10 @@ fn parallel_inline_workers_keep_isolated_context_and_referencing_diagnostics() {
         .unwrap_err()
         .to_string();
     assert!(error.contains("nodes.work.tasks[0].agent"), "{error}");
-    assert!(error.contains("workflows/demo.yaml"), "{error}");
+    assert!(
+        error.replace('\\', "/").contains("workflows/demo.yaml"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -291,7 +328,7 @@ fn inline_outcomes_and_skill_deduplication_match_named_tasks() {
     let context = inspect_task(&loaded, "work").unwrap().context;
     assert_eq!(context.skills.len(), 1);
     assert_eq!(context.outcomes, ["passed", "failed"]);
-    let yaml = fs::read_to_string(root.join(".unelos/workflows/demo.yaml"))
+    let yaml = fs::read_to_string(root.join(".unelos").join("workflows").join("demo.yaml"))
         .unwrap()
         .replace("next: {passed: end, failed: work}", "next: end");
     put(&root, ".unelos/workflows/demo.yaml", &yaml);
@@ -316,11 +353,18 @@ fn import_preserves_settings_and_copies_resources() {
     install_workflow(root, Some(&source), "demo").unwrap();
     install_workflow(root, Some(&source), "demo").unwrap();
     assert_eq!(
-        fs::read_to_string(root.join(".unelos/project.yaml")).unwrap(),
+        fs::read_to_string(root.join(".unelos").join("project.yaml")).unwrap(),
         "# User comment\n{}\n"
     );
     assert_eq!(
-        fs::read_to_string(root.join(".unelos/agents/worker/templates/report.md")).unwrap(),
+        fs::read_to_string(
+            root.join(".unelos")
+                .join("agents")
+                .join("worker")
+                .join("templates")
+                .join("report.md")
+        )
+        .unwrap(),
         "REPORT_TEMPLATE\n"
     );
     assert_eq!(
@@ -367,12 +411,17 @@ fn flat_import_copies_shared_instruction_dependencies_and_inline_skills_only() {
         "SHARED\n"
     );
     assert_eq!(
-        fs::read_to_string(root.join(".unelos/shared/instructions.md")).unwrap(),
+        fs::read_to_string(root.join(".unelos").join("shared").join("instructions.md")).unwrap(),
         "SHARED\n"
     );
-    assert!(root.join(".unelos/skills/check/reference.md").is_file());
-    assert!(!root.join(".unelos/tasks/unused").exists());
-    assert!(!root.join(".unelos/skills/unused").exists());
+    assert!(root
+        .join(".unelos")
+        .join("skills")
+        .join("check")
+        .join("reference.md")
+        .is_file());
+    assert!(!root.join(".unelos").join("tasks").join("unused").exists());
+    assert!(!root.join(".unelos").join("skills").join("unused").exists());
     let workers = serde_json::to_value(inspect_node(&loaded, "work").unwrap()).unwrap();
     assert_eq!(workers["workers"][1]["skills"][0]["content"], "CHECK\n");
 }
@@ -399,14 +448,23 @@ fn collisions_are_preflighted_before_any_authoring_write() {
             fs::read_to_string(root.join(conflict)).unwrap(),
             "USER_CONTENT\n"
         );
-        assert!(!root.join(".unelos/project.yaml").exists());
-        assert!(!root.join(".unelos/agents/worker/agent.yaml").exists());
+        assert!(!root.join(".unelos").join("project.yaml").exists());
+        assert!(!root
+            .join(".unelos")
+            .join("agents")
+            .join("worker")
+            .join("agent.yaml")
+            .exists());
     }
 }
 
 #[test]
 fn sole_flat_example_installs_with_its_bundled_skills() {
-    let package = Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/superpowers-dev");
+    let package = Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("examples")
+        .join("superpowers-dev");
     assert!(!package.join(".unelos").exists());
     assert!(!package.join("project.yaml").exists());
     let target = TempDir::new().unwrap();
@@ -426,7 +484,7 @@ fn sole_flat_example_installs_with_its_bundled_skills() {
             .outcomes,
         ["final_fix", "finish"]
     );
-    let mut skills: Vec<String> = std::fs::read_dir(root.join(".unelos/skills"))
+    let mut skills: Vec<String> = std::fs::read_dir(root.join(".unelos").join("skills"))
         .unwrap()
         .map(|entry| entry.unwrap().file_name().into_string().unwrap())
         .collect();
@@ -447,9 +505,14 @@ fn sole_flat_example_installs_with_its_bundled_skills() {
         ]
     );
     for id in &skills {
-        let text = std::fs::read_to_string(root.join(".unelos/skills").join(id).join("SKILL.md"))
-            .unwrap()
-            .replace("\r\n", "\n");
+        let text = std::fs::read_to_string(
+            root.join(".unelos")
+                .join("skills")
+                .join(id)
+                .join("SKILL.md"),
+        )
+        .unwrap()
+        .replace("\r\n", "\n");
         assert!(
             text.starts_with(&format!("---\nname: {id}\n")),
             "{id} frontmatter"
@@ -463,7 +526,7 @@ fn sole_flat_example_installs_with_its_bundled_skills() {
             assert!(!text.contains(banned), "{id} contains {banned}");
         }
     }
-    assert!(!root.join(".unelos/README.md").exists());
+    assert!(!root.join(".unelos").join("README.md").exists());
 }
 
 #[test]
@@ -494,7 +557,7 @@ fn instructions_cannot_import_runtime_state_or_integration_files() {
 fn workflow_discovery_rejects_symlinked_settings_and_directories() {
     for relative in ["project.yaml", "workflows"] {
         let (_temp, root) = project();
-        fs::remove_file(root.join(".unelos/workflows/demo.yaml")).unwrap();
+        fs::remove_file(root.join(".unelos").join("workflows").join("demo.yaml")).unwrap();
         let outside = TempDir::new().unwrap();
         let target = outside.path().join("external");
         let path = root.join(".unelos").join(relative);
@@ -539,15 +602,26 @@ fn import_preflight_rejects_symlinked_resources_and_destinations() {
         let target = TempDir::new().unwrap();
         let root = Utf8Path::from_path(target.path()).unwrap();
         let link = if destination {
-            root.join(".unelos/agents/worker/agent.yaml")
+            root.join(".unelos")
+                .join("agents")
+                .join("worker")
+                .join("agent.yaml")
         } else {
-            source.join(".unelos/agents/worker/template.md")
+            source
+                .join(".unelos")
+                .join("agents")
+                .join("worker")
+                .join("template.md")
         };
         fs::create_dir_all(link.parent().unwrap()).unwrap();
         std::os::unix::fs::symlink(&external, &link).unwrap();
         assert!(install_workflow(root, Some(&source), "demo").is_err());
         assert_eq!(fs::read_to_string(external).unwrap(), "PRESERVE\n");
-        assert!(!root.join(".unelos/project.yaml").exists());
-        assert!(!root.join(".unelos/workflows/demo.yaml").exists());
+        assert!(!root.join(".unelos").join("project.yaml").exists());
+        assert!(!root
+            .join(".unelos")
+            .join("workflows")
+            .join("demo.yaml")
+            .exists());
     }
 }

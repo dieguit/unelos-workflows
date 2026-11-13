@@ -66,7 +66,9 @@ pub(crate) fn resolve_agent_model(model: &crate::AgentModel) -> Result<String, I
 
 use crate::project::safe_id;
 
-pub(crate) fn references(project: &LoadedProject) -> (BTreeSet<String>, BTreeMap<String, (bool, bool)>) {
+pub(crate) fn references(
+    project: &LoadedProject,
+) -> (BTreeSet<String>, BTreeMap<String, (bool, bool)>) {
     let mut tasks = BTreeSet::new();
     let mut agents = BTreeMap::new();
     let mut add = |task: &TaskSelection, agent: &str, execution: Execution| {
@@ -111,7 +113,10 @@ fn export(project: &LoadedProject) -> Result<Vec<AgentExport>, InstallError> {
                 let bare = mcp.strip_prefix("global/").unwrap_or(mcp);
                 if let Some(previous) = scopes.insert(bare.to_owned(), mcp.clone()) {
                     if previous != *mcp {
-                        return Err(fail("mcp_collision", format!("Project and global MCP share ID {bare:?}")));
+                        return Err(fail(
+                            "mcp_collision",
+                            format!("Project and global MCP share ID {bare:?}"),
+                        ));
                     }
                 }
                 let document = if mcp.starts_with("global/") {
@@ -119,12 +124,12 @@ fn export(project: &LoadedProject) -> Result<Vec<AgentExport>, InstallError> {
                 } else {
                     crate::mcp_document::read_mcp(&project.authoring_root, mcp)
                 }
-                    .map_err(|e| {
-                        fail(
-                            "missing_mcp",
-                            format!("Cannot resolve MCP {mcp:?} for agent {id:?}: {e}"),
-                        )
-                    })?;
+                .map_err(|e| {
+                    fail(
+                        "missing_mcp",
+                        format!("Cannot resolve MCP {mcp:?} for agent {id:?}: {e}"),
+                    )
+                })?;
                 mcp_servers.insert(bare.to_owned(), document.server);
             }
             let model = agent.model.as_ref().map(resolve_agent_model).transpose()?;
@@ -171,7 +176,10 @@ pub fn export_workflow_agents(
     export(&project)
 }
 
-pub(crate) fn load_install_source(root: &Utf8Path, workflow: &str) -> Result<LoadedProject, InstallError> {
+pub(crate) fn load_install_source(
+    root: &Utf8Path,
+    workflow: &str,
+) -> Result<LoadedProject, InstallError> {
     checked_path(root, Utf8Path::new(".unelos"))?;
     if root.join(".unelos").exists() {
         return crate::load_project(root, workflow)
@@ -213,31 +221,64 @@ pub fn install_workflow(
     };
     let plan = crate::plan_import(root, source, source.as_str(), &BTreeMap::new())?;
     if plan.workflow.id != workflow {
-        return Err(fail("invalid_project", format!("Source workflow {:?} does not match requested workflow {workflow:?}", plan.workflow.id)));
+        return Err(fail(
+            "invalid_project",
+            format!(
+                "Source workflow {:?} does not match requested workflow {workflow:?}",
+                plan.workflow.id
+            ),
+        ));
     }
     if !plan.conflicts.is_empty() {
-        return Err(fail("import_collision", format!("Existing authoring differs: {}", plan.conflicts.iter().map(|c| c.key.as_str()).collect::<Vec<_>>().join(", "))));
+        return Err(fail(
+            "import_collision",
+            format!(
+                "Existing authoring differs: {}",
+                plan.conflicts
+                    .iter()
+                    .map(|c| c.key.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        ));
     }
     match crate::commit_import(root, source, source.as_str(), &BTreeMap::new())? {
-        crate::ImportOutcome::Imported { workflow, agents, .. } => Ok(WorkflowInstall { workflow, agents }),
+        crate::ImportOutcome::Imported {
+            workflow, agents, ..
+        } => Ok(WorkflowInstall { workflow, agents }),
         crate::ImportOutcome::Conflicts(plan) => Err(fail(
             "import_collision",
-            format!("Existing authoring differs: {}", plan.conflicts.iter().map(|c| c.key.as_str()).collect::<Vec<_>>().join(", ")),
+            format!(
+                "Existing authoring differs: {}",
+                plan.conflicts
+                    .iter()
+                    .map(|c| c.key.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
         )),
     }
 }
 
-pub(crate) fn collect_import_files(project: &LoadedProject, workflow: &str) -> Result<BTreeMap<Utf8PathBuf, Vec<u8>>, InstallError> {
+pub(crate) fn collect_import_files(
+    project: &LoadedProject,
+    workflow: &str,
+) -> Result<BTreeMap<Utf8PathBuf, Vec<u8>>, InstallError> {
     let mut files = BTreeMap::new();
     let authoring = &project.authoring_root;
     let (tasks, agent_ids) = references(project);
     for agent in agent_ids.keys().map(|id| &project.definitions.agents[id]) {
         for id in &agent.mcps {
-            if id.starts_with("global/") { continue; }
+            if id.starts_with("global/") {
+                continue;
+            }
             let relative = Utf8PathBuf::from(format!("mcps/{id}.yaml"));
             let path = checked_path(authoring, &relative)?;
             let bytes = fs::read(path).map_err(|error| match error.kind() {
-                io::ErrorKind::NotFound => fail("invalid_project", format!("MCP {id:?} is referenced but {relative} is missing")),
+                io::ErrorKind::NotFound => fail(
+                    "invalid_project",
+                    format!("MCP {id:?} is referenced but {relative} is missing"),
+                ),
                 _ => io_error(error),
             })?;
             files.insert(relative, bytes);
@@ -349,7 +390,10 @@ pub(crate) fn collect_files(
     Ok(())
 }
 
-pub(crate) fn checked_path(root: &Utf8Path, relative: &Utf8Path) -> Result<Utf8PathBuf, InstallError> {
+pub(crate) fn checked_path(
+    root: &Utf8Path,
+    relative: &Utf8Path,
+) -> Result<Utf8PathBuf, InstallError> {
     let mut path = root.to_owned();
     for component in relative.components() {
         let Utf8Component::Normal(part) = component else {

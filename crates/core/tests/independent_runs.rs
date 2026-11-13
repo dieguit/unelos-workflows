@@ -63,7 +63,8 @@ fn rename_keeps_identity_and_ignores_obsolete_pointer() {
     let a = start_workflow(&root, "simple-plan-execute-review", Some("first-run")).unwrap();
     let b = start_workflow(&root, "simple-plan-execute-review", Some("second-run")).unwrap();
     std::fs::write(root.join(".unelos/active-run"), "../invalid-old-pointer").unwrap();
-    let before_b = std::fs::read(root.join(".unelos/runs").join(&b.run_id).join("state.json")).unwrap();
+    let before_b =
+        std::fs::read(root.join(".unelos/runs").join(&b.run_id).join("state.json")).unwrap();
     rename_run(&root, &a.run_id, "renamed-first").unwrap();
     assert_eq!(status(&root, &a.run_id).unwrap().name, "renamed-first");
     assert_eq!(status(&root, &b.run_id).unwrap(), b);
@@ -82,8 +83,14 @@ fn cross_run_callback_with_same_task_label_never_writes_either_run() {
     let (_temp, root) = fixture();
     let a = execution_start(&root, "simple-plan-execute-review", Some("first-run")).unwrap();
     let b = execution_start(&root, "simple-plan-execute-review", Some("second-run")).unwrap();
-    let a_path = root.join(".unelos/runs").join(a.run_id.as_deref().unwrap()).join("state.json");
-    let b_path = root.join(".unelos/runs").join(b.run_id.as_deref().unwrap()).join("state.json");
+    let a_path = root
+        .join(".unelos/runs")
+        .join(a.run_id.as_deref().unwrap())
+        .join("state.json");
+    let b_path = root
+        .join(".unelos/runs")
+        .join(b.run_id.as_deref().unwrap())
+        .join("state.json");
     let before = (
         std::fs::read(&a_path).unwrap(),
         std::fs::read(&b_path).unwrap(),

@@ -1,6 +1,6 @@
 # Unelos native OpenCode tools
 
-Thin adapter for OpenCode V1 ≥1.18.29 and V2. Shared instructions, execution
+Thin adapter for OpenCode V2. Shared instructions, execution
 prompts, result validation and guarded progression live in Rust core. The model
 dispatches configured native workers; the plugin does not intercept subagents.
 
@@ -21,7 +21,7 @@ foreign entries and comments. Both config filenames existing is an error.
 No npm, source checkout or network is required. The plugin uses a stable CLI copy
 under the Unelos config directory; reinstall refreshes it and the integration.
 Use `unelos harness uninstall opencode` to remove only our registration and recorded assets.
-The stable CLI remains available. V1 is not supported by global installation.
+The stable CLI remains available. Reinstall removes the legacy `index.js` asset.
 
 ## Install Workflow and native agents
 
@@ -67,6 +67,7 @@ Build `cargo build --locked -p unelos-cli` (or install from the checkout with
 `cargo install --locked --path crates/cli`). The CLI embeds integration runtime
 files at build time. `npm pack` here is optional for distributing the plugin
 separately; keep extracted package files together outside `.opencode/plugins`.
+The package ships raw TypeScript, loaded by OpenCode without a build step.
 
 ## Run
 
@@ -82,16 +83,15 @@ independent runs do not isolate edits to shared source files.
 
 Native tools: `unelos_next`, `unelos_start`, `unelos_resume`, `unelos_complete`, `unelos_approve`,
 `unelos_reject`, `unelos_status`, `unelos_inspect`, `unelos_rename`.
-V1 inspects workflows before starting; parallel workflows are unavailable and fail with `unsupported_workflow` before run creation. Other tools call CLI once. Completion/decisions check full expected identity inside the
+Tools call CLI once. Completion/decisions check full expected identity inside the
 core runtime lock and return the resulting package. No shell-called JS helper,
 status-then-next loop, worker tracking or per-model-request polling.
 
 The package supplies `workerPrompt` unchanged and a mapped `nativeAgent`.
-V1 dispatches `task(subagent_type, prompt)` and continues `task_id`; V2 uses
-`subagent(agent, prompt)` and `sessionID`. Controller inspects reports/results,
+Workers use `subagent(agent, prompt)` and `sessionID`. Controller inspects reports/results,
 relays questions and completes ordinary work. Native return alone is not success.
 
-Parallel Nodes (V2 only) supply `workerPrompts[]`, each with its own mapped
+Parallel Nodes supply `workerPrompts[]`, each with its own mapped
 `nativeAgent`. The controller starts every worker with `background=true` in one
 turn, relays a worker's question through its native session, writes the
 aggregate itself, then completes the parent with every worker's final frame.

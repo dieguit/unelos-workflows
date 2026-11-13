@@ -67,7 +67,7 @@ pub fn get_global_skill(id: &str) -> Result<SkillDocument, String> {
 
 fn get_skill_at(root: &Utf8Path, id: &str) -> Result<SkillDocument, String> {
     valid_id(id)?;
-    let text = fs::read_to_string(bounded(&root, &format!("skills/{id}/SKILL.md"))?)
+    let text = fs::read_to_string(bounded(root, &format!("skills/{id}/SKILL.md"))?)
         .map_err(|e| e.to_string())?;
     let (metadata, body) = split(&text)?;
     let description = metadata
@@ -241,6 +241,232 @@ pub(crate) fn collect(
     Ok(())
 }
 
+pub(crate) fn atomic_write(path: &Utf8Path, text: &str) -> Result<(), String> {
+    let temp = path.with_extension("unelos-tmp");
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp)
+        .map_err(|e| e.to_string())?;
+    let result = (|| {
+        file.write_all(text.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temp, path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(temp);
+    }
+    result.map_err(|e: std::io::Error| e.to_string())
+}
+
+pub fn create_skill(
+    root: &Utf8Path,
+    name: &str,
+    description: &str,
+    body: &str,
+) -> Result<SkillDocument, String> {
+    let root = crate::project::absolute_root(root).map_err(|e| e.to_string())?;
+    create_skill_at(&root.join(".unelos"), name, description, body)
+}
+
+pub fn create_global_skill(
+    name: &str,
+    description: &str,
+    body: &str,
+) -> Result<SkillDocument, String> {
+    create_skill_at(
+        &crate::task_document::global_root()?,
+        name,
+        description,
+        body,
+    )
+}
+
+fn create_skill_at(
+    root: &Utf8Path,
+    name: &str,
+    description: &str,
+    body: &str,
+) -> Result<SkillDocument, String> {
+    valid_id(name)?;
+    let target = bounded(root, &format!("skills/{name}"))?;
+    let content = skill_content(Mapping::new(), name, description, body)?;
+    fs::create_dir_all(bounded(root, "skills")?).map_err(|e| e.to_string())?;
+    fs::create_dir(&target).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::AlreadyExists {
+            format!("Skill {name:?} already exists")
+        } else {
+            e.to_string()
+        }
+    })?;
+    if let Err(error) = atomic_write(&target.join("SKILL.md"), &content) {
+        let _ = fs::remove_dir(&target);
+        return Err(error);
+    }
+    Ok(SkillDocument {
+        name: name.into(),
+        description: (!description.trim().is_empty()).then(|| description.into()),
+        body: body.into(),
+    })
+}
+
+fn skill_content(
+    mut metadata: Mapping,
+    name: &str,
+    description: &str,
+    body: &str,
+) -> Result<String, String> {
+    metadata.insert(Value::from("name"), Value::from(name));
+    metadata.remove(Value::from("description"));
+    if !description.trim().is_empty() {
+        metadata.insert(Value::from("description"), Value::from(description));
+    }
+    Ok(format!(
+        "---\n{}---\n{body}",
+        serde_yaml_ng::to_string(&metadata).map_err(|e| e.to_string())?
+    ))
+}
+
+pub fn save_skill(
+    root: &Utf8Path,
+    id: &str,
+    name: &str,
+    description: &str,
+    body: &str,
+) -> Result<SaveSkillResult, String> {
+    let project = crate::project::absolute_root(root).map_err(|e| e.to_string())?;
+    save_skill_at(
+        &project.join(".unelos"),
+        Some(&project),
+        false,
+        id,
+        name,
+        description,
+        body,
+    )
+}
+
+pub fn save_global_skill(
+    project: Option<&Utf8Path>,
+    id: &str,
+    name: &str,
+    description: &str,
+    body: &str,
+) -> Result<SaveSkillResult, String> {
+    let project = project
+        .map(crate::project::absolute_root)
+        .transpose()
+        .map_err(|e| e.to_string())?;
+    save_skill_at(
+        &crate::task_document::global_root()?,
+        project.as_deref(),
+        true,
+        id,
+        name,
+        description,
+        body,
+    )
+}
+
+fn save_skill_at(
+    root: &Utf8Path,
+    project: Option<&Utf8Path>,
+    global: bool,
+    id: &str,
+    name: &str,
+    description: &str,
+    body: &str,
+) -> Result<SaveSkillResult, String> {
+    valid_id(id)?;
+    valid_id(name)?;
+    let source = bounded(root, &format!("skills/{id}/SKILL.md"))?;
+    let directory = bounded(root, &format!("skills/{id}"))?;
+    let target = bounded(root, &format!("skills/{name}"))?;
+    let text = fs::read_to_string(&source).map_err(|e| e.to_string())?;
+    let (metadata, _) = split(&text)?;
+    let content = skill_content(metadata, name, description, body)?;
+    let description = (!description.trim().is_empty()).then(|| description.to_owned());
+    let mut edits = Vec::new();
+    if name != id {
+        if target.exists() {
+            return Err(format!("Skill {name:?} already exists"));
+        }
+        let mut files = Vec::new();
+        if global {
+            collect(root, "tasks", &mut files)?;
+        }
+        if let Some(project) = project {
+            for category in ["agents", "tasks", "workflows"] {
+                collect(&project.join(".unelos"), category, &mut files)?;
+            }
+        }
+        let old = if global {
+            format!("global/{id}")
+        } else {
+            id.into()
+        };
+        let new = if global {
+            format!("global/{name}")
+        } else {
+            name.into()
+        };
+        files.sort();
+        for file in files {
+            let original = fs::read_to_string(&file).map_err(|e| e.to_string())?;
+            let updated =
+                reference_edit(&original, &old, &new).map_err(|e| format!("{file}: {e}"))?;
+            if original != updated {
+                edits.push((file, original, updated));
+            }
+        }
+    }
+    // Roll back completed writes on ordinary I/O errors; no cross-file crash transaction.
+    let mut written = 0;
+    let mut renamed = false;
+    let result = (|| {
+        if name != id {
+            fs::rename(&directory, &target).map_err(|e| e.to_string())?;
+            renamed = true;
+        }
+        for (path, _, updated) in &edits {
+            atomic_write(path, updated)?;
+            written += 1;
+        }
+        atomic_write(&target.join("SKILL.md"), &content)
+    })();
+    if let Err(error) = result {
+        let mut rollback_errors = Vec::new();
+        for (path, original, _) in edits[..written].iter().rev() {
+            if let Err(e) = atomic_write(path, original) {
+                rollback_errors.push(e);
+            }
+        }
+        if renamed {
+            if let Err(e) = fs::rename(&target, &directory) {
+                rollback_errors.push(e.to_string());
+            }
+        }
+        return Err(format!("{error}; rollback errors: {rollback_errors:?}"));
+    }
+    Ok(SaveSkillResult {
+        skill: SkillDocument {
+            name: name.into(),
+            description,
+            body: body.into(),
+        },
+        updated_references: edits
+            .iter()
+            .map(|(p, _, _)| {
+                project
+                    .and_then(|root| p.strip_prefix(root).ok())
+                    .map(|relative| relative.iter().collect::<Vec<_>>().join("/"))
+                    .unwrap_or_else(|| p.to_string())
+            })
+            .collect(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,11 +489,17 @@ mod tests {
         let loaded = get_skill(root, "new").unwrap();
         assert_eq!(loaded.description, created.description);
         assert_eq!(loaded.body, created.body);
-        assert_eq!(create_skill(root, "new", "", "changed").unwrap_err(), "Skill \"new\" already exists");
+        assert_eq!(
+            create_skill(root, "new", "", "changed").unwrap_err(),
+            "Skill \"new\" already exists"
+        );
         assert_eq!(get_skill(root, "new").unwrap().body, created.body);
         create_skill(root, "blank", " \n", "Body").unwrap();
         let text = fs::read_to_string(root.join(".unelos/skills/blank/SKILL.md")).unwrap();
-        assert!(!split(&text).unwrap().0.contains_key(Value::from("description")));
+        assert!(!split(&text)
+            .unwrap()
+            .0
+            .contains_key(Value::from("description")));
         assert!(create_skill(root, "../escape", "", "").is_err());
     }
 
@@ -369,157 +601,4 @@ mod tests {
         assert_eq!(get_skill(&root, "old").unwrap().body, "Body");
         assert!(!root.join(".unelos/skills/new").exists());
     }
-}
-
-pub(crate) fn atomic_write(path: &Utf8Path, text: &str) -> Result<(), String> {
-    let temp = path.with_extension("unelos-tmp");
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&temp)
-        .map_err(|e| e.to_string())?;
-    let result = (|| {
-        file.write_all(text.as_bytes())?;
-        file.sync_all()?;
-        drop(file);
-        fs::rename(&temp, path)
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(temp);
-    }
-    result.map_err(|e: std::io::Error| e.to_string())
-}
-
-pub fn create_skill(root: &Utf8Path, name: &str, description: &str, body: &str) -> Result<SkillDocument, String> {
-    let root = crate::project::absolute_root(root).map_err(|e| e.to_string())?;
-    create_skill_at(&root.join(".unelos"), name, description, body)
-}
-
-pub fn create_global_skill(name: &str, description: &str, body: &str) -> Result<SkillDocument, String> {
-    create_skill_at(&crate::task_document::global_root()?, name, description, body)
-}
-
-fn create_skill_at(root: &Utf8Path, name: &str, description: &str, body: &str) -> Result<SkillDocument, String> {
-    valid_id(name)?;
-    let target = bounded(root, &format!("skills/{name}"))?;
-    let content = skill_content(Mapping::new(), name, description, body)?;
-    fs::create_dir_all(bounded(root, "skills")?).map_err(|e| e.to_string())?;
-    fs::create_dir(&target).map_err(|e| {
-        if e.kind() == std::io::ErrorKind::AlreadyExists {
-            format!("Skill {name:?} already exists")
-        } else {
-            e.to_string()
-        }
-    })?;
-    if let Err(error) = atomic_write(&target.join("SKILL.md"), &content) {
-        let _ = fs::remove_dir(&target);
-        return Err(error);
-    }
-    Ok(SkillDocument {
-        name: name.into(),
-        description: (!description.trim().is_empty()).then(|| description.into()),
-        body: body.into(),
-    })
-}
-
-fn skill_content(mut metadata: Mapping, name: &str, description: &str, body: &str) -> Result<String, String> {
-    metadata.insert(Value::from("name"), Value::from(name));
-    metadata.remove(Value::from("description"));
-    if !description.trim().is_empty() {
-        metadata.insert(Value::from("description"), Value::from(description));
-    }
-    Ok(format!("---\n{}---\n{body}", serde_yaml_ng::to_string(&metadata).map_err(|e| e.to_string())?))
-}
-
-pub fn save_skill(
-    root: &Utf8Path,
-    id: &str,
-    name: &str,
-    description: &str,
-    body: &str,
-) -> Result<SaveSkillResult, String> {
-    let project = crate::project::absolute_root(root).map_err(|e| e.to_string())?;
-    save_skill_at(&project.join(".unelos"), Some(&project), false, id, name, description, body)
-}
-
-pub fn save_global_skill(project: Option<&Utf8Path>, id: &str, name: &str, description: &str, body: &str) -> Result<SaveSkillResult, String> {
-    let project = project.map(crate::project::absolute_root).transpose().map_err(|e| e.to_string())?;
-    save_skill_at(&crate::task_document::global_root()?, project.as_deref(), true, id, name, description, body)
-}
-
-fn save_skill_at(root: &Utf8Path, project: Option<&Utf8Path>, global: bool, id: &str, name: &str, description: &str, body: &str) -> Result<SaveSkillResult, String> {
-    valid_id(id)?;
-    valid_id(name)?;
-    let source = bounded(&root, &format!("skills/{id}/SKILL.md"))?;
-    let directory = bounded(&root, &format!("skills/{id}"))?;
-    let target = bounded(&root, &format!("skills/{name}"))?;
-    let text = fs::read_to_string(&source).map_err(|e| e.to_string())?;
-    let (metadata, _) = split(&text)?;
-    let content = skill_content(metadata, name, description, body)?;
-    let description = (!description.trim().is_empty()).then(|| description.to_owned());
-    let mut edits = Vec::new();
-    if name != id {
-        if target.exists() {
-            return Err(format!("Skill {name:?} already exists"));
-        }
-        let mut files = Vec::new();
-        if global {
-            collect(root, "tasks", &mut files)?;
-        }
-        if let Some(project) = project {
-            for category in ["agents", "tasks", "workflows"] {
-                collect(&project.join(".unelos"), category, &mut files)?;
-            }
-        }
-        let old = if global { format!("global/{id}") } else { id.into() };
-        let new = if global { format!("global/{name}") } else { name.into() };
-        files.sort();
-        for file in files {
-            let original = fs::read_to_string(&file).map_err(|e| e.to_string())?;
-            let updated =
-                reference_edit(&original, &old, &new).map_err(|e| format!("{file}: {e}"))?;
-            if original != updated {
-                edits.push((file, original, updated));
-            }
-        }
-    }
-    // Roll back completed writes on ordinary I/O errors; no cross-file crash transaction.
-    let mut written = 0;
-    let mut renamed = false;
-    let result = (|| {
-        if name != id {
-            fs::rename(&directory, &target).map_err(|e| e.to_string())?;
-            renamed = true;
-        }
-        for (path, _, updated) in &edits {
-            atomic_write(path, updated)?;
-            written += 1;
-        }
-        atomic_write(&target.join("SKILL.md"), &content)
-    })();
-    if let Err(error) = result {
-        let mut rollback_errors = Vec::new();
-        for (path, original, _) in edits[..written].iter().rev() {
-            if let Err(e) = atomic_write(path, original) {
-                rollback_errors.push(e);
-            }
-        }
-        if renamed {
-            if let Err(e) = fs::rename(&target, &directory) {
-                rollback_errors.push(e.to_string());
-            }
-        }
-        return Err(format!("{error}; rollback errors: {rollback_errors:?}"));
-    }
-    Ok(SaveSkillResult {
-        skill: SkillDocument {
-            name: name.into(),
-            description,
-            body: body.into(),
-        },
-        updated_references: edits
-            .iter()
-            .map(|(p, _, _)| project.and_then(|root| p.strip_prefix(root).ok()).unwrap_or(p).to_string())
-            .collect(),
-    })
 }

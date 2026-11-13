@@ -315,7 +315,14 @@ fn run(cli: &Cli) -> Result<(), Error> {
             let renames = import::parse_renames(rename)?;
             let selected = init::install_version(&cli.project, *opencode)?;
             if let Some(source) = source {
-                return import::install(cli, source, renames, *trust_mcps, *accept_suggested, selected);
+                return import::install(
+                    cli,
+                    source,
+                    renames,
+                    *trust_mcps,
+                    *accept_suggested,
+                    selected,
+                );
             }
             if selected.is_some() {
                 let agents = unelos_core::export_workflow_agents(&cli.project, workflow)?;

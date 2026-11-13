@@ -10,15 +10,23 @@ const PROJECT: &str = include_str!("fixtures/project/.unelos/project.yaml");
 const WORKFLOW: &str = include_str!("fixtures/project/.unelos/workflows/implement-feature.yaml");
 
 fn fixture_root() -> Utf8PathBuf {
-    Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/project")
+    Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("project")
 }
 
 fn assert_fixture(loaded: &LoadedProject, root: &Utf8Path) {
     assert_eq!(loaded.project_root, root);
-    assert_eq!(loaded.project_source, root.join(".unelos/project.yaml"));
+    assert_eq!(
+        loaded.project_source,
+        root.join(".unelos").join("project.yaml")
+    );
     assert_eq!(
         loaded.workflow_source,
-        root.join(".unelos/workflows/implement-feature.yaml")
+        root.join(".unelos")
+            .join("workflows")
+            .join("implement-feature.yaml")
     );
     assert!(loaded.project_root.is_absolute());
     assert_eq!(
@@ -27,7 +35,10 @@ fn assert_fixture(loaded: &LoadedProject, root: &Utf8Path) {
     );
     assert_eq!(
         loaded.definitions.agents["engineer"].model,
-        Some(unelos_core::AgentModel::Harness { harness: "opencode".into(), model: "example-provider/example-model".into() })
+        Some(unelos_core::AgentModel::Harness {
+            harness: "opencode".into(),
+            model: "example-provider/example-model".into()
+        })
     );
     assert_eq!(
         loaded.workflow,
@@ -42,10 +53,12 @@ fn temporary_project() -> (TempDir, Utf8PathBuf) {
     assert_fs::fixture::ChildPath::new(root.as_std_path())
         .copy_from(fixture_root(), &["**/*"])
         .unwrap();
-    fs::create_dir_all(root.join(".unelos/workflows")).unwrap();
-    fs::write(root.join(".unelos/project.yaml"), PROJECT).unwrap();
+    fs::create_dir_all(root.join(".unelos").join("workflows")).unwrap();
+    fs::write(root.join(".unelos").join("project.yaml"), PROJECT).unwrap();
     fs::write(
-        root.join(".unelos/workflows/implement-feature.yaml"),
+        root.join(".unelos")
+            .join("workflows")
+            .join("implement-feature.yaml"),
         WORKFLOW,
     )
     .unwrap();
@@ -89,12 +102,25 @@ fn complete_fixture_preserves_authoring_data_and_locations() {
 #[test]
 fn selection_ignores_unrelated_files_and_supports_unicode() {
     let (_temp, root) = temporary_project();
-    fs::write(root.join(".unelos/workflows/broken.yaml"), "nodes: [").unwrap();
-    fs::create_dir_all(root.join(".unelos/skills/unused")).unwrap();
-    fs::write(root.join(".unelos/skills/unused/SKILL.md"), [0xff]).unwrap();
+    fs::write(
+        root.join(".unelos").join("workflows").join("broken.yaml"),
+        "nodes: [",
+    )
+    .unwrap();
+    fs::create_dir_all(root.join(".unelos").join("skills").join("unused")).unwrap();
+    fs::write(
+        root.join(".unelos")
+            .join("skills")
+            .join("unused")
+            .join("SKILL.md"),
+        [0xff],
+    )
+    .unwrap();
     assert_fixture(&load_project(&root, "implement-feature").unwrap(), &root);
     fs::write(
-        root.join(".unelos/workflows/café plan.yaml"),
+        root.join(".unelos")
+            .join("workflows")
+            .join("café plan.yaml"),
         WORKFLOW.replace("name: implement-feature", "name: café plan"),
     )
     .unwrap();
@@ -111,7 +137,9 @@ fn missing_files_report_the_expected_absolute_path() {
         ".unelos/workflows/implement-feature.yaml",
     ] {
         let (_temp, root) = temporary_project();
-        let expected = root.join(relative);
+        let expected = relative
+            .split('/')
+            .fold(root.clone(), |path, part| path.join(part));
         fs::remove_file(&expected).unwrap();
         let error = load_project(&root, "implement-feature").unwrap_err();
         assert!(error.to_string().contains(expected.as_str()));
@@ -126,7 +154,9 @@ fn malformed_yaml_retains_path_and_parser_diagnostic() {
         ".unelos/workflows/implement-feature.yaml",
     ] {
         let (_temp, root) = temporary_project();
-        let expected = root.join(relative);
+        let expected = relative
+            .split('/')
+            .fold(root.clone(), |path, part| path.join(part));
         fs::write(&expected, "invalid: [").unwrap();
         let error = load_project(&root, "implement-feature").unwrap_err();
         assert!(error.to_string().contains(expected.as_str()));
@@ -146,7 +176,9 @@ fn unreadable_inputs_are_not_missing_or_yaml_errors() {
     ] {
         for directory in [false, true] {
             let (_temp, root) = temporary_project();
-            let expected = root.join(relative);
+            let expected = relative
+                .split('/')
+                .fold(root.clone(), |path, part| path.join(part));
             if directory {
                 fs::remove_file(&expected).unwrap();
                 fs::create_dir(&expected).unwrap();
@@ -164,13 +196,17 @@ fn unreadable_inputs_are_not_missing_or_yaml_errors() {
 fn rejects_declared_name_mismatch_and_path_shaped_names() {
     let (_temp, root) = temporary_project();
     fs::write(
-        root.join(".unelos/workflows/implement-feature.yaml"),
+        root.join(".unelos")
+            .join("workflows")
+            .join("implement-feature.yaml"),
         WORKFLOW.replace("name: implement-feature", "name: different"),
     )
     .unwrap();
     let error = load_project(&root, "implement-feature").unwrap_err();
     assert!(error.to_string().contains(
-        root.join(".unelos/workflows/implement-feature.yaml")
+        root.join(".unelos")
+            .join("workflows")
+            .join("implement-feature.yaml")
             .as_str()
     ));
     assert!(

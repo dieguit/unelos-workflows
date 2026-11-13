@@ -34,7 +34,9 @@ fn example_installs_with_three_isolated_workers() {
     assert_eq!(workers[1]["agent"], "councillor-beta");
     assert_eq!(workers[2]["agent"], "councillor-gamma");
     for worker in workers {
-        assert!(worker["skills"].to_string().contains("council-deliberation"));
+        assert!(worker["skills"]
+            .to_string()
+            .contains("council-deliberation"));
     }
 }
 
@@ -42,9 +44,7 @@ fn example_installs_with_three_isolated_workers() {
 fn parallel_packet(root: &Utf8Path) -> WorkPacket {
     let mut project = load_project(root, WORKFLOW).unwrap();
     project.workflow.start = "council".into();
-    if let NodeDefinition::Parallel(node) =
-        project.workflow.nodes.get_mut("council").unwrap()
-    {
+    if let NodeDefinition::Parallel(node) = project.workflow.nodes.get_mut("council").unwrap() {
         node.inputs.clear();
     }
     let state = start(&project, "parallel-check", "").unwrap();
@@ -64,7 +64,11 @@ fn parallel_packet(root: &Utf8Path) -> WorkPacket {
                 feedback: record.feedback.clone(),
             },
             worker_reports: record.worker_reports.clone(),
-            ledger_path: root.join(".unelos/runs/parallel-check/ledger.md"),
+            ledger_path: root
+                .join(".unelos")
+                .join("runs")
+                .join("parallel-check")
+                .join("ledger.md"),
         },
     )
     .unwrap()
@@ -101,6 +105,7 @@ fn parallel_first_start_renders_worker_prompts_without_brief() {
     let path = root.join(".unelos/workflows/council.yaml");
     let yaml = std::fs::read_to_string(&path)
         .unwrap()
+        .replace("\r\n", "\n")
         .replace("start: assignment", "start: council")
         .replace("    inputs: [question.md]\n", "");
     std::fs::write(path, yaml).unwrap();
@@ -169,7 +174,10 @@ fn parallel_package_has_one_isolated_prompt_per_worker() {
         "Focus: correctness",
         "Focus: architecture",
         "Focus: simplicity",
-    ].iter().enumerate() {
+    ]
+    .iter()
+    .enumerate()
+    {
         for (other, prompt) in package.worker_prompts.iter().enumerate() {
             assert_eq!(prompt.prompt.contains(focus), index == other);
         }
@@ -183,15 +191,28 @@ fn parallel_result_parser_accepts_finished_subsets() {
         node_id: "fan-out".into(),
         task_id: "task-4".into(),
     };
-    let keys = vec!["worker-1".to_string(), "worker-2".to_string(), "worker-3".to_string()];
+    let keys = vec![
+        "worker-1".to_string(),
+        "worker-2".to_string(),
+        "worker-3".to_string(),
+    ];
     let one = worker_json(&expected, "worker-1", "FINISHED");
     let two = worker_json(&expected, "worker-2", "FINISHED");
     let three = worker_json(&expected, "worker-3", "FINISHED");
-    let results =
-        parse_parallel_results(&frames(&[two.clone(), three, one.clone()]), &expected, &keys).unwrap();
+    let results = parse_parallel_results(
+        &frames(&[two.clone(), three, one.clone()]),
+        &expected,
+        &keys,
+    )
+    .unwrap();
     assert_eq!(results[0].worker_key.as_deref(), Some("worker-1"));
     assert_eq!(results.len(), 3);
-    assert_eq!(parse_parallel_results(&frames(std::slice::from_ref(&one)), &expected, &keys).unwrap().len(), 1);
+    assert_eq!(
+        parse_parallel_results(&frames(std::slice::from_ref(&one)), &expected, &keys)
+            .unwrap()
+            .len(),
+        1
+    );
     assert!(
         parse_parallel_results(&frames(&[one.clone(), one.clone()]), &expected, &keys)
             .unwrap_err()
@@ -279,7 +300,6 @@ fn complete(
     execution_mutate(root, "r-000001", ExecutionOperation::Complete, control)
 }
 
-
 /// Starts the run and completes `assignment`, returning the parallel package.
 fn parallel(root: &Utf8Path) -> ExecutionPackage {
     let scope = execution_start(root, WORKFLOW, Some("research-check")).unwrap();
@@ -317,20 +337,20 @@ fn parallel_package_binds_flat_readable_paths() {
     assert_eq!(package.worker_prompts.len(), 3);
     let run = root.join(".unelos/runs/r-000001/council");
     assert_eq!(
-        packet["outputs"][0]["path"],
-        run.join("council-responses.md").as_str()
+        Utf8Path::new(packet["outputs"][0]["path"].as_str().unwrap()),
+        run.join("council-responses.md")
     );
     assert_eq!(
-        packet["workers"][0]["outputs"][0]["path"],
-        run.join("councillor-alpha/result.md").as_str()
+        Utf8Path::new(packet["workers"][0]["outputs"][0]["path"].as_str().unwrap()),
+        run.join("councillor-alpha/result.md")
     );
     assert_eq!(
-        packet["workers"][1]["outputs"][0]["path"],
-        run.join("councillor-beta/result.md").as_str()
+        Utf8Path::new(packet["workers"][1]["outputs"][0]["path"].as_str().unwrap()),
+        run.join("councillor-beta/result.md")
     );
     assert_eq!(
-        packet["workers"][2]["outputs"][0]["path"],
-        run.join("councillor-gamma/result.md").as_str()
+        Utf8Path::new(packet["workers"][2]["outputs"][0]["path"].as_str().unwrap()),
+        run.join("councillor-gamma/result.md")
     );
 }
 
@@ -351,9 +371,19 @@ fn partial_frames_never_complete_the_parent() {
     for attempt in 1..=3 {
         let error = complete(&root, &first).unwrap_err();
         assert!(error.to_string().contains("worker-1"));
-        assert_eq!(error.to_string().contains("Stop and tell the user."), attempt == 3);
+        assert_eq!(
+            error.to_string().contains("Stop and tell the user."),
+            attempt == 3
+        );
     }
-    let next = complete(&root, &parent_control(&remaining, &[("worker-2", "FINISHED"), ("worker-3", "FINISHED")])).unwrap();
+    let next = complete(
+        &root,
+        &parent_control(
+            &remaining,
+            &[("worker-2", "FINISHED"), ("worker-3", "FINISHED")],
+        ),
+    )
+    .unwrap();
     assert_eq!(packet_json(&next)["nodeId"], "synthesis");
 }
 
@@ -363,7 +393,11 @@ fn missing_aggregate_or_worker_report_blocks_completion() {
     let package = parallel(&root);
     let all = parent_control(
         &package,
-        &[("worker-1", "FINISHED"), ("worker-2", "FINISHED"), ("worker-3", "FINISHED")],
+        &[
+            ("worker-1", "FINISHED"),
+            ("worker-2", "FINISHED"),
+            ("worker-3", "FINISHED"),
+        ],
     );
     write_worker_reports(&package);
     assert_eq!(complete(&root, &all).unwrap_err().code(), "missing_output");
@@ -373,7 +407,12 @@ fn missing_aggregate_or_worker_report_blocks_completion() {
         .unwrap()
         .to_owned();
     std::fs::remove_file(&frontend).unwrap();
-    assert_eq!(complete(&root, &parent_control(&package, &[])).unwrap_err().code(), "missing_output");
+    assert_eq!(
+        complete(&root, &parent_control(&package, &[]))
+            .unwrap_err()
+            .code(),
+        "missing_output"
+    );
 }
 
 #[test]
@@ -386,7 +425,11 @@ fn gate_rejection_reenters_parallel_with_same_paths_and_new_identity() {
         &root,
         &parent_control(
             &first,
-            &[("worker-2", "FINISHED"), ("worker-1", "FINISHED"), ("worker-3", "FINISHED")],
+            &[
+                ("worker-2", "FINISHED"),
+                ("worker-1", "FINISHED"),
+                ("worker-3", "FINISHED"),
+            ],
         ),
     )
     .unwrap();
@@ -434,7 +477,11 @@ fn gate_rejection_reenters_parallel_with_same_paths_and_new_identity() {
         .contains("Cover error handling"));
     let stale = parent_control(
         &first,
-        &[("worker-1", "FINISHED"), ("worker-2", "FINISHED"), ("worker-3", "FINISHED")],
+        &[
+            ("worker-1", "FINISHED"),
+            ("worker-2", "FINISHED"),
+            ("worker-3", "FINISHED"),
+        ],
     );
     assert_eq!(
         complete(&root, &stale).unwrap_err().code(),
@@ -446,7 +493,11 @@ fn gate_rejection_reenters_parallel_with_same_paths_and_new_identity() {
         &root,
         &parent_control(
             &rejected,
-            &[("worker-1", "FINISHED"), ("worker-2", "FINISHED"), ("worker-3", "FINISHED")],
+            &[
+                ("worker-1", "FINISHED"),
+                ("worker-2", "FINISHED"),
+                ("worker-3", "FINISHED"),
+            ],
         ),
     )
     .unwrap();

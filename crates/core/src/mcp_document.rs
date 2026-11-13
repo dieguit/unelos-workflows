@@ -91,7 +91,7 @@ pub fn mcp_summaries(root: &Utf8Path) -> Result<Vec<McpSummary>, String> {
 }
 
 fn summaries_at(root: &Utf8Path) -> Result<Vec<McpSummary>, String> {
-    let directory = crate::project::bounded_path(&root, Utf8Path::new("mcps"), &root, "MCP")
+    let directory = crate::project::bounded_path(root, Utf8Path::new("mcps"), root, "MCP")
         .map_err(|e| e.to_string())?;
     if !directory.exists() {
         return Ok(Vec::new());
@@ -104,7 +104,7 @@ fn summaries_at(root: &Utf8Path) -> Result<Vec<McpSummary>, String> {
             continue;
         }
         let name = file.file_stem().unwrap().to_owned();
-        let (kind, target, problem) = match read_mcp(&root, &name) {
+        let (kind, target, problem) = match read_mcp(root, &name) {
             Ok(McpDocument {
                 server: McpServer::Local { command, .. },
                 ..
@@ -137,10 +137,15 @@ pub fn save_mcp(
     save_at(&root, original_id, mcp, true)
 }
 
-fn save_at(root: &Utf8Path, original_id: Option<&str>, mcp: McpDocument, rewrite: bool) -> Result<McpDocument, String> {
+fn save_at(
+    root: &Utf8Path,
+    original_id: Option<&str>,
+    mcp: McpDocument,
+    rewrite: bool,
+) -> Result<McpDocument, String> {
     validate(&mcp.server)?;
-    let target = path(&root, &mcp.id)?;
-    let source = original_id.map(|id| path(&root, id)).transpose()?;
+    let target = path(root, &mcp.id)?;
+    let source = original_id.map(|id| path(root, id)).transpose()?;
     if source.as_ref() != Some(&target) && target.exists() {
         return Err(format!("MCP {:?} already exists", mcp.id));
     }
@@ -152,7 +157,7 @@ fn save_at(root: &Utf8Path, original_id: Option<&str>, mcp: McpDocument, rewrite
     let mut edits = Vec::new();
     if let Some(old) = original_id.filter(|id| rewrite && *id != mcp.id) {
         let mut files = Vec::new();
-        collect(&root, "agents", &mut files)?;
+        collect(root, "agents", &mut files)?;
         files.sort();
         for file in files {
             let original = fs::read_to_string(&file).map_err(|e| e.to_string())?;
@@ -202,10 +207,20 @@ pub fn global_mcp_summaries() -> Result<Vec<McpSummary>, String> {
 }
 
 pub fn save_global_mcp(original_id: Option<&str>, mcp: McpDocument) -> Result<McpDocument, String> {
-    save_at(&crate::task_document::global_root()?, original_id, mcp, false)
+    save_at(
+        &crate::task_document::global_root()?,
+        original_id,
+        mcp,
+        false,
+    )
 }
 
-fn remove_at(authoring: &Utf8Path, id: &str, project: Option<&Utf8Path>, reference: &str) -> Result<(), String> {
+fn remove_at(
+    authoring: &Utf8Path,
+    id: &str,
+    project: Option<&Utf8Path>,
+    reference: &str,
+) -> Result<(), String> {
     let target = path(authoring, id)?;
     if let Some(root) = project {
         let mut files = Vec::new();
@@ -213,9 +228,12 @@ fn remove_at(authoring: &Utf8Path, id: &str, project: Option<&Utf8Path>, referen
         files.sort();
         for file in files {
             let text = fs::read_to_string(&file).map_err(|e| e.to_string())?;
-            let agent: crate::AgentDefinition = serde_yaml_ng::from_str(&text).map_err(|e| format!("{file}: {e}"))?;
+            let agent: crate::AgentDefinition =
+                serde_yaml_ng::from_str(&text).map_err(|e| format!("{file}: {e}"))?;
             if agent.mcps.iter().any(|id| id == reference) {
-                return Err(format!("Cannot remove MCP {reference:?}: referenced by {file}"));
+                return Err(format!(
+                    "Cannot remove MCP {reference:?}: referenced by {file}"
+                ));
             }
         }
     }
@@ -228,8 +246,16 @@ pub fn remove_mcp(root: &Utf8Path, id: &str) -> Result<(), String> {
 }
 
 pub fn remove_global_mcp(root: Option<&Utf8Path>, id: &str) -> Result<(), String> {
-    let root = root.map(crate::project::absolute_root).transpose().map_err(|e| e.to_string())?;
-    remove_at(&crate::task_document::global_root()?, id, root.as_deref(), &format!("global/{id}"))
+    let root = root
+        .map(crate::project::absolute_root)
+        .transpose()
+        .map_err(|e| e.to_string())?;
+    remove_at(
+        &crate::task_document::global_root()?,
+        id,
+        root.as_deref(),
+        &format!("global/{id}"),
+    )
 }
 
 #[cfg(test)]
@@ -240,15 +266,38 @@ mod tests {
     fn removal_checks_agent_references() {
         let temp = assert_fs::TempDir::new().unwrap();
         let root = Utf8Path::from_path(temp.path()).unwrap();
-        fs::create_dir_all(root.join(".unelos/agents/worker")).unwrap();
-        let agent = root.join(".unelos/agents/worker/agent.yaml");
+        fs::create_dir_all(root.join(".unelos").join("agents").join("worker")).unwrap();
+        let agent = root
+            .join(".unelos")
+            .join("agents")
+            .join("worker")
+            .join("agent.yaml");
         fs::write(&agent, "instructions: Work\nmcps: [browser]\n").unwrap();
-        save_mcp(root, None, McpDocument { id: "browser".into(), server: McpServer::Remote { url: "https://example.com".into(), headers: BTreeMap::new() } }).unwrap();
+        save_mcp(
+            root,
+            None,
+            McpDocument {
+                id: "browser".into(),
+                server: McpServer::Remote {
+                    url: "https://example.com".into(),
+                    headers: BTreeMap::new(),
+                },
+            },
+        )
+        .unwrap();
         let error = remove_mcp(root, "browser").unwrap_err();
         assert!(error.contains(agent.as_str()), "{error}");
-        assert!(root.join(".unelos/mcps/browser.yaml").exists());
+        assert!(root
+            .join(".unelos")
+            .join("mcps")
+            .join("browser.yaml")
+            .exists());
         fs::write(agent, "instructions: Work\n").unwrap();
         remove_mcp(root, "browser").unwrap();
-        assert!(!root.join(".unelos/mcps/browser.yaml").exists());
+        assert!(!root
+            .join(".unelos")
+            .join("mcps")
+            .join("browser.yaml")
+            .exists());
     }
 }

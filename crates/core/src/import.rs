@@ -31,9 +31,14 @@ fn browser_tree_spec(spec: &str) -> Option<String> {
         return None;
     }
     let spec = spec.split(['?', '#']).next()?;
-    let (repo, rest) = spec.split_once("/-/tree/").or_else(|| spec.split_once("/tree/"))?;
+    let (repo, rest) = spec
+        .split_once("/-/tree/")
+        .or_else(|| spec.split_once("/tree/"))?;
     let (reference, subpath) = rest.split_once('/').unwrap_or((rest, ""));
-    Some(format!("{repo}#{reference}:{}", subpath.trim_end_matches('/')))
+    Some(format!(
+        "{repo}#{reference}:{}",
+        subpath.trim_end_matches('/')
+    ))
 }
 
 pub fn parse_source_spec(spec: &str) -> Result<SourceSpec, InstallError> {
@@ -95,7 +100,10 @@ fn ssh_url(url: &str) -> Option<String> {
         return None;
     }
     let path = path.trim_end_matches('/');
-    Some(format!("git@{host}:{}.git", path.strip_suffix(".git").unwrap_or(path)))
+    Some(format!(
+        "git@{host}:{}.git",
+        path.strip_suffix(".git").unwrap_or(path)
+    ))
 }
 
 /// Outer error: cancelled or I/O; inner error: git's stderr.
@@ -107,7 +115,9 @@ fn clone_repo(
 ) -> Result<Result<(), String>, InstallError> {
     let stderr = tempfile::tempfile().map_err(io_error)?;
     let mut command = Command::new("git");
-    command.env("GIT_TERMINAL_PROMPT", "0").args(["clone", "--depth", "1"]);
+    command
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .args(["clone", "--depth", "1"]);
     if let Some(reference) = reference {
         command.args(["--branch", reference]);
     }
@@ -180,7 +190,9 @@ pub fn fetch_source(spec: &str, cancel: &AtomicBool) -> Result<FetchedSource, In
             };
             // Copied https links fail on private repos when git has no https credentials; ssh keys often work.
             if let Err(https) = clone_repo(&url, reference.as_deref(), &clone, cancel)? {
-                let Some(ssh) = ssh_url(&url) else { return Err(clone_error(https)) };
+                let Some(ssh) = ssh_url(&url) else {
+                    return Err(clone_error(https));
+                };
                 let _ = fs::remove_dir_all(&clone);
                 if let Err(detail) = clone_repo(&ssh, reference.as_deref(), &clone, cancel)? {
                     return Err(clone_error(format!("{https}\nSSH ({ssh}): {detail}")));
@@ -1121,16 +1133,32 @@ mod tests {
             );
         }
         for (link, url) in [
-            ("https://github.com/dieguit/unelos-workflows/tree/main/examples/superpowers-dev/", "https://github.com/dieguit/unelos-workflows"),
-            ("https://gitlab.com/org/repo/-/tree/main/examples/superpowers-dev?ref_type=heads", "https://gitlab.com/org/repo"),
+            (
+                "https://github.com/dieguit/unelos-workflows/tree/main/examples/superpowers-dev/",
+                "https://github.com/dieguit/unelos-workflows",
+            ),
+            (
+                "https://gitlab.com/org/repo/-/tree/main/examples/superpowers-dev?ref_type=heads",
+                "https://gitlab.com/org/repo",
+            ),
         ] {
             assert_eq!(
                 parse_source_spec(link).unwrap(),
-                SourceSpec::Git { url: url.into(), reference: Some("main".into()), subpath: "examples/superpowers-dev".into() }
+                SourceSpec::Git {
+                    url: url.into(),
+                    reference: Some("main".into()),
+                    subpath: "examples/superpowers-dev".into()
+                }
             );
         }
-        assert_eq!(ssh_url("https://github.com/org/repo").as_deref(), Some("git@github.com:org/repo.git"));
-        assert_eq!(ssh_url("https://gitlab.com/g/sub/repo.git/").as_deref(), Some("git@gitlab.com:g/sub/repo.git"));
+        assert_eq!(
+            ssh_url("https://github.com/org/repo").as_deref(),
+            Some("git@github.com:org/repo.git")
+        );
+        assert_eq!(
+            ssh_url("https://gitlab.com/g/sub/repo.git/").as_deref(),
+            Some("git@gitlab.com:g/sub/repo.git")
+        );
         assert_eq!(ssh_url("https://user@host/repo"), None);
         assert_eq!(ssh_url("git@github.com:org/repo.git"), None);
         for suffix in ["#:../secret", "#:/absolute", "#:a/../secret"] {

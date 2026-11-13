@@ -40,44 +40,79 @@ fn semver_extraction() {
 
 #[test]
 fn agent_models_resolve_global_aliases_for_opencode() {
-    use crate::{AgentModel, install::resolve_agent_model};
+    use crate::{install::resolve_agent_model, AgentModel};
     let _lock = ENV.lock().unwrap();
     let temp = assert_fs::TempDir::new().unwrap();
     let root = Utf8Path::from_path(temp.path()).unwrap();
     let _env = Env::set(&[("UNELOS_CONFIG_DIR", root.as_str())]);
     let alias = AgentModel::Alias("smart".into());
-    assert_eq!(resolve_agent_model(&alias).unwrap_err().code, "unmapped_model_alias");
-    crate::save_model_mapping(Some("smart"), "smart", [("opencode".into(), "provider/model".into())].into()).unwrap();
+    assert_eq!(
+        resolve_agent_model(&alias).unwrap_err().code,
+        "unmapped_model_alias"
+    );
+    crate::save_model_mapping(
+        Some("smart"),
+        "smart",
+        [("opencode".into(), "provider/model".into())].into(),
+    )
+    .unwrap();
     assert_eq!(resolve_agent_model(&alias).unwrap(), "provider/model");
-    assert_eq!(resolve_agent_model(&AgentModel::Harness { harness: "claude".into(), model: "x".into() }).unwrap_err().code, "model_harness_mismatch");
+    assert_eq!(
+        resolve_agent_model(&AgentModel::Harness {
+            harness: "claude".into(),
+            model: "x".into()
+        })
+        .unwrap_err()
+        .code,
+        "model_harness_mismatch"
+    );
 }
 
 #[test]
 fn model_mapping_lifecycle() {
-    use std::collections::BTreeMap;
     use crate::{delete_model_mapping, list_model_mappings, save_model_mapping};
+    use std::collections::BTreeMap;
     let _lock = ENV.lock().unwrap();
     let temp = assert_fs::TempDir::new().unwrap();
     let root = Utf8Path::from_path(temp.path()).unwrap();
     let _env = Env::set(&[("UNELOS_CONFIG_DIR", root.as_str())]);
     let defaults = list_model_mappings().unwrap();
-    assert_eq!(defaults.keys().collect::<Vec<_>>(), ["balanced", "fast", "smart"]);
+    assert_eq!(
+        defaults.keys().collect::<Vec<_>>(),
+        ["balanced", "fast", "smart"]
+    );
     assert!(root.join("models.json").is_file());
     for alias in ["smart", "balanced", "fast"] {
         delete_model_mapping(alias).unwrap();
     }
     assert!(list_model_mappings().unwrap().is_empty());
-    let models = BTreeMap::from([("opencode".into(), "provider/model".into()), ("claude".into(), "".into())]);
+    let models = BTreeMap::from([
+        ("opencode".into(), "provider/model".into()),
+        ("claude".into(), "".into()),
+    ]);
     let saved = save_model_mapping(None, "smart", models.clone()).unwrap();
     assert_eq!(saved["smart"].len(), 1);
     assert_eq!(list_model_mappings().unwrap(), saved);
     assert!(save_model_mapping(None, "smart", models.clone()).is_err());
     assert!(save_model_mapping(Some("missing"), "new", models.clone()).is_err());
-    for invalid in ["", "Smart", "-smart", "smart-", "smart..fast", "smart fast", "é"] {
+    for invalid in [
+        "",
+        "Smart",
+        "-smart",
+        "smart-",
+        "smart..fast",
+        "smart fast",
+        "é",
+    ] {
         assert!(save_model_mapping(None, invalid, models.clone()).is_err());
     }
     for invalid in ["a b", " a", "a\n", "a\u{85}b"] {
-        assert!(save_model_mapping(Some("smart"), "smart", BTreeMap::from([("opencode".into(), invalid.into())])).is_err());
+        assert!(save_model_mapping(
+            Some("smart"),
+            "smart",
+            BTreeMap::from([("opencode".into(), invalid.into())])
+        )
+        .is_err());
     }
     assert_eq!(list_model_mappings().unwrap(), saved);
     save_model_mapping(None, "fast", BTreeMap::new()).unwrap();
@@ -92,7 +127,10 @@ fn model_mapping_lifecycle() {
     fs::write(root.join("models.json"), "not json").unwrap();
     assert!(list_model_mappings().is_err());
     assert!(save_model_mapping(None, "new", BTreeMap::new()).is_err());
-    assert_eq!(fs::read_to_string(root.join("models.json")).unwrap(), "not json");
+    assert_eq!(
+        fs::read_to_string(root.join("models.json")).unwrap(),
+        "not json"
+    );
 }
 
 #[test]
@@ -158,6 +196,21 @@ fn global_lifecycle() {
     records.get_mut("opencode").unwrap().version = "0.0.0".into();
     global_config::write_state(&records).unwrap();
     assert!(list_harnesses()[0].update_available);
+    let legacy = global.join("integrations/opencode/unelos/index.js");
+    fs::write(&legacy, "old plugin").unwrap();
+    let mut records = global_config::read_state().unwrap();
+    let files = &mut records.get_mut("opencode").unwrap().files;
+    files.retain(|file| !file.ends_with("index.ts"));
+    files.push(legacy.clone());
+    global_config::write_state(&records).unwrap();
+    install_harness("opencode", &src).unwrap();
+    assert!(!legacy.exists());
+    assert!(global
+        .join("integrations/opencode/unelos/index.ts")
+        .exists());
+    assert!(!global_config::read_state().unwrap()["opencode"]
+        .files
+        .contains(&legacy));
     let foreign = global.join("integrations/opencode/unelos/foreign.txt");
     fs::write(&foreign, "keep").unwrap();
     let mut records = global_config::read_state().unwrap();
@@ -175,7 +228,7 @@ fn global_lifecycle() {
     assert!(foreign.exists());
     assert!(stable.exists());
     assert!(!global
-        .join("integrations/opencode/unelos/index.js")
+        .join("integrations/opencode/unelos/index.ts")
         .exists());
     let text = fs::read_to_string(&config).unwrap();
     assert!(text.contains("// keep me"));
@@ -187,6 +240,18 @@ fn global_lifecycle() {
     );
     uninstall_harness("opencode").unwrap();
     assert_eq!(fs::read_to_string(&config).unwrap(), text);
+    install_harness("opencode", &src).unwrap();
+    let current = global.join("integrations/opencode/unelos/index.ts");
+    fs::rename(&current, &legacy).unwrap();
+    let mut records = global_config::read_state().unwrap();
+    for file in &mut records.get_mut("opencode").unwrap().files {
+        if *file == current {
+            *file = legacy.clone();
+        }
+    }
+    global_config::write_state(&records).unwrap();
+    uninstall_harness("opencode").unwrap();
+    assert!(!legacy.exists());
     fs::write(oc.join("opencode.json"), "{}").unwrap();
     assert!(install_harness("opencode", &src).is_err());
 }

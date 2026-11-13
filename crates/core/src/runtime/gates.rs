@@ -57,7 +57,10 @@ fn decide(
     let candidate = prepare_decision(&project, &state, expected_gate_activation, outcome, reason)?;
     artifacts::prepare_work_directories(
         &candidate,
-        &project.project_root.join(".unelos/runs").join(&state.run_id),
+        &project
+            .project_root
+            .join(".unelos/runs")
+            .join(&state.run_id),
     )?;
     store.update(&candidate)?;
     store.run(&candidate.run_id)

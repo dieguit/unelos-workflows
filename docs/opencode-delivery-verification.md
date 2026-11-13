@@ -56,7 +56,7 @@ private raw context and native transcripts remain available for comparison.
 
 ## Recovery failures and retest
 
-The aggregate `node integrations/opencode/test/evidence.mjs EVIDENCE_DIRECTORY`
+The aggregate `node integrations/opencode/test/evidence.ts EVIDENCE_DIRECTORY`
 passed for the original **V2 coexistence** cell. It correctly failed for:
 
 - **V2 isolated:** review report bytes changed during recovery, though core

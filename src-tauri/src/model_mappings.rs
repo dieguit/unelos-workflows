@@ -4,7 +4,8 @@ use unelos_core::ModelMappings;
 #[tauri::command]
 pub async fn agent_model_options() -> Result<unelos_core::AgentModelOptions, String> {
     tauri::async_runtime::spawn_blocking(unelos_core::agent_model_options)
-        .await.map_err(|e| e.to_string())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

@@ -27,7 +27,9 @@ pub enum CommitResult {
         #[serde(rename = "warningCount")]
         warning_count: usize,
     },
-    Conflicts { plan: ImportPlan },
+    Conflicts {
+        plan: ImportPlan,
+    },
 }
 
 #[tauri::command]
@@ -44,11 +46,14 @@ pub async fn import_prepare(
         if sessions.contains_key(&id) {
             return Err("Import session already exists".into());
         }
-        sessions.insert(id.clone(), Session {
-            cancel: cancel.clone(),
-            fetched: None,
-            source: source.clone(),
-        });
+        sessions.insert(
+            id.clone(),
+            Session {
+                cancel: cancel.clone(),
+                fetched: None,
+                source: source.clone(),
+            },
+        );
     }
     tauri::async_runtime::spawn_blocking(move || {
         let result = (|| {
@@ -93,7 +98,10 @@ pub async fn import_plan(
         let state = app.state::<ImportSessions>();
         let sessions = state.lock().map_err(|e| e.to_string())?;
         let session = sessions.get(&id).ok_or("Import session not found")?;
-        let fetched = session.fetched.as_ref().ok_or("Import is still preparing")?;
+        let fetched = session
+            .fetched
+            .as_ref()
+            .ok_or("Import is still preparing")?;
         unelos_core::plan_import(root, fetched.dir(), &session.source, &renames)
             .map_err(|e| e.to_string())
     })
@@ -115,13 +123,23 @@ pub async fn import_commit(
         let state = app.state::<ImportSessions>();
         let mut sessions = state.lock().map_err(|e| e.to_string())?;
         let session = sessions.get(&id).ok_or("Import session not found")?;
-        let fetched = session.fetched.as_ref().ok_or("Import is still preparing")?;
+        let fetched = session
+            .fetched
+            .as_ref()
+            .ok_or("Import is still preparing")?;
         match unelos_core::commit_import(root, fetched.dir(), &session.source, &renames)
             .map_err(|e| e.to_string())?
         {
-            ImportOutcome::Imported { workflow, warning_count, .. } => {
+            ImportOutcome::Imported {
+                workflow,
+                warning_count,
+                ..
+            } => {
                 sessions.remove(&id);
-                Ok(CommitResult::Imported { workflow, warning_count })
+                Ok(CommitResult::Imported {
+                    workflow,
+                    warning_count,
+                })
             }
             ImportOutcome::Conflicts(plan) => Ok(CommitResult::Conflicts { plan }),
         }
@@ -144,7 +162,10 @@ mod tests {
 
     #[test]
     fn imported_response_matches_contract() {
-        let result = CommitResult::Imported { workflow: "review".into(), warning_count: 2 };
+        let result = CommitResult::Imported {
+            workflow: "review".into(),
+            warning_count: 2,
+        };
         assert_eq!(
             serde_json::to_value(result).unwrap(),
             serde_json::json!({"status": "imported", "workflow": "review", "warningCount": 2})

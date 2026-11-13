@@ -27,7 +27,7 @@ jobs:
       - name: Lints
         run: cargo clippy --locked -p unelos-core -p unelos-cli --all-targets -- -D warnings
       - name: Tests
-        run: cargo nextest run --locked -p unelos-core -p unelos-cli
+        run: cargo nextest run --locked --no-fail-fast -p unelos-core -p unelos-cli
       - name: Documentation tests
         run: cargo test --locked -p unelos-core --doc
       - name: Windows workspace metadata

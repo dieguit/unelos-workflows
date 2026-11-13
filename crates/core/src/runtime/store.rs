@@ -349,18 +349,30 @@ pub(super) fn validate_state(state: &RunState) -> Result<(), RuntimeError> {
         };
         for (key, result) in &record.worker_receipts {
             if !matches!(work, CurrentWork::Parallel(_))
-                || !record.worker_reports.iter().any(|report| &report.key == key)
+                || !record
+                    .worker_reports
+                    .iter()
+                    .any(|report| &report.key == key)
                 || result.worker_key.as_ref() != Some(key)
                 || result.task_id != record.execution_id
                 || result.status != crate::WorkerStatus::Finished
                 || result.outcome.is_some()
             {
-                return Err(RuntimeError::InvalidState(format!("invalid worker receipt for key {key:?}")));
+                return Err(RuntimeError::InvalidState(format!(
+                    "invalid worker receipt for key {key:?}"
+                )));
             }
         }
         for path in record.output_digests.keys() {
-            if !record.outputs.iter().chain(record.worker_reports.iter().map(|r| &r.report)).any(|output| &output.path == path) {
-                return Err(RuntimeError::InvalidState(format!("unexpected output snapshot path {path}")));
+            if !record
+                .outputs
+                .iter()
+                .chain(record.worker_reports.iter().map(|r| &r.report))
+                .any(|output| &output.path == path)
+            {
+                return Err(RuntimeError::InvalidState(format!(
+                    "unexpected output snapshot path {path}"
+                )));
             }
         }
         if let Some(confirmed) = &record.confirmed_execution_id {

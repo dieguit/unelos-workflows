@@ -96,9 +96,11 @@ pub(super) fn install(
             ));
         }
     }
-    if plan.conflicts.iter().any(|row| {
-        row.error.is_some() || (!accept_suggested && !renames.contains_key(&row.key))
-    }) {
+    if plan
+        .conflicts
+        .iter()
+        .any(|row| row.error.is_some() || (!accept_suggested && !renames.contains_key(&row.key)))
+    {
         return conflicts(cli, &plan);
     }
     for row in &plan.conflicts {

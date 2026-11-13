@@ -128,7 +128,10 @@ fn starts_after_finish_allocate_distinct_ids() {
 fn collisions_and_second_unfinished_start_preserve_the_first_run() {
     let (_temp, root) = project_copy();
     let state = start_workflow(&root, "implement-feature", Some("first")).unwrap();
-    let state_path = root.join(".unelos/runs").join(&state.run_id).join("state.json");
+    let state_path = root
+        .join(".unelos/runs")
+        .join(&state.run_id)
+        .join("state.json");
     let saved = fs::read(&state_path).unwrap();
     assert!(start_workflow(&root, "implement-feature", Some("second")).is_ok());
     assert_eq!(fs::read(state_path).unwrap(), saved);
@@ -156,7 +159,11 @@ fn allocation_skips_legacy_generated_id_and_corrupt_counter_does_not_publish() {
         serde_json::from_slice(&fs::read(&state_path).unwrap()).unwrap();
     saved["runId"] = "r-000001".into();
     fs::write(&state_path, serde_json::to_vec(&saved).unwrap()).unwrap();
-    fs::rename(root.join(".unelos/runs/legacy"), root.join(".unelos/runs/r-000001")).unwrap();
+    fs::rename(
+        root.join(".unelos/runs/legacy"),
+        root.join(".unelos/runs/r-000001"),
+    )
+    .unwrap();
     let generated = start_workflow(&root, "finished", None).unwrap();
     assert_ne!(generated.run_id, "r-000001");
 

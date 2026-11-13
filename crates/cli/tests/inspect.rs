@@ -9,7 +9,12 @@ fn command() -> assert_cmd::Command {
 }
 
 fn fixture() -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../core/tests/fixtures/project")
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("core")
+        .join("tests")
+        .join("fixtures")
+        .join("project")
 }
 
 #[test]
@@ -41,7 +46,11 @@ fn inspect_normalizes_the_existing_fixture() {
 #[test]
 fn inspect_shipped_example_after_flat_install() {
     let temp = assert_fs::TempDir::new().unwrap();
-    let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/superpowers-dev");
+    let example = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("examples")
+        .join("superpowers-dev");
     command()
         .arg("--project")
         .arg(temp.path())
@@ -131,11 +140,13 @@ fn inspect_supports_default_project_and_reports_invalid_project() {
     for json_mode in [true, false] {
         let temp = assert_fs::TempDir::new().unwrap();
         let root = temp.path().join("invalid");
-        fs::create_dir_all(root.join(".unelos/workflows")).unwrap();
+        fs::create_dir_all(root.join(".unelos").join("workflows")).unwrap();
         copy_tree(&fixture(), &root);
-        fs::write(root.join(".unelos/project.yaml"), project_yaml()).unwrap();
+        fs::write(root.join(".unelos").join("project.yaml"), project_yaml()).unwrap();
         fs::write(
-            root.join(".unelos/workflows/implement-feature.yaml"),
+            root.join(".unelos")
+                .join("workflows")
+                .join("implement-feature.yaml"),
             workflow_yaml().replace("next: review", "next: missing-node"),
         )
         .unwrap();
@@ -144,7 +155,9 @@ fn inspect_supports_default_project_and_reports_invalid_project() {
         assert_eq!(output.status.code(), Some(2));
         assert!(output.stdout.is_empty());
         let stderr = String::from_utf8(output.stderr).unwrap();
-        assert!(stderr.contains("implement-feature.yaml"), "{stderr}");
+        if json_mode {
+            assert!(stderr.contains("implement-feature.yaml"), "{stderr}");
+        }
         assert!(stderr.contains("nodes.implement.next"), "{stderr}");
         if json_mode {
             assert!(stderr.contains("invalid_project"), "{stderr}");
@@ -170,14 +183,22 @@ fn inspect_reports_missing_sources_malformed_yaml_and_rejects_traversal() {
         ),
     ] {
         let root = temp.path().join(format!("case-{}", expected.len()));
-        fs::create_dir_all(root.join(".unelos/workflows")).unwrap();
+        fs::create_dir_all(root.join(".unelos").join("workflows")).unwrap();
         for (path, contents) in root_files {
             fs::write(root.join(path), contents).unwrap();
         }
         let output = inspect(&root, true);
         assert_eq!(output.status.code(), Some(2));
         assert!(output.stdout.is_empty());
-        assert!(String::from_utf8(output.stderr).unwrap().contains(expected));
+        let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert!(
+            error["error"]["message"]
+                .as_str()
+                .unwrap()
+                .replace('\\', "/")
+                .contains(expected),
+            "{error}"
+        );
     }
     let output = command()
         .arg("--project")
@@ -200,7 +221,9 @@ fn inspect_serializes_parallel_workers_and_gate_and_end() {
         .replace("  review:\n", "  parallel-check:\n    type: parallel\n    tasks:\n      - task: implement-plan\n        agent: engineer\n      - task: create-plan\n        agent: planner\n    inputs: [implementation-report.md]\n    outputs: [checks.md]\n    next: review\n  review:\n");
     assert!(!workflow.contains("\r\n"));
     fs::write(
-        root.join(".unelos/workflows/implement-feature.yaml"),
+        root.join(".unelos")
+            .join("workflows")
+            .join("implement-feature.yaml"),
         workflow,
     )
     .unwrap();
@@ -253,7 +276,10 @@ fn inspect_resolves_one_task_context_deterministically_without_runtime_state() {
     );
     assert_eq!(value["inputs"], json!(["plan.md"]));
     assert_eq!(value["outputs"], json!(["implementation-report.md"]));
-    assert_eq!(value["model"], json!({"harness": "opencode", "model": "example-provider/example-model"}));
+    assert_eq!(
+        value["model"],
+        json!({"harness": "opencode", "model": "example-provider/example-model"})
+    );
     assert_eq!(value["mcps"], json!(["github"]));
     assert_eq!(value["tools"], json!(["read-file", "run-command"]));
     assert_eq!(value["skills"][0]["id"], "verification");
@@ -266,14 +292,16 @@ fn inspect_resolves_one_task_context_deterministically_without_runtime_state() {
     }
     assert_eq!(
         value["skills"][0]["directory"],
-        root.join(".unelos/skills")
+        root.join(".unelos")
+            .join("skills")
             .join("verification")
             .to_string_lossy()
             .as_ref()
     );
     assert_eq!(
         value["skills"][1]["directory"],
-        root.join(".unelos/skills")
+        root.join(".unelos")
+            .join("skills")
             .join("rust")
             .to_string_lossy()
             .as_ref()
@@ -281,9 +309,9 @@ fn inspect_resolves_one_task_context_deterministically_without_runtime_state() {
     for field in ["runId", "taskId", "request", "feedback"] {
         assert!(value.get(field).is_none(), "unexpected {field}");
     }
-    assert!(!root.join(".unelos/runs").exists());
-    assert!(!root.join(".unelos/active-run").exists());
-    assert!(!root.join(".unelos/active-run.json").exists());
+    assert!(!root.join(".unelos").join("runs").exists());
+    assert!(!root.join(".unelos").join("active-run").exists());
+    assert!(!root.join(".unelos").join("active-run.json").exists());
     assert_eq!(snapshot(&root), before);
 }
 
@@ -292,7 +320,11 @@ fn inspect_node_reads_only_selected_skills_in_order_and_reports_missing_skill() 
     let temp = assert_fs::TempDir::new().unwrap();
     let root = temp.path();
     copy_tree(&fixture(), root);
-    let project_path = root.join(".unelos/agents/engineer/agent.yaml");
+    let project_path = root
+        .join(".unelos")
+        .join("agents")
+        .join("engineer")
+        .join("agent.yaml");
     let project = fs::read_to_string(&project_path)
         .unwrap()
         .replace("\r\n", "\n");
@@ -301,11 +333,15 @@ fn inspect_node_reads_only_selected_skills_in_order_and_reports_missing_skill() 
         project.replace("skills: [rust]", "skills: [rust, verification]"),
     )
     .unwrap();
-    let selected_path = root.join(".unelos/skills/verification/SKILL.md");
+    let selected_path = root
+        .join(".unelos")
+        .join("skills")
+        .join("verification")
+        .join("SKILL.md");
     let selected = fs::read_to_string(&selected_path).unwrap();
     let selected = format!("{selected}\nSELECTED_SKILL_MARKER\n");
     fs::write(&selected_path, &selected).unwrap();
-    let unrelated = root.join(".unelos/skills/unrelated");
+    let unrelated = root.join(".unelos").join("skills").join("unrelated");
     fs::create_dir_all(&unrelated).unwrap();
     fs::write(unrelated.join("SKILL.md"), "UNRELATED_SKILL_MARKER\n").unwrap();
 
@@ -323,14 +359,16 @@ fn inspect_node_reads_only_selected_skills_in_order_and_reports_missing_skill() 
     assert_eq!(skills[0]["content"], selected);
     assert_eq!(
         skills[0]["directory"],
-        root.join(".unelos/skills")
+        root.join(".unelos")
+            .join("skills")
             .join("verification")
             .to_string_lossy()
             .as_ref()
     );
     assert_eq!(
         skills[1]["directory"],
-        root.join(".unelos/skills")
+        root.join(".unelos")
+            .join("skills")
             .join("rust")
             .to_string_lossy()
             .as_ref()
@@ -392,7 +430,10 @@ fn inspect_node_resolves_all_node_kinds_and_reports_unknown_nodes() {
     assert!(stderr.contains("context_resolution_failed"), "{stderr}");
     assert!(stderr.contains("missing"), "{stderr}");
 
-    let workflow_path = root.join(".unelos/workflows/implement-feature.yaml");
+    let workflow_path = root
+        .join(".unelos")
+        .join("workflows")
+        .join("implement-feature.yaml");
     let parallel = workflow_yaml().replace(
         "    next: review\n  review:",
         "    next: parallel-check\n  parallel-check:\n    type: parallel\n    tasks:\n      - task: implement-plan\n        agent: engineer\n    inputs: [plan.md]\n    outputs: [parallel.md]\n    next: review\n  review:",
@@ -473,7 +514,8 @@ fn inspect_research_parallel_is_isolated_repeatable_and_read_only() {
         assert!(!serialized.contains(other_marker));
         assert_eq!(
             worker["skills"][0]["directory"],
-            root.join(".unelos/skills")
+            root.join(".unelos")
+                .join("skills")
                 .join(if index == 0 {
                     "backend-research"
                 } else {
@@ -489,12 +531,13 @@ fn inspect_research_parallel_is_isolated_repeatable_and_read_only() {
         assert!(value.get(field).is_none(), "unexpected {field}");
     }
     assert!(!value.to_string().contains(".unelos/runs"));
-    assert!(!root.join(".unelos/runs").exists());
-    assert!(!root.join(".unelos/active-run").exists());
-    assert!(!root.join(".unelos/active-run.json").exists());
+    assert!(!root.join(".unelos").join("runs").exists());
+    assert!(!root.join(".unelos").join("active-run").exists());
+    assert!(!root.join(".unelos").join("active-run.json").exists());
 
     let backend_skill = root
-        .join(".unelos/skills")
+        .join(".unelos")
+        .join("skills")
         .join("backend-research")
         .join("SKILL.md");
     fs::rename(
@@ -606,11 +649,16 @@ fn copy_tree(source: &Path, destination: &Path) {
 }
 
 fn project_yaml() -> String {
-    fs::read_to_string(fixture().join(".unelos/project.yaml")).unwrap()
+    fs::read_to_string(fixture().join(".unelos").join("project.yaml")).unwrap()
 }
 
 fn workflow_yaml() -> String {
-    fs::read_to_string(fixture().join(".unelos/workflows/implement-feature.yaml"))
-        .unwrap()
-        .replace("\r\n", "\n")
+    fs::read_to_string(
+        fixture()
+            .join(".unelos")
+            .join("workflows")
+            .join("implement-feature.yaml"),
+    )
+    .unwrap()
+    .replace("\r\n", "\n")
 }

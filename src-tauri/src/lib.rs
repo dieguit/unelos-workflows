@@ -1,8 +1,8 @@
-mod projects;
-mod imports;
-mod runs;
 mod harnesses;
+mod imports;
 mod model_mappings;
+mod projects;
+mod runs;
 
 use tauri::webview::PageLoadEvent;
 use tauri_plugin_log::{Target, TargetKind};

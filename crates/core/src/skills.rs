@@ -69,10 +69,11 @@ pub(crate) fn resolve_authoring_skills(
         }
         let global_root;
         let root = if id.starts_with("global/") {
-            global_root = crate::task_document::global_root().map_err(|error| SkillResolveError::Root {
-                path: authoring_root.to_owned(),
-                source: io::Error::other(error),
-            })?;
+            global_root =
+                crate::task_document::global_root().map_err(|error| SkillResolveError::Root {
+                    path: authoring_root.to_owned(),
+                    source: io::Error::other(error),
+                })?;
             &global_root
         } else {
             authoring_root

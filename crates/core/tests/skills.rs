@@ -8,7 +8,7 @@ fn root(temp: &TempDir) -> Utf8PathBuf {
 }
 
 fn write_skill(root: &Utf8Path, id: &str, content: impl AsRef<[u8]>) -> Utf8PathBuf {
-    let directory = root.join(".unelos/skills").join(id);
+    let directory = root.join(".unelos").join("skills").join(id);
     fs::create_dir_all(&directory).unwrap();
     fs::write(directory.join("SKILL.md"), content).unwrap();
     directory
@@ -22,7 +22,7 @@ fn selected_skills_preserve_order_full_content_and_resource_locations() {
     let directory = write_skill(&root, "verification", text);
     fs::create_dir(directory.join("resources")).unwrap();
     fs::write(
-        directory.join("resources/check.txt"),
+        directory.join("resources").join("check.txt"),
         "resource, not injected",
     )
     .unwrap();
@@ -38,10 +38,13 @@ fn selected_skills_preserve_order_full_content_and_resource_locations() {
     assert_eq!(selected[0].content, text);
     assert_eq!(selected[1].content, "Rust instructions\n");
     assert_eq!(selected[0].directory, directory);
-    assert_eq!(selected[1].directory, root.join(".unelos/skills/rust"));
+    assert_eq!(
+        selected[1].directory,
+        root.join(".unelos").join("skills").join("rust")
+    );
     assert!(selected[0].directory.is_absolute());
     assert_eq!(
-        fs::read_to_string(selected[0].directory.join("resources/check.txt")).unwrap(),
+        fs::read_to_string(selected[0].directory.join("resources").join("check.txt")).unwrap(),
         "resource, not injected"
     );
     write_skill(&root, "unused", [0xff]);
@@ -58,7 +61,11 @@ fn missing_selected_skill_reports_id_and_expected_path() {
     let root = root(&temp);
     write_skill(&root, "rust", "Rust instructions");
     // Match native join separators when checking the rendered diagnostic on Windows.
-    let expected = root.join(".unelos/skills").join("missing").join("SKILL.md");
+    let expected = root
+        .join(".unelos")
+        .join("skills")
+        .join("missing")
+        .join("SKILL.md");
     let error = resolve_skills(&root, &["rust", "missing"]).unwrap_err();
     assert!(error.to_string().contains("missing"));
     assert!(error.to_string().contains(expected.as_str()));
@@ -122,7 +129,10 @@ fn relative_root_is_resolved_once_from_the_calling_directory() {
         let relative = resolve_skills(Utf8Path::new("project"), &["rust"]).unwrap();
         assert_eq!(
             relative[0].directory,
-            cwd.join("project/.unelos/skills/rust")
+            cwd.join("project")
+                .join(".unelos")
+                .join("skills")
+                .join("rust")
         );
         assert_eq!(relative[0].content, "Rust instructions");
         let absolute = resolve_skills(&parent.join("project"), &["rust"]).unwrap();

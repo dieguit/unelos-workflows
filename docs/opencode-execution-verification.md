@@ -74,7 +74,7 @@ global configuration change was silently made.
 Package suite: 62 test executions, zero failures (some shared packet tests execute
 again when imported). Core/CLI Cargo tests and real graph/packet inspection passed.
 Installed archive callbacks are exercised separately from workspace imports.
-`test/execution-evidence.mjs` rejects incomplete/contradictory full-acceptance
+`test/execution-evidence.ts` rejects incomplete/contradictory full-acceptance
 inputs; its synthetic fixture proves the checker only. No full native/human
 acceptance evidence directory passed that checker.
 
