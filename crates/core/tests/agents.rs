@@ -272,7 +272,8 @@ fn ordinary_files_in_agents_directory_are_ignored() {
     assert!(result.problems.is_empty());
 }
 
-#[cfg(unix)]
+// macOS (APFS) rejects non-UTF-8 file names, so the fixture can't be created there.
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn invalid_utf8_child_is_isolated() {
     use std::{ffi::OsStr, os::unix::ffi::OsStrExt};

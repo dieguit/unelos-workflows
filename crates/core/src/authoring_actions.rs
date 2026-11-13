@@ -136,6 +136,7 @@ fn duplicate_at(root: &Utf8Path, kind: &str, id: &str, new_id: &str) -> Result<(
     if !definition.is_file() {
         return Err(format!("Missing definition: {definition}"));
     }
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut directory = fs::DirBuilder::new();
     #[cfg(unix)]
     {
