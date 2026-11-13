@@ -62,60 +62,9 @@ function SkillsHome() {
   const router = useRouter()
   const { doc, error, setDoc } = useSkill(root, id)
   const [saveError, setSaveError] = useState<string>()
-  const form = useSkillForm(
-    doc
-      ? { ...doc, description: doc.description ?? "" }
-      : { name: "", description: "", body: "" },
-    async (value, closeEditor) => {
-      if (!doc) return
-      setSaveError(undefined)
-      try {
-        const res = await saveSkill(root, id!, value)
-        applySave(id!, res)
-        if (closeEditor) setEditor(null)
-        return { ...res.skill, description: res.skill.description ?? "" }
-      } catch (error) {
-        setSaveError(String(error))
-      }
-    }
-  )
-  const draft = useStore(form.store, (s) => s.values)
-  const saving = useStore(form.store, (s) => s.isSubmitting)
-  const visualSaving = useDelayedFlag(saving)
-  const isDefaultValue = useStore(form.store, (s) => s.isDefaultValue)
-  const discard = useDiscardChanges()
-  useEffect(() => {
-    form.reset(
-      doc
-        ? { ...doc, description: doc.description ?? "" }
-        : { name: "", description: "", body: "" }
-    )
-    setSaveError(undefined)
-  }, [doc, form])
-  const dirty = !!doc && !isDefaultValue
   const [editor, setEditor] = useState<{ id: string; body: string } | null>(
     null
   )
-  useEffect(() => setEditor(null), [id])
-  const editing = editor && doc && editor.id === id ? editor : null
-
-  const discardEdits = async () =>
-    !editing ||
-    editing.body === draft.body ||
-    (await discard.ask(
-      "Discard unsaved changes to SKILL.md? The Skill draft will be kept."
-    ))
-
-  const projectChangeApproved = useProjectDiscardGuard(saving, dirty || (!!editing && editing.body !== draft.body), discard.ask)
-  useBlocker({
-    shouldBlockFn: async () =>
-      !projectChangeApproved.current && (saving ||
-      ((dirty || (!!editing && editing.body !== doc?.body)) &&
-        !(await discard.ask("Discard unsaved changes to this Skill?")))),
-    enableBeforeUnload:
-      dirty || (!!editing && editing.body !== doc?.body) || saving,
-  })
-
   const applySave = (
     from: string,
     { skill, updatedReferences }: SkillSaveResult
@@ -139,6 +88,64 @@ function SkillsHome() {
         }
       )
   }
+  const form = useSkillForm(
+    doc
+      ? { ...doc, description: doc.description ?? "" }
+      : { name: "", description: "", body: "" },
+    async (value, closeEditor) => {
+      if (!doc) return
+      setSaveError(undefined)
+      try {
+        const res = await saveSkill(root, id!, value)
+        applySave(id!, res)
+        if (closeEditor) setEditor(null)
+        return { ...res.skill, description: res.skill.description ?? "" }
+      } catch (error) {
+        setSaveError(String(error))
+      }
+    }
+  )
+  const draft = useStore(form.store, (s) => s.values)
+  const saving = useStore(form.store, (s) => s.isSubmitting)
+  const visualSaving = useDelayedFlag(saving)
+  const isDefaultValue = useStore(form.store, (s) => s.isDefaultValue)
+  const discard = useDiscardChanges()
+  const [previousDoc, setPreviousDoc] = useState(doc)
+  if (previousDoc !== doc) {
+    setPreviousDoc(doc)
+    setSaveError(undefined)
+  }
+  useEffect(() => {
+    form.reset(
+      doc
+        ? { ...doc, description: doc.description ?? "" }
+        : { name: "", description: "", body: "" }
+    )
+  }, [doc, form])
+  const dirty = !!doc && !isDefaultValue
+  const [previousId, setPreviousId] = useState(id)
+  if (previousId !== id) {
+    setPreviousId(id)
+    setEditor(null)
+  }
+  const editing = editor && doc && editor.id === id ? editor : null
+
+  const discardEdits = async () =>
+    !editing ||
+    editing.body === draft.body ||
+    (await discard.ask(
+      "Discard unsaved changes to SKILL.md? The Skill draft will be kept."
+    ))
+
+  const projectChangeApproved = useProjectDiscardGuard(saving, dirty || (!!editing && editing.body !== draft.body), discard.ask)
+  useBlocker({
+    shouldBlockFn: async () =>
+      !projectChangeApproved.current && (saving ||
+      ((dirty || (!!editing && editing.body !== doc?.body)) &&
+        !(await discard.ask("Discard unsaved changes to this Skill?")))),
+    enableBeforeUnload:
+      dirty || (!!editing && editing.body !== doc?.body) || saving,
+  })
 
   if (root !== project.path)
     return (

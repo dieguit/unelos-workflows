@@ -1,8 +1,9 @@
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { emptyMcp, mcpDocument, mcpDraft } from "./mcp-fields"
+import type { McpDocument } from "@/lib/projects"
 
 test("local MCP fields round-trip and trim names without altering secrets", () => {
-  const document = {
+  const document: McpDocument = {
     id: "github",
     type: "local",
     command: ["npx", "-y", "server"],
@@ -28,7 +29,7 @@ test("local MCP fields round-trip and trim names without altering secrets", () =
 })
 
 test("remote MCP fields round-trip independently of local fields", () => {
-  const document = {
+  const document: McpDocument = {
     id: "remote",
     type: "remote",
     url: "https://example.com/mcp",

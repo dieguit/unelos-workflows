@@ -1,8 +1,9 @@
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { executionsByNode, missingNodes, nodeStatus } from "./run-graph"
+import type { ExecutionRecord, RunState } from "./runs-api"
 
-const rec = (nodeId, executionId) => ({ nodeId, executionId, inputs: [], outputs: [], workerReports: [], feedback: null })
-const run = {
+const rec = (nodeId: string, executionId: string): ExecutionRecord => ({ nodeId, executionId, inputs: [], outputs: [], workerReports: [], feedback: null })
+const run: RunState = {
   runId: "r",
   name: "r",
   workflowName: "w",
@@ -16,7 +17,7 @@ const run = {
 
 test("groups executions per node with the active one last", () => {
   const build = executionsByNode(run).get("build")
-  expect(build.map((e) => [e.n, e.active])).toEqual([[1, false], [2, true]])
+  expect(build?.map((e) => [e.n, e.active])).toEqual([[1, false], [2, true]])
 })
 
 test("status marks current, visited and untouched steps", () => {
@@ -27,8 +28,8 @@ test("status marks current, visited and untouched steps", () => {
 })
 
 test("waiting gate and finished end node", () => {
-  expect(nodeStatus({ ...run, current: { kind: "human-gate", ...rec("gate", "g") } }, ["gate"]).get("gate").state).toBe("waiting")
-  expect(nodeStatus({ ...run, current: { kind: "finished", nodeId: "end" } }, ["end"]).get("end").state).toBe("done")
+  expect(nodeStatus({ ...run, current: { kind: "human-gate", ...rec("gate", "g") } }, ["gate"]).get("gate")?.state).toBe("waiting")
+  expect(nodeStatus({ ...run, current: { kind: "finished", nodeId: "end" } }, ["end"]).get("end")?.state).toBe("done")
 })
 
 test("reports nodes missing from the workflow", () => {
