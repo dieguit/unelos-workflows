@@ -95,11 +95,11 @@ fn inspect_emits_full_normalized_workflow_and_is_read_only() {
     assert_eq!(
         value["nodes"],
         json!([
-            {"id":"approve-plan", "kind":"human-gate", "inputs":["plan.md"], "next":{"approved":"implement", "rejected":"plan"}},
-            {"id":"done", "kind":"end"},
-            {"id":"implement", "kind":"task", "task":"implement-plan", "agent":"engineer", "execution":"subagent", "inputs":["plan.md"], "outputs":["implementation-report.md"], "next":"review"},
             {"id":"plan", "kind":"task", "task":"create-plan", "agent":"planner", "execution":"main", "inputs":[], "outputs":["plan.md"], "next":"approve-plan"},
-            {"id":"review", "kind":"task", "task":"review-implementation", "agent":"reviewer", "execution":"subagent", "inputs":["plan.md", "implementation-report.md"], "outputs":["review.md"], "next":{"approved":"done", "changes_requested":"implement"}}
+            {"id":"approve-plan", "kind":"human-gate", "inputs":["plan.md"], "next":{"approved":"implement", "rejected":"plan"}},
+            {"id":"implement", "kind":"task", "task":"implement-plan", "agent":"engineer", "execution":"subagent", "inputs":["plan.md"], "outputs":["implementation-report.md"], "next":"review"},
+            {"id":"review", "kind":"task", "task":"review-implementation", "agent":"reviewer", "execution":"subagent", "inputs":["plan.md", "implementation-report.md"], "outputs":["review.md"], "next":{"approved":"done", "changes_requested":"implement"}},
+            {"id":"done", "kind":"end"}
         ])
     );
     assert_eq!(
