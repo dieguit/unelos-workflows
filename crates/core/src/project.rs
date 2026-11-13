@@ -322,14 +322,14 @@ pub fn agent_summaries(project_root: &Utf8Path) -> Result<Vec<AgentSummary>, Pro
         project_root,
         "agents",
         |authoring_root, directory, id| {
-            let relative = Utf8PathBuf::from("agents").join(id);
+            let relative = Utf8PathBuf::from(format!("agents/{id}"));
             let entry = bounded_path(authoring_root, &relative, directory, id)?;
             if !safe_id(id) {
                 return Err(diagnostic(&entry, "id", "invalid definition ID"));
             }
             let source = bounded_path(
                 authoring_root,
-                &relative.join("agent.yaml"),
+                &Utf8PathBuf::from(format!("{relative}/agent.yaml")),
                 &entry,
                 "agent.yaml",
             )?;
@@ -380,14 +380,14 @@ fn summarize_task(
     directory: &Utf8Path,
     id: &str,
 ) -> Result<TaskSummary, ProjectLoadError> {
-    let relative = Utf8PathBuf::from("tasks").join(id);
+    let relative = Utf8PathBuf::from(format!("tasks/{id}"));
     let entry = bounded_path(authoring_root, &relative, directory, id)?;
     if !safe_id(id) {
         return Err(diagnostic(&entry, "id", "invalid definition ID"));
     }
     let source = bounded_path(
         authoring_root,
-        &relative.join("task.yaml"),
+        &Utf8PathBuf::from(format!("{relative}/task.yaml")),
         &entry,
         "task.yaml",
     )?;
@@ -426,11 +426,11 @@ pub fn skill_summaries(project_root: &Utf8Path) -> Result<Vec<SkillSummary>, Pro
         project_root,
         "skills",
         |authoring_root, directory, id| {
-            let relative = Utf8PathBuf::from("skills").join(id);
+            let relative = Utf8PathBuf::from(format!("skills/{id}"));
             let entry = bounded_path(authoring_root, &relative, directory, id)?;
             let source = bounded_path(
                 authoring_root,
-                &relative.join("SKILL.md"),
+                &Utf8PathBuf::from(format!("{relative}/SKILL.md")),
                 &entry,
                 "SKILL.md",
             )?;
@@ -669,7 +669,7 @@ fn load_authoring_candidate(
                             .map_err(|e| diagnostic(&workflow_source, "task", e))?;
                         let source = bounded_path(
                             &root,
-                            &Utf8PathBuf::from("tasks").join(id).join("task.yaml"),
+                            &Utf8PathBuf::from(format!("tasks/{id}/task.yaml")),
                             &workflow_source,
                             "task",
                         )?;
@@ -793,7 +793,7 @@ fn definition_sources(
     paths.sort();
     let mut sources = BTreeMap::new();
     for id in paths {
-        let relative = Utf8PathBuf::from(directory).join(&id);
+        let relative = Utf8PathBuf::from(format!("{directory}/{id}"));
         let entry = bounded_path(root, &relative, &path, &id)?;
         if !entry.is_dir() {
             continue;
@@ -801,7 +801,12 @@ fn definition_sources(
         if !safe_id(&id) {
             return Err(diagnostic(&entry, "id", "invalid definition ID: use ASCII letters, digits, hyphen or underscore (1–128 bytes)"));
         }
-        let source = bounded_path(root, &relative.join(filename), &entry, filename)?;
+        let source = bounded_path(
+            root,
+            Utf8Path::new(&format!("{relative}/{filename}")),
+            &entry,
+            filename,
+        )?;
         sources.insert(id, source);
     }
     Ok(sources)
@@ -827,7 +832,12 @@ pub(crate) fn resolve_instructions(
             "expected a relative instructionsFile path",
         ));
     }
-    let path = bounded_path(root, &base.join(file), source, field)?;
+    let relative = base
+        .iter()
+        .chain(std::iter::once(file.as_str()))
+        .collect::<Vec<_>>()
+        .join("/");
+    let path = bounded_path(root, Utf8Path::new(&relative), source, field)?;
     let relative = path.strip_prefix(root).unwrap();
     if matches!(
         relative.components().next().map(|part| part.as_str()),
