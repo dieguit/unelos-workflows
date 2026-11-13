@@ -324,16 +324,16 @@ fn parallel_package_binds_flat_readable_paths() {
         .join("r-000001")
         .join("parallel-research");
     assert_eq!(
-        packet["outputs"][0]["path"],
-        run.join("research-summary.md").as_str()
+        Utf8Path::new(packet["outputs"][0]["path"].as_str().unwrap()),
+        run.join("research-summary.md")
     );
     assert_eq!(
-        packet["workers"][0]["outputs"][0]["path"],
-        run.join("backend-researcher").join("result.md").as_str()
+        Utf8Path::new(packet["workers"][0]["outputs"][0]["path"].as_str().unwrap()),
+        run.join("backend-researcher").join("result.md")
     );
     assert_eq!(
-        packet["workers"][1]["outputs"][0]["path"],
-        run.join("frontend-researcher").join("result.md").as_str()
+        Utf8Path::new(packet["workers"][1]["outputs"][0]["path"].as_str().unwrap()),
+        run.join("frontend-researcher").join("result.md")
     );
 }
 

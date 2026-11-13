@@ -137,7 +137,9 @@ fn missing_files_report_the_expected_absolute_path() {
         ".unelos/workflows/implement-feature.yaml",
     ] {
         let (_temp, root) = temporary_project();
-        let expected = root.join(relative);
+        let expected = relative
+            .split('/')
+            .fold(root.clone(), |path, part| path.join(part));
         fs::remove_file(&expected).unwrap();
         let error = load_project(&root, "implement-feature").unwrap_err();
         assert!(error.to_string().contains(expected.as_str()));
@@ -152,7 +154,9 @@ fn malformed_yaml_retains_path_and_parser_diagnostic() {
         ".unelos/workflows/implement-feature.yaml",
     ] {
         let (_temp, root) = temporary_project();
-        let expected = root.join(relative);
+        let expected = relative
+            .split('/')
+            .fold(root.clone(), |path, part| path.join(part));
         fs::write(&expected, "invalid: [").unwrap();
         let error = load_project(&root, "implement-feature").unwrap_err();
         assert!(error.to_string().contains(expected.as_str()));
@@ -172,7 +176,9 @@ fn unreadable_inputs_are_not_missing_or_yaml_errors() {
     ] {
         for directory in [false, true] {
             let (_temp, root) = temporary_project();
-            let expected = root.join(relative);
+            let expected = relative
+                .split('/')
+                .fold(root.clone(), |path, part| path.join(part));
             if directory {
                 fs::remove_file(&expected).unwrap();
                 fs::create_dir(&expected).unwrap();
