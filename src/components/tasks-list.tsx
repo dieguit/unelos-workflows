@@ -12,6 +12,8 @@ import {
   ListTable,
   Truncated,
 } from "@/components/list-table"
+import { UsedByCell, UsedByHead } from "@/components/used-by"
+import type { UsedBy } from "@/lib/references"
 import type { TaskSummary } from "@/lib/projects"
 
 export function filterTasks(tasks: TaskSummary[], query: string) {
@@ -24,6 +26,7 @@ function List({ items }: { items: string[] }) {
 }
 
 type Selection = {
+  usedBy: UsedBy
   selected?: string
   onSelect?: (name: string) => void
   actions?: (name: string) => ReactNode
@@ -31,6 +34,7 @@ type Selection = {
 
 function TasksTable({
   tasks,
+  usedBy,
   selected,
   onSelect,
   actions,
@@ -42,6 +46,7 @@ function TasksTable({
         <ListHead>Description</ListHead>
         <ListHead className="w-[18%]">Skills</ListHead>
         <ListHead className="w-[18%]">Outcomes</ListHead>
+        <UsedByHead className="w-28" project={usedBy.project} />
         {actions && (
           <ListHead className="w-14">
             <span className="sr-only">Actions</span>
@@ -74,6 +79,7 @@ function TasksTable({
             <ListCell className="font-mono text-xs text-foreground-dim">
               <List items={t.outcomes} />
             </ListCell>
+            <UsedByCell refs={usedBy.of(t.name)} />
             {actions && <ListCell>{actions(t.name)}</ListCell>}
           </ListRow>
         ))}

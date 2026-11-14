@@ -20,6 +20,7 @@ import { useProjectDiscardGuard } from "@/hooks/use-project-discard-guard"
 import { applyBodyDraft } from "@/lib/apply-body-draft"
 import { SkillsList, filterSkills } from "@/components/skills-list"
 import { useSkill } from "@/hooks/use-skill"
+import type { UsedBy } from "@/lib/references"
 import { skillSchema } from "@/lib/skill-schema"
 
 type SkillsApi = {
@@ -38,6 +39,7 @@ type SkillsApi = {
 
 export function SkillsPage({
   skills,
+  usedBy,
   id,
   scope,
   api,
@@ -45,6 +47,7 @@ export function SkillsPage({
   navigate,
 }: {
   skills: SkillSummary[]
+  usedBy: UsedBy
   id: string | undefined
   scope: string
   api: SkillsApi
@@ -258,6 +261,7 @@ export function SkillsPage({
             ) : null}
             <SkillsList
               skills={skills}
+              usedBy={usedBy}
               query={query}
               onCreate={() => void startCreate()}
               onClear={() => {
@@ -275,6 +279,8 @@ export function SkillsPage({
         <SkillInspector
           id={current!}
           isNew={creating}
+          usedBy={id && !creating ? usedBy.of(id) : null}
+          project={usedBy.project}
           doc={creating ? { name: "", description: "", body: "" } : doc}
           error={error}
           form={form}

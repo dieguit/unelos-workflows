@@ -11,6 +11,22 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 const MAX_RECENTS: usize = 10;
 
 #[tauri::command]
+pub async fn project_references(
+    app: AppHandle,
+    root: String,
+) -> Result<unelos_core::ProjectReferences, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = approved_root(&load_from(&store_file(&app)?), Path::new(&root))?;
+        unelos_core::project_references(
+            camino::Utf8Path::from_path(&root).ok_or("Project path is not UTF-8")?,
+        )
+        .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn duplicate_agent(
     app: AppHandle,
     root: String,

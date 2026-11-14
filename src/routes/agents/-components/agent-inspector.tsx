@@ -14,7 +14,8 @@ import {
   FieldTitle,
 } from "@/components/ui/field"
 import { listAllSkills } from "@/hooks/skill-fetchers"
-import { listGlobalMcps, listMcps, type AgentDocument } from "@/lib/projects"
+import { listGlobalMcps, listMcps, type AgentDocument, type Reference } from "@/lib/projects"
+import { UsedByRow } from "@/components/used-by"
 import type { AgentForm } from "../-hooks/use-agent-form"
 import { useLazy } from "@/hooks/use-lazy"
 import { AgentModelPicker } from "./model-picker"
@@ -23,6 +24,7 @@ import { SkillLink } from "@/components/skill-link"
 
 export function AgentInspector({
   root,
+  usedBy,
   originalId,
   form,
   draft,
@@ -39,6 +41,7 @@ export function AgentInspector({
 }: {
   footer?: ReactNode
   root: string
+  usedBy: Reference[] | null
   originalId: string | null
   form: AgentForm
   draft?: AgentDocument
@@ -286,6 +289,11 @@ export function AgentInspector({
                 </form.Field>
               </FieldGroup>
             </fieldset>
+            {originalId ? (
+              <div className="mt-4">
+                <UsedByRow refs={usedBy} />
+              </div>
+            ) : null}
             {saveError ? (
               <div
                 role="alert"

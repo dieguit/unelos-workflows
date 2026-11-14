@@ -60,6 +60,7 @@ pub use import::{
     ImportWorkflow, SourceSpec,
 };
 mod project;
+pub use project::{project_references, ProjectReferences, Reference};
 mod runtime;
 mod settings;
 mod skill_document;

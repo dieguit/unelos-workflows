@@ -9,6 +9,9 @@ export type RecentProject = {
   available: boolean
 }
 export type ProjectState = { home: string; recents: RecentProject[] }
+export type Reference = { kind: "workflow" | "agent" | "task"; id: string; name: string }
+export type ProjectReferences = { agents: Record<string, Reference[]>; tasks: Record<string, Reference[]>; skills: Record<string, Reference[]>; mcps: Record<string, Reference[]> }
+export const getProjectReferences = (root: string) => trackedInvoke<ProjectReferences>("project_references", { root })
 export type WorkflowSummary = {
   name: string
   file: string

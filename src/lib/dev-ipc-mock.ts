@@ -1,7 +1,7 @@
 import { mockIPC } from "@tauri-apps/api/mocks"
 import type { Harness } from "./harnesses"
 import type { ModelMappings } from "./model-mappings"
-import type { McpDocument, TaskDocument, AgentDocument, AgentSummary, ProjectState, SkillDocument, SkillSummary, WorkflowDocument, WorkflowDraft, WorkflowStep, WorkflowIssue, WorkflowSummary } from "./projects"
+import type { ProjectReferences, Reference, McpDocument, TaskDocument, AgentDocument, AgentSummary, ProjectState, SkillDocument, SkillSummary, WorkflowDocument, WorkflowDraft, WorkflowStep, WorkflowIssue, WorkflowSummary } from "./projects"
 
 const home = "/home/dieguit"
 const day = 86_400_000
@@ -281,6 +281,36 @@ export function installDevIpcMock() {
       return documents
     })())
     switch (cmd) {
+      case "project_references": {
+        const result: ProjectReferences = { agents: {}, tasks: {}, skills: {}, mcps: {} }
+        const add = (map: Record<string, Reference[]>, id: string, reference: Reference) => {
+          if (!id) return
+          const entries = map[id] ??= []
+          if (!entries.some((entry) => entry.kind === reference.kind && entry.id === reference.id)) entries.push(reference)
+        }
+        for (const agent of agents.filter((agent) => !agent.problem)) {
+          const reference: Reference = { kind: "agent", id: agent.name, name: agent.name }
+          agent.skills.forEach((id) => add(result.skills, id, reference))
+          agent.mcps.forEach((id) => add(result.mcps, id, reference))
+        }
+        for (const task of Object.values(tasks)) {
+          task.skills.forEach((id) => add(result.skills, id, { kind: "task", id: task.id, name: task.id }))
+        }
+        for (const { document, summary } of workflowsFor(root)) {
+          if (summary.problem) continue
+          const reference: Reference = { kind: "workflow", id: document.id, name: document.name }
+          for (const step of document.steps) {
+            const selections = step.kind === "task" ? [{ agent: step.agent, task: step.task }] : step.workers
+            for (const { agent, task } of selections) {
+              if (agent) add(result.agents, agent, reference)
+              if (task?.source === "named" && task.id) add(result.tasks, task.id, reference)
+              if (task?.source === "inline") task.skills.forEach((id) => add(result.skills, id, reference))
+            }
+          }
+        }
+        Object.values(result).forEach((map) => Object.values(map).forEach((entries) => entries.sort((a, b) => a.name.localeCompare(b.name))))
+        return result
+      }
       case "list_tasks":
       case "list_global_tasks":
         return Object.values(tasks).sort((a, b) => a.id.localeCompare(b.id)).map((task) => ({ name: task.id, description: task.description, skills: [...task.skills], outcomes: [...task.outcomes], problem: null }))

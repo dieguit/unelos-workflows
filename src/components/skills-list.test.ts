@@ -12,7 +12,7 @@ const skills = [
 const broken = { name: "bad", description: null, problem: "bad <yaml>" }
 const render = (skills: SkillSummary[], query = "", selected?: string) =>
   renderToStaticMarkup(
-    createElement(mod.SkillsList, { skills, query, onClear() {}, selected })
+    createElement(mod.SkillsList, { skills, query, onClear() {}, selected, usedBy: { of: () => null } })
   )
 
 test("filterSkills matches name or description, case-insensitive, trimmed", () => {

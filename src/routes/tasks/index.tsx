@@ -3,6 +3,7 @@ import { useCallback } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { z } from "zod"
 import { PageHeader } from "@/components/page-header"
+import { loadReferences, usedByFor } from "@/lib/references"
 import { TasksError, TasksPage } from "@/components/tasks-page"
 import {
   duplicateTask,
@@ -22,6 +23,7 @@ export const Route = createFileRoute("/tasks/")({
   loader: async ({ context }) => ({
     root: context.project.path,
     tasks: await listTasks(context.project.path),
+    references: await loadReferences(context.project.path),
   }),
   component: TasksRoute,
   pendingComponent: () => <p role="status">Loading tasks…</p>,
@@ -39,7 +41,7 @@ function Header({ action }: { action?: ReactNode }) {
 }
 
 function TasksRoute() {
-  const { root, tasks } = Route.useLoaderData()
+  const { root, tasks, references } = Route.useLoaderData()
   const { project } = Route.useRouteContext()
   const { task } = Route.useSearch()
   const fetchSkills = useCallback(() => listAllSkills(root), [root])
@@ -54,6 +56,7 @@ function TasksRoute() {
     <TasksPage
       key={project.path}
       tasks={tasks}
+      usedBy={usedByFor(references?.tasks)}
       initial={task}
       fetchSkills={fetchSkills}
       scope={{ path: "tasks", label: "Project Task" }}

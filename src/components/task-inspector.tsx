@@ -13,7 +13,8 @@ import {
   FieldLabel,
   FieldTitle,
 } from "@/components/ui/field"
-import type { SkillSummary, TaskDocument } from "@/lib/projects"
+import type { Reference, SkillSummary, TaskDocument } from "@/lib/projects"
+import { UsedByRow } from "@/components/used-by"
 import { useLazy } from "@/hooks/use-lazy"
 import { SkillPicker } from "@/components/skill-picker"
 import { SkillLink } from "@/components/skill-link"
@@ -22,6 +23,8 @@ import type { TaskForm } from "@/hooks/use-task-form"
 export function TaskInspector({
   fetchSkills,
   scope,
+  usedBy,
+  project,
   originalId,
   form,
   draft,
@@ -43,6 +46,8 @@ export function TaskInspector({
   fetchSkills: (() => Promise<SkillSummary[]>) | null
   /** Shown under the title, e.g. "tasks/review" or "Project Task". */
   scope: { path: string; label: string }
+  usedBy: Reference[] | null
+  project?: string
   originalId: string | null
   form: TaskForm
   draft?: TaskDocument
@@ -326,6 +331,11 @@ export function TaskInspector({
                 </form.Field>
               </FieldGroup>
             </fieldset>
+            {originalId ? (
+              <div className="mt-4">
+                <UsedByRow refs={usedBy} project={project} />
+              </div>
+            ) : null}
             {saveError ? (
               <div
                 role="alert"
