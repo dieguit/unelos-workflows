@@ -62,10 +62,8 @@ fn changed(
 
 pub fn build_harness_config(root: &Utf8Path) -> Result<HarnessBuild, InstallError> {
     let mut result = HarnessBuild::default();
-    if !crate::harness::list_harnesses()
-        .iter()
-        .any(|h| h.id == "opencode" && h.installed)
-    {
+    let installed = crate::harness::list_harnesses();
+    if !installed.iter().any(|h| h.installed) {
         return Ok(result);
     }
     let workflows_path = Utf8Path::new(".unelos/workflows");
@@ -94,9 +92,57 @@ pub fn build_harness_config(root: &Utf8Path) -> Result<HarnessBuild, InstallErro
             Err(e) => result.skipped.push(format!("{id}: {}", e.message)),
         }
     }
+    for adapter in crate::harness::registry() {
+        if !installed
+            .iter()
+            .any(|h| h.id == adapter.id() && h.installed)
+        {
+            continue;
+        }
+        match adapter.build_project(root, &workflows) {
+            Ok(build) => {
+                result.harnesses.extend(build.harnesses);
+                result.written.extend(build.written);
+                result.removed.extend(build.removed);
+                result.skipped.extend(build.skipped);
+            }
+            Err(e) => result
+                .skipped
+                .push(format!("{}: {}", adapter.id(), e.message)),
+        }
+    }
+    Ok(result)
+}
+
+pub(crate) fn merge_agents(
+    workflows: &BTreeMap<String, Vec<AgentExport>>,
+) -> Result<Vec<AgentExport>, InstallError> {
+    let mut scopes = BTreeMap::new();
+    let mut servers = BTreeMap::new();
     let mut agents: BTreeMap<String, AgentExport> = BTreeMap::new();
     for agent in workflows.values().flatten() {
+        for reference in &agent.mcps {
+            let id = reference.strip_prefix("global/").unwrap_or(reference);
+            if id == "unelos" {
+                return Err(error("MCP ID 'unelos' is reserved"));
+            }
+            if scopes
+                .insert(id, reference)
+                .is_some_and(|old| old != reference)
+            {
+                return Err(error(format!("Project and global MCP share ID {id:?}")));
+            }
+        }
+        for (id, server) in &agent.mcp_servers {
+            if id == "unelos" {
+                return Err(error("MCP ID 'unelos' is reserved"));
+            }
+            if servers.insert(id, server).is_some_and(|old| old != server) {
+                return Err(error(format!("Workflows disagree on MCP {id:?}")));
+            }
+        }
         if let Some(existing) = agents.get_mut(&agent.id) {
+            existing.mcp_servers.extend(agent.mcp_servers.clone());
             existing.main |= agent.main;
             existing.subagent |= agent.subagent;
             existing.mcps.extend(agent.mcps.clone());
@@ -106,13 +152,20 @@ pub fn build_harness_config(root: &Utf8Path) -> Result<HarnessBuild, InstallErro
             agents.insert(agent.id.clone(), agent.clone());
         }
     }
-    let agents: Vec<_> = agents.into_values().collect();
-    crate::opencode_agents::check_agents(root, &agents)?;
-    let rendered =
-        crate::opencode_agents::render_agents(crate::opencode_agents::Version::V2, &agents)?;
-    crate::mcp_install::plan_replace(root, &workflows)?;
-    let directory = Utf8Path::new(".opencode/agents");
+    Ok(agents.into_values().collect())
+}
+
+pub(crate) fn write_agents(
+    root: &Utf8Path,
+    directory: &str,
+    rendered: Vec<(Utf8PathBuf, String)>,
+) -> Result<HarnessBuild, InstallError> {
+    let mut result = HarnessBuild::default();
+    let directory = Utf8Path::new(directory);
     crate::check_install_path(root, directory)?;
+    for (path, _) in &rendered {
+        crate::check_install_path(root, path)?;
+    }
     let mut stale = Vec::new();
     if root.join(directory).exists() {
         for entry in fs::read_dir(root.join(directory)).map_err(error)? {
@@ -130,17 +183,36 @@ pub fn build_harness_config(root: &Utf8Path) -> Result<HarnessBuild, InstallErro
             }
         }
     }
-    for (path, text) in rendered {
-        changed(root, &path, text.as_bytes(), &mut result)?;
-    }
-    result
-        .written
-        .extend(crate::replace_opencode_mcps(root, &workflows)?);
     stale.sort();
-    for path in stale {
-        fs::remove_file(root.join(&path)).map_err(error)?;
-        result.removed.push(root.join(path));
+    let mut previous = BTreeMap::new();
+    for path in rendered.iter().map(|(path, _)| path).chain(stale.iter()) {
+        let bytes = match fs::read(root.join(path)) {
+            Ok(bytes) => Some(bytes),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(error(e)),
+        };
+        previous.insert(path.clone(), bytes);
     }
-    result.harnesses.push("opencode".into());
+    let applied = (|| {
+        for (path, text) in &rendered {
+            changed(root, path, text.as_bytes(), &mut result)?;
+        }
+        for path in &stale {
+            fs::remove_file(root.join(path)).map_err(error)?;
+            result.removed.push(root.join(path));
+        }
+        Ok::<(), InstallError>(())
+    })();
+    if let Err(failure) = applied {
+        for path in result.written.iter().chain(&result.removed).rev() {
+            let relative = path.strip_prefix(root).unwrap();
+            let rollback = match &previous[relative] {
+                Some(bytes) => crate::write_install_file(root, relative, bytes),
+                None => fs::remove_file(path).map_err(error),
+            };
+            rollback.map_err(|e| error(format!("{failure}; rollback failed: {e}")))?;
+        }
+        return Err(failure);
+    }
     Ok(result)
 }

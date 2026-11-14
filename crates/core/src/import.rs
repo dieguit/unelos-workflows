@@ -1,6 +1,6 @@
 use crate::install::{
     checked_path, collect_files, collect_import_files, fail, io_error, load_install_source,
-    references, resolve_agent_model,
+    references,
 };
 use crate::{AgentExport, InstallError, LoadedProject, McpServer};
 use camino::{Utf8Path, Utf8PathBuf};
@@ -638,11 +638,14 @@ fn load_source(
     }
     for id in agents.keys() {
         let agent = &project.definitions.agents[id];
-        if let Some(model) = &agent.model {
-            if let Err(e) = resolve_agent_model(model) {
+        if let Some(crate::AgentModel::Alias(alias)) = &agent.model {
+            if crate::list_model_mappings()?
+                .get(alias)
+                .is_none_or(|models| models.is_empty())
+            {
                 warnings.push(ImportWarning {
                     kind: "unresolvedModel".into(),
-                    message: format!("Agent {id}: {e}"),
+                    message: format!("Agent {id}: No harness model mapped for alias '{alias}'"),
                 });
             }
         }
@@ -1081,10 +1084,7 @@ pub fn commit_import(
                 .unwrap_or(&id)
                 .clone(),
             instructions: agent.instructions.clone(),
-            model: agent
-                .model
-                .as_ref()
-                .and_then(|m| resolve_agent_model(m).ok()),
+            model: agent.model.clone(),
             tools: agent.tools.clone(),
             mcps,
             mcp_servers,

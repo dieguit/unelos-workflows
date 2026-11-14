@@ -39,7 +39,9 @@ impl Settings {
                     std::env::vars_os()
                         .filter_map(|(key, value)| {
                             let key = key.into_string().ok()?;
-                            if key.eq_ignore_ascii_case("UNELOS_CONFIG_DIR") {
+                            if key.eq_ignore_ascii_case("UNELOS_CONFIG_DIR")
+                                || key.eq_ignore_ascii_case("UNELOS_CLAUDE_BIN")
+                            {
                                 return None;
                             }
                             Some((key, value.into_string().ok()?))

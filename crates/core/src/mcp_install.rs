@@ -17,6 +17,9 @@ fn projection(workflows: &Workflows) -> Result<Value, InstallError> {
     let mut result = json!({"mcp": {}, "tools": {}});
     for servers in workflows.values() {
         for (id, server) in servers {
+            if id == "unelos" {
+                return Err(error("reserved_mcp_id", "MCP ID 'unelos' is reserved"));
+            }
             let mut value = serde_json::to_value(server).map_err(|e| error("invalid_mcp", e))?;
             value["enabled"] = true.into();
             if let Some(existing) = result["mcp"].get(id) {

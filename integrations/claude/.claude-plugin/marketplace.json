@@ -1,0 +1,5 @@
+{
+  "name": "unelos-local",
+  "owner": {"name": "Unelos"},
+  "plugins": [{"name": "unelos", "source": "./unelos", "description": "Unelos workflow controller"}]
+}

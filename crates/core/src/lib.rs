@@ -107,3 +107,5 @@ pub use work::{
     NodeInspection, ParallelInspection, ParallelPacket, TaskWorkPacket, WorkPacket,
     WorkRuntimeInput, WorkerInspection, WorkerPacket, WorkerReportBinding,
 };
+pub mod controller_mcp;
+pub mod session_binding;

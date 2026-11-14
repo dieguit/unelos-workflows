@@ -2,6 +2,289 @@ use super::*;
 use std::sync::Mutex;
 static ENV: Mutex<()> = Mutex::new(());
 
+#[cfg(unix)]
+fn fake_claude(root: &Utf8Path) -> Utf8PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let binary = root.join("fake-claude");
+    fs::write(&binary, r#"#!/bin/sh
+set -eu
+/bin/mkdir -p "$CLAUDE_CONFIG_DIR"
+echo "$*" >> "$CLAUDE_CONFIG_DIR/calls"
+case "$*" in
+  "plugin marketplace list --json")
+    if [ -f "$CLAUDE_CONFIG_DIR/market" ]; then echo '[{"name":"unelos-local"}]'; else echo '[]'; fi ;;
+  "plugin list --json")
+    if [ -f "$CLAUDE_CONFIG_DIR/plugin" ]; then echo '[{"id":"unelos@unelos-local"}]'; else echo '[]'; fi ;;
+  "plugin marketplace add "*) : > "$CLAUDE_CONFIG_DIR/market" ;;
+  "plugin marketplace update "*|"plugin update "*) ;;
+  "plugin install "*|"plugin enable "*)
+    : > "$CLAUDE_CONFIG_DIR/plugin"
+    echo '{"enabledPlugins":{"unelos@unelos-local":true}}' > "$CLAUDE_CONFIG_DIR/settings.json" ;;
+  "plugin uninstall "*)
+    /bin/rm -f "$CLAUDE_CONFIG_DIR/plugin"
+    echo '{}' > "$CLAUDE_CONFIG_DIR/settings.json" ;;
+  "plugin marketplace remove "*) /bin/rm -f "$CLAUDE_CONFIG_DIR/market" ;;
+  *) exit 1 ;;
+esac
+"#).unwrap();
+    fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
+    binary
+}
+
+#[test]
+#[cfg(unix)]
+fn claude_install_uninstall_with_fake_cli() {
+    let _lock = ENV.lock().unwrap();
+    let temp = assert_fs::TempDir::new().unwrap();
+    let root = Utf8Path::from_path(temp.path()).unwrap();
+    let fake = fake_claude(root);
+    let _env = Env::set(&[
+        ("UNELOS_CONFIG_DIR", root.join("unelos").as_str()),
+        ("CLAUDE_CONFIG_DIR", root.join("claude").as_str()),
+        ("UNELOS_CLAUDE_BIN", fake.as_str()),
+        ("OPENCODE_CONFIG_DIR", root.join("opencode").as_str()),
+        ("HOME", root.as_str()),
+        ("PATH", root.join("empty").as_str()),
+    ]);
+    // A broken OpenCode config must not prevent Claude installation.
+    fs::create_dir_all(root.join("opencode")).unwrap();
+    fs::write(root.join("opencode/opencode.json"), "invalid").unwrap();
+    let source = root.join("unelos source");
+    fs::write(&source, "binary").unwrap();
+    install_harness("claude", &source).unwrap();
+    let cx = context().unwrap();
+    let record = claude::Claude.integration(&cx).unwrap().unwrap();
+    assert_eq!(record.files.len(), 8);
+    let mcp: serde_json::Value = serde_json::from_slice(
+        &fs::read(root.join("unelos/integrations/claude/unelos/.mcp.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(mcp["mcpServers"]["unelos"]["command"], cx.binary.as_str());
+    install_harness("claude", &source).unwrap();
+    let calls = fs::read_to_string(root.join("claude/calls")).unwrap();
+    assert!(calls
+        .lines()
+        .any(|line| line == "plugin marketplace update unelos-local"));
+    assert!(calls
+        .lines()
+        .any(|line| line == "plugin update unelos@unelos-local --scope user"));
+    assert_eq!(
+        calls
+            .lines()
+            .filter(|s| s.starts_with("plugin marketplace add "))
+            .count(),
+        1
+    );
+    assert_eq!(
+        calls
+            .lines()
+            .filter(|s| s.starts_with("plugin install "))
+            .count(),
+        1
+    );
+    fs::write(
+        root.join("claude/settings.json"),
+        r#"{"enabledPlugins":{"unelos@unelos-local":false}}"#,
+    )
+    .unwrap();
+    assert!(claude::Claude.integration(&cx).unwrap().is_none());
+    claude::Claude.uninstall(&cx).unwrap();
+    assert!(!global_config::read_state().unwrap().contains_key("claude"));
+    assert!(record.files.iter().all(|path| !path.exists()));
+    assert!(cx.binary.exists());
+}
+
+#[test]
+fn claude_agent_model_mapping_and_mcp_list() {
+    use crate::{AgentExport, AgentModel, McpServer};
+    let _lock = ENV.lock().unwrap();
+    let temp = assert_fs::TempDir::new().unwrap();
+    let root = Utf8Path::from_path(temp.path()).unwrap();
+    let _env = Env::set(&[("UNELOS_CONFIG_DIR", root.join("global").as_str())]);
+    crate::save_model_mapping(
+        Some("smart"),
+        "smart",
+        [("claude".into(), "opus".into())].into(),
+    )
+    .unwrap();
+    let mut agent = AgentExport {
+        id: "test".into(),
+        instructions: "Do work".into(),
+        model: Some(AgentModel::Alias("smart".into())),
+        tools: vec![],
+        mcps: vec!["local".into(), "remote".into()],
+        mcp_servers: [
+            (
+                "local".into(),
+                McpServer::Local {
+                    command: vec!["server".into(), "--flag".into()],
+                    environment: [("TOKEN".into(), "secret".into())].into(),
+                },
+            ),
+            (
+                "remote".into(),
+                McpServer::Remote {
+                    url: "https://example.com/mcp".into(),
+                    headers: [("Authorization".into(), "Bearer token".into())].into(),
+                },
+            ),
+        ]
+        .into(),
+        main: true,
+        subagent: true,
+    };
+    let path = root.join(".claude/agents/unelos-test.md");
+    for (model, expected) in [
+        (agent.model.clone(), Some("opus")),
+        (
+            Some(AgentModel::Harness {
+                harness: "claude".into(),
+                model: "sonnet".into(),
+            }),
+            Some("sonnet"),
+        ),
+        (
+            Some(AgentModel::Harness {
+                harness: "opencode".into(),
+                model: "p/m".into(),
+            }),
+            None,
+        ),
+        (None, None),
+    ] {
+        agent.model = model;
+        claude::Claude
+            .build_project(root, &[("workflow".into(), vec![agent.clone()])].into())
+            .unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        let front: serde_json::Value =
+            serde_yaml_ng::from_str(text.split("---").nth(1).unwrap()).unwrap();
+        assert_eq!(front["name"], "unelos-test");
+        assert_eq!(front.get("model").and_then(|v| v.as_str()), expected);
+        let servers = front["mcpServers"].as_array().unwrap();
+        assert_eq!(servers[0]["local"]["type"], "stdio");
+        assert_eq!(servers[0]["local"]["command"], "server");
+        assert_eq!(servers[0]["local"]["args"][0], "--flag");
+        assert_eq!(servers[0]["local"]["env"]["TOKEN"], "secret");
+        assert_eq!(servers[1]["remote"]["type"], "http");
+        assert_eq!(
+            servers[1]["remote"]["headers"]["Authorization"],
+            "Bearer token"
+        );
+    }
+    assert_eq!(
+        claude::Claude.list_models().unwrap(),
+        ["opus", "sonnet", "haiku"]
+    );
+}
+
+#[test]
+fn adapter_write_failure_restores_existing_files() {
+    let temp = assert_fs::TempDir::new().unwrap();
+    let root = Utf8Path::from_path(temp.path()).unwrap();
+    fs::create_dir_all(root.join(".claude/agents")).unwrap();
+    fs::write(root.join(".claude/agents/unelos-a.md"), "original a").unwrap();
+    fs::write(root.join(".claude/agents/unelos-b.md"), "original b").unwrap();
+    fs::write(root.join(".claude/agents/unelos-stale.md"), "stale").unwrap();
+    fs::write(
+        root.join(format!(
+            ".claude/agents/.unelos-b.md.unelos-{}.tmp",
+            std::process::id()
+        )),
+        "blocked",
+    )
+    .unwrap();
+    assert!(crate::harness_build::write_agents(
+        root,
+        ".claude/agents",
+        vec![
+            (".claude/agents/unelos-a.md".into(), "new a".into()),
+            (".claude/agents/unelos-b.md".into(), "new b".into()),
+        ]
+    )
+    .is_err());
+    assert_eq!(
+        fs::read_to_string(root.join(".claude/agents/unelos-a.md")).unwrap(),
+        "original a"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join(".claude/agents/unelos-b.md")).unwrap(),
+        "original b"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join(".claude/agents/unelos-stale.md")).unwrap(),
+        "stale"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn builds_both_harnesses_and_unmapped_claude_keeps_files() {
+    use assert_fs::fixture::PathCopy;
+    let _lock = ENV.lock().unwrap();
+    let temp = assert_fs::TempDir::new().unwrap();
+    let root = Utf8Path::from_path(temp.path()).unwrap();
+    let fake = fake_claude(root);
+    let _env = Env::set(&[
+        ("UNELOS_CONFIG_DIR", root.join("global").as_str()),
+        ("OPENCODE_CONFIG_DIR", root.join("opencode").as_str()),
+        ("CLAUDE_CONFIG_DIR", root.join("claude").as_str()),
+        ("UNELOS_CLAUDE_BIN", fake.as_str()),
+        ("HOME", root.as_str()),
+        ("PATH", root.join("empty").as_str()),
+    ]);
+    fs::create_dir(root.join(".unelos")).unwrap();
+    assert_fs::fixture::ChildPath::new(root.join(".unelos"))
+        .copy_from(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/simple-plan-execute-review"),
+            &["**/*"],
+        )
+        .unwrap();
+    crate::initialize_project(root).unwrap();
+    let source = root.join("cli");
+    fs::write(&source, "binary").unwrap();
+    install_harness("opencode", &source).unwrap();
+    install_harness("claude", &source).unwrap();
+    crate::save_model_mapping(
+        Some("smart"),
+        "smart",
+        [
+            ("opencode".into(), "p/m".into()),
+            ("claude".into(), "opus".into()),
+        ]
+        .into(),
+    )
+    .unwrap();
+    let source_agent = root.join(".unelos/agents/simple-implementer/agent.yaml");
+    let original = fs::read_to_string(&source_agent).unwrap();
+    fs::write(&source_agent, format!("{original}\nmodel: smart\n")).unwrap();
+    let built = crate::build_harness_config(root).unwrap();
+    assert_eq!(built.harnesses, ["opencode", "claude"]);
+    assert!(built.skipped.is_empty());
+    let claude_agent = root.join(".claude/agents/unelos-simple-implementer.md");
+    let before = fs::read(&claude_agent).unwrap();
+    let stale = root.join(".claude/agents/unelos-stale.md");
+    fs::write(&stale, "keep").unwrap();
+    crate::save_model_mapping(
+        Some("smart"),
+        "smart",
+        [("opencode".into(), "p/new".into())].into(),
+    )
+    .unwrap();
+    let built = crate::build_harness_config(root).unwrap();
+    assert_eq!(built.harnesses, ["opencode"]);
+    assert_eq!(built.skipped.len(), 1);
+    assert!(built.skipped[0].starts_with("claude: No Claude model mapped"));
+    assert_eq!(fs::read(&claude_agent).unwrap(), before);
+    assert_eq!(fs::read_to_string(stale).unwrap(), "keep");
+    assert!(
+        fs::read_to_string(root.join(".opencode/agents/unelos-simple-implementer.md"))
+            .unwrap()
+            .contains("p/new")
+    );
+}
+
 struct Env(Vec<(String, Option<std::ffi::OsString>)>);
 impl Env {
     fn set(values: &[(&str, &str)]) -> Self {
@@ -40,7 +323,7 @@ fn semver_extraction() {
 
 #[test]
 fn agent_models_resolve_global_aliases_for_opencode() {
-    use crate::{install::resolve_agent_model, AgentModel};
+    use crate::{harness::opencode::resolve_agent_model, AgentModel};
     let _lock = ENV.lock().unwrap();
     let temp = assert_fs::TempDir::new().unwrap();
     let root = Utf8Path::from_path(temp.path()).unwrap();
@@ -167,7 +450,7 @@ fn global_lifecycle() {
     assert!(statuses.iter().all(|s| !s.detected && !s.installed));
     fs::create_dir(root.join("claude")).unwrap();
     assert!(list_harnesses()[1].detected);
-    assert!(!list_harnesses()[1].installable);
+    assert!(list_harnesses()[1].installable);
     assert!(install_harness("claude", &root.join("missing")).is_err());
     assert!(harness_models("unknown").is_err());
     fs::create_dir_all(&oc).unwrap();
