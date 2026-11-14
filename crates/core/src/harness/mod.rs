@@ -30,6 +30,7 @@ pub trait HarnessAdapter {
         &self,
         _root: &Utf8Path,
         _workflows: &std::collections::BTreeMap<String, Vec<crate::AgentExport>>,
+        _prune: bool,
     ) -> Result<crate::HarnessBuild> {
         Err(error("harness_not_installable", self.id()))
     }

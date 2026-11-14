@@ -87,6 +87,7 @@ pub struct SessionService {
 
 pub(crate) struct LockedBinding {
     path: Utf8PathBuf,
+    context: SessionContext,
     _lock: File,
 }
 
@@ -107,27 +108,44 @@ impl LockedBinding {
         Ok(binding)
     }
     pub(crate) fn read(&self) -> Result<Option<SessionBinding>, SessionError> {
-        let bytes = match fs::read(&self.path) {
-            Ok(bytes) => bytes,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => return Err(io_error(e)),
-        };
-        let value: Value = serde_json::from_slice(&bytes).map_err(io_error)?;
-        if value["version"] != 1 {
-            return Err(fail(
-                "binding_version_unsupported",
-                "Unsupported session binding version",
-            ));
-        }
-        serde_json::from_value(value).map(Some).map_err(io_error)
+        read_binding(&self.path, &self.context)
     }
     pub(crate) fn write(&self, binding: &SessionBinding) -> Result<(), SessionError> {
         crate::global_config::atomic_write(
             &self.path,
             &serde_json::to_vec(binding).map_err(io_error)?,
         )
-        .map_err(io_error)
+        .map_err(io_error)?;
+        #[cfg(unix)]
+        File::open(self.path.parent().unwrap())
+            .and_then(|directory| directory.sync_all())
+            .map_err(io_error)?;
+        Ok(())
     }
+}
+
+fn read_binding(
+    path: &Utf8Path,
+    context: &SessionContext,
+) -> Result<Option<SessionBinding>, SessionError> {
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(io_error(e)),
+    };
+    let value: Value = serde_json::from_slice(&bytes).map_err(io_error)?;
+    if value["version"] != 1 {
+        return Err(fail(
+            "binding_version_unsupported",
+            "Unsupported session binding version",
+        ));
+    }
+    let binding: SessionBinding =
+        serde_json::from_value(value).map_err(|error| fail("binding_corrupt", error))?;
+    if binding.harness != context.harness || binding.session_id != context.session_id {
+        return Err(fail("binding_corrupt", "Session binding identity mismatch"));
+    }
+    Ok(Some(binding))
 }
 
 impl SessionService {
@@ -175,6 +193,7 @@ impl SessionService {
         lock.lock().map_err(io_error)?;
         Ok(LockedBinding {
             path: directory.join(format!("{digest}.json")),
+            context: context.clone(),
             _lock: lock,
         })
     }
@@ -192,19 +211,7 @@ impl SessionService {
             .join("sessions")
             .join(&context.harness)
             .join(format!("{digest}.json"));
-        let bytes = match fs::read(path) {
-            Ok(bytes) => bytes,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => return Err(io_error(e)),
-        };
-        let value: Value = serde_json::from_slice(&bytes).map_err(io_error)?;
-        if value["version"] != 1 {
-            return Err(fail(
-                "binding_version_unsupported",
-                "Unsupported session binding version",
-            ));
-        }
-        serde_json::from_value(value).map(Some).map_err(io_error)
+        read_binding(&path, context)
     }
     pub fn activate(&self, context: &SessionContext, mode: &str) -> Result<Value, SessionError> {
         let lock = self.lock(context)?;
@@ -449,6 +456,49 @@ mod tests {
             "invalid_entry"
         );
         assert_eq!(crate::list_runs(&context.project).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn precommit_start_failures_clear_pending_and_allow_retry() {
+        let (_temp, service, context) = fixture();
+        service.activate(&context, "new").unwrap();
+        let mut args = input(&context);
+        args["workflow"] = json!("unknown-workflow");
+        assert!(service.dispatch("start", &args, None).is_err());
+        assert!(service
+            .binding(&context)
+            .unwrap()
+            .unwrap()
+            .pending_start
+            .is_none());
+        args = input(&context);
+        args["name"] = json!("");
+        assert!(service.dispatch("start", &args, None).is_err());
+        assert!(service
+            .binding(&context)
+            .unwrap()
+            .unwrap()
+            .pending_start
+            .is_none());
+        service.dispatch("start", &input(&context), None).unwrap();
+    }
+
+    #[test]
+    fn both_readers_reject_persisted_identity_mismatch() {
+        let (_temp, service, context) = fixture();
+        service.activate(&context, "new").unwrap();
+        let lock = service.lock(&context).unwrap();
+        let original = lock.read().unwrap().unwrap();
+        for field in ["harness", "sessionId"] {
+            let mut value = serde_json::to_value(&original).unwrap();
+            value[field] = json!("other");
+            fs::write(&lock.path, serde_json::to_vec(&value).unwrap()).unwrap();
+            assert_eq!(lock.read().unwrap_err().code(), "binding_corrupt");
+            assert_eq!(
+                service.binding(&context).unwrap_err().code(),
+                "binding_corrupt"
+            );
+        }
     }
 
     #[test]

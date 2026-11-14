@@ -96,12 +96,13 @@ impl HarnessAdapter for OpenCode {
         &self,
         root: &Utf8Path,
         workflows: &std::collections::BTreeMap<String, Vec<crate::AgentExport>>,
+        prune: bool,
     ) -> Result<crate::HarnessBuild> {
         let agents = crate::harness_build::merge_agents(workflows)?;
         crate::opencode_agents::check_agents(root, &agents)?;
         let mut rendered =
             crate::opencode_agents::render_agents(crate::opencode_agents::Version::V2, &agents)?;
-        let (path, text, state) = crate::mcp_install::plan_replace(root, workflows)?;
+        let (path, text, state) = crate::mcp_install::plan_replace(root, workflows, prune)?;
         if state.values().any(|servers| !servers.is_empty())
             || root.join(".unelos/opencode-mcps.json").exists()
         {
@@ -111,7 +112,8 @@ impl HarnessAdapter for OpenCode {
             ));
             rendered.push((path.strip_prefix(root).unwrap().to_owned(), text));
         }
-        let mut result = crate::harness_build::write_agents(root, ".opencode/agents", rendered)?;
+        let mut result =
+            crate::harness_build::write_agents(root, ".opencode/agents", rendered, prune)?;
         result.harnesses.push(self.id().into());
         Ok(result)
     }

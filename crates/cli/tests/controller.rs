@@ -238,4 +238,41 @@ fn session_start_is_read_only_and_recovers_bound_run() {
         .unwrap();
     assert!(text.contains(started["runId"].as_str().unwrap()));
     assert!(text.contains("next"));
+
+    let elsewhere = TempDir::new().unwrap();
+    let output = cargo_bin_cmd!("unelos")
+        .args(["hook", "claude", "session-start"])
+        .env("UNELOS_CONFIG_DIR", &config)
+        .env_remove("CLAUDE_PROJECT_DIR")
+        .write_stdin(json!({"source":"resume","session_id":"s","cwd":elsewhere.path()}).to_string())
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(output.stdout.is_empty());
+
+    let path = std::fs::read_dir(config.join("sessions/claude"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "json")
+        })
+        .unwrap();
+    let mut binding: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    binding["pendingStart"] = json!({"entryId":binding["entryId"],"at":1});
+    std::fs::write(&path, serde_json::to_vec(&binding).unwrap()).unwrap();
+    let output = run();
+    assert!(output.status.success());
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let text = value["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .unwrap();
+    assert!(text.contains("pendingStart"));
+    assert!(text.contains("/unelos-resume"));
+    assert!(text.contains("never retry start"));
+    assert!(!text.contains("__next"));
+
+    binding["enabled"] = json!(false);
+    std::fs::write(&path, serde_json::to_vec(&binding).unwrap()).unwrap();
+    assert!(run().stdout.is_empty());
 }

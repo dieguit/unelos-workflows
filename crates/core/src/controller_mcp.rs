@@ -163,6 +163,11 @@ impl SessionService {
                 match result {
                     Ok(package) => serde_json::to_value(package).map_err(|_| fail("mutation_uncertain", "Start response unavailable; explicitly reconcile with /unelos resume; never retry start"))?,
                     Err(error) => {
+                        // execution_start wraps every publish failure as mutation_uncertain.
+                        if error.code() != "mutation_uncertain" {
+                            binding.pending_start = None;
+                            lock.write(&binding)?;
+                        }
                         return Err(error);
                     }
                 }

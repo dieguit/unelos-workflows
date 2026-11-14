@@ -125,9 +125,19 @@ pub(crate) fn hook(command: &HookCommand) -> Result<(), Error> {
             let Some(binding) = service.binding(&context)?.filter(|b| b.enabled) else {
                 return Ok(());
             };
+            let project = std::fs::canonicalize(&context.project)?;
+            if project != binding.project.as_std_path() {
+                return Ok(());
+            }
+            let recovery = if binding.pending_start.is_some() {
+                "A pendingStart is unresolved. Explicitly reconcile via /unelos-resume; never retry start."
+            } else {
+                "Call mcp__plugin_unelos_unelos__next to recover."
+            };
             json!({"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":format!(
-                "Unelos controller enabled. Bound run: {}. Call mcp__plugin_unelos_unelos__next to recover.",
-                binding.run_id.as_deref().unwrap_or("(none; explicitly start or resume a run)")
+                "Unelos controller enabled. Bound run: {}. {}",
+                binding.run_id.as_deref().unwrap_or("(none; explicitly start or resume a run)"),
+                recovery
             )}})
         }
     };

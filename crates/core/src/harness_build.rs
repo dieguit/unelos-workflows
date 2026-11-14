@@ -92,6 +92,7 @@ pub fn build_harness_config(root: &Utf8Path) -> Result<HarnessBuild, InstallErro
             Err(e) => result.skipped.push(format!("{id}: {}", e.message)),
         }
     }
+    let prune = result.skipped.is_empty();
     for adapter in crate::harness::registry() {
         if !installed
             .iter()
@@ -99,7 +100,7 @@ pub fn build_harness_config(root: &Utf8Path) -> Result<HarnessBuild, InstallErro
         {
             continue;
         }
-        match adapter.build_project(root, &workflows) {
+        match adapter.build_project(root, &workflows, prune) {
             Ok(build) => {
                 result.harnesses.extend(build.harnesses);
                 result.written.extend(build.written);
@@ -159,6 +160,7 @@ pub(crate) fn write_agents(
     root: &Utf8Path,
     directory: &str,
     rendered: Vec<(Utf8PathBuf, String)>,
+    prune: bool,
 ) -> Result<HarnessBuild, InstallError> {
     let mut result = HarnessBuild::default();
     let directory = Utf8Path::new(directory);
@@ -167,7 +169,7 @@ pub(crate) fn write_agents(
         crate::check_install_path(root, path)?;
     }
     let mut stale = Vec::new();
-    if root.join(directory).exists() {
+    if prune && root.join(directory).exists() {
         for entry in fs::read_dir(root.join(directory)).map_err(error)? {
             let entry = entry.map_err(error)?;
             let name = entry

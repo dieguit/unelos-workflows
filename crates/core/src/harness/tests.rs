@@ -95,6 +95,48 @@ fn claude_install_uninstall_with_fake_cli() {
 }
 
 #[test]
+#[cfg(unix)]
+fn failed_workflow_export_preserves_existing_profiles() {
+    let _lock = ENV.lock().unwrap();
+    let temp = assert_fs::TempDir::new().unwrap();
+    let root = Utf8Path::from_path(temp.path()).unwrap();
+    let fake = fake_claude(root);
+    let _env = Env::set(&[
+        ("UNELOS_CONFIG_DIR", root.join("unelos").as_str()),
+        ("CLAUDE_CONFIG_DIR", root.join("claude").as_str()),
+        ("UNELOS_CLAUDE_BIN", fake.as_str()),
+        ("OPENCODE_CONFIG_DIR", root.join("opencode").as_str()),
+        ("HOME", root.as_str()),
+        ("PATH", root.join("empty").as_str()),
+    ]);
+    let source = root.join("source");
+    fs::write(&source, "binary").unwrap();
+    install_harness("claude", &source).unwrap();
+    crate::install_workflow(
+        root,
+        Some(
+            &Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/simple-plan-execute-review"),
+        ),
+        "simple-plan-execute-review",
+    )
+    .unwrap();
+    fs::create_dir_all(root.join(".unelos/workflows")).unwrap();
+    fs::write(root.join(".unelos/workflows/broken.yaml"), "invalid").unwrap();
+    fs::create_dir_all(root.join(".claude/agents")).unwrap();
+    let profile = root.join(".claude/agents/unelos-existing.md");
+    fs::write(&profile, "keep").unwrap();
+    let valid = root.join(".claude/agents/unelos-simple-controller.md");
+    fs::write(&valid, "outdated").unwrap();
+    let result = crate::build_harness_config(root).unwrap();
+    assert!(!result.skipped.is_empty());
+    assert!(result.removed.is_empty());
+    assert_eq!(fs::read_to_string(profile).unwrap(), "keep");
+    assert!(result.written.contains(&valid));
+    assert_ne!(fs::read_to_string(valid).unwrap(), "outdated");
+}
+
+#[test]
 fn claude_agent_model_mapping_and_mcp_list() {
     use crate::{AgentExport, AgentModel, McpServer};
     let _lock = ENV.lock().unwrap();
@@ -154,7 +196,11 @@ fn claude_agent_model_mapping_and_mcp_list() {
     ] {
         agent.model = model;
         claude::Claude
-            .build_project(root, &[("workflow".into(), vec![agent.clone()])].into())
+            .build_project(
+                root,
+                &[("workflow".into(), vec![agent.clone()])].into(),
+                true,
+            )
             .unwrap();
         let text = fs::read_to_string(&path).unwrap();
         let front: serde_json::Value =
@@ -200,7 +246,8 @@ fn adapter_write_failure_restores_existing_files() {
         vec![
             (".claude/agents/unelos-a.md".into(), "new a".into()),
             (".claude/agents/unelos-b.md".into(), "new b".into()),
-        ]
+        ],
+        true
     )
     .is_err());
     assert_eq!(

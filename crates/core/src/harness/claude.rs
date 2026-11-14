@@ -331,10 +331,12 @@ impl HarnessAdapter for Claude {
         &self,
         root: &Utf8Path,
         workflows: &BTreeMap<String, Vec<crate::AgentExport>>,
+        prune: bool,
     ) -> Result<crate::HarnessBuild> {
         let agents = crate::harness_build::merge_agents(workflows)?;
         let rendered = render_agents(&agents)?;
-        let mut result = crate::harness_build::write_agents(root, ".claude/agents", rendered)?;
+        let mut result =
+            crate::harness_build::write_agents(root, ".claude/agents", rendered, prune)?;
         result.harnesses.push(self.id().into());
         Ok(result)
     }
