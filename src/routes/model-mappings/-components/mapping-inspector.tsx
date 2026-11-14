@@ -8,7 +8,7 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import type { HarnessModels } from "../-hooks/use-harness-models"
+import type { HarnessModels } from "@/hooks/use-harness-models"
 import type { Harness } from "@/lib/harnesses"
 import {
   Field,
@@ -17,7 +17,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import type { MappingForm } from "../-hooks/use-mapping-form"
-import { ModelPicker } from "./model-picker"
+import { ModelPicker } from "@/components/model-picker"
 
 export function MappingInspector({
   harnesses,

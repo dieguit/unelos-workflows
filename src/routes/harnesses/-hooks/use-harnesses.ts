@@ -1,7 +1,9 @@
 import { useState } from "react"
 import { toast } from "sonner"
 import { useRouteContext } from "@tanstack/react-router"
-import { autoBuildHarness } from "@/lib/projects"
+import { autoBuildHarness, listAgents } from "@/lib/projects"
+import { listModelMappings } from "@/lib/model-mappings"
+import { missingAliases, type MissingAlias } from "../-lib/missing-mappings"
 import {
   installHarness,
   listHarnesses,
@@ -23,6 +25,25 @@ export function useHarnesses(initial: Harness[]) {
   const [pending, setPending] = useState<Record<string, HarnessAction>>({})
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [scanning, setScanning] = useState(false)
+  const [mapping, setMapping] = useState<{ harness: Harness; action: HarnessAction; rows: MissingAlias[] }>()
+
+  const build = async (action: HarnessAction) => {
+    if (!project) return
+    try {
+      await autoBuildHarness(project.path)
+    } catch (e) {
+      toast.error(`Harness ${action} succeeded, but harness config build failed: ${String(e)}`)
+    }
+  }
+
+  const missingFor = async (h: Harness) => {
+    try {
+      const agents = project ? await listAgents(project.path).catch(() => null) : null
+      return missingAliases(await listModelMappings(), h.id, agents)
+    } catch {
+      return []
+    }
+  }
 
   const run = async (h: Harness, action: HarnessAction) => {
     setPending((p) => ({ ...p, [h.id]: action }))
@@ -31,13 +52,10 @@ export function useHarnesses(initial: Harness[]) {
       setHarnesses(
         await (action === "uninstall" ? uninstallHarness : installHarness)(h.id)
       )
-      if (project) {
-        try {
-          await autoBuildHarness(project.path)
-        } catch (e) {
-          toast.error(`Harness ${action} succeeded, but harness config build failed: ${String(e)}`)
-        }
-      }
+      const rows = action === "uninstall" ? [] : await missingFor(h)
+      // Build waits for the dialog so the new mappings are included.
+      if (rows.length) setMapping({ harness: h, action, rows })
+      else await build(action)
     } catch (e) {
       setErrors((r) => ({
         ...r,
@@ -60,5 +78,11 @@ export function useHarnesses(initial: Harness[]) {
     }
   }
 
-  return { harnesses, pending, errors, scanning, run, rescan }
+  const closeMapping = async () => {
+    const m = mapping
+    setMapping(undefined)
+    if (m) await build(m.action)
+  }
+
+  return { harnesses, pending, errors, scanning, run, rescan, mapping, closeMapping }
 }

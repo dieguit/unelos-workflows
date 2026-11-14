@@ -12,13 +12,14 @@ import {
   deleteModelMapping,
   listModelMappings,
   saveModelMapping,
+  usedBy,
 } from "@/lib/model-mappings"
 import { autoBuildHarness, listAgents } from "@/lib/projects"
 import { listHarnesses, sortHarnesses } from "@/lib/harnesses"
 import { MappingInspector } from "./-components/mapping-inspector"
 import { MappingsTable } from "./-components/mappings-table"
-import { useHarnessModels } from "./-hooks/use-harness-models"
-import { filterMappings, usedBy } from "./-lib/model-mappings-list"
+import { useHarnessModels } from "@/hooks/use-harness-models"
+import { filterMappings } from "./-lib/model-mappings-list"
 import { useMappingForm } from "./-hooks/use-mapping-form"
 import { useDiscardChanges } from "@/hooks/use-discard-changes"
 import { useProjectDiscardGuard } from "@/hooks/use-project-discard-guard"

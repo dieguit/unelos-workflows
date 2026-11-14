@@ -1,4 +1,5 @@
 import * as mod from "@/routes/model-mappings/-lib/model-mappings-list"
+import { usedBy, usedByLabel } from "@/lib/model-mappings"
 import { expect, test } from "vitest"
 
 
@@ -30,8 +31,8 @@ test("usedBy is null without a project", () => {
     { name: "Planner", model: "smart", skills: [], mcps: [], problem: null },
     { name: "Eng", model: "fast", skills: [], mcps: [], problem: null },
   ]
-  expect(mod.usedBy(agents, "smart")).toEqual(["Planner"])
-  expect(mod.usedBy(null, "smart")).toBe(null)
-  expect(mod.usedByLabel(null)).toBe("—")
-  expect(mod.usedByLabel(["a", "b"])).toBe("2 agents")
+  expect(usedBy(agents, "smart")).toEqual(["Planner"])
+  expect(usedBy(null, "smart")).toBe(null)
+  expect(usedByLabel(null)).toBe("—")
+  expect(usedByLabel(["a", "b"])).toBe("2 agents")
 })

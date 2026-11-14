@@ -20,7 +20,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
-import type { HarnessModels } from "../-hooks/use-harness-models"
+import type { HarnessModels } from "@/hooks/use-harness-models"
 
 export function ModelPicker({
   id,
@@ -31,6 +31,7 @@ export function ModelPicker({
   onChange,
   invalid,
   errorId,
+  neutral,
 }: {
   id: string
   label: string
@@ -40,6 +41,8 @@ export function ModelPicker({
   onChange: (model: string) => void
   invalid?: boolean
   errorId?: string
+  /** Empty value is fine: no warning style. */
+  neutral?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const listRef = useRef<HTMLDivElement>(null)
@@ -66,6 +69,7 @@ export function ModelPicker({
             className={cn(
               "h-9 w-full justify-start gap-2 px-2.5 font-normal",
               !value &&
+                !neutral &&
                 "border-warning bg-warning-muted/40 text-muted-foreground hover:bg-warning-muted/60"
             )}
           />
@@ -73,7 +77,7 @@ export function ModelPicker({
       >
         {value ? (
           <CpuIcon aria-hidden="true" className="text-muted-foreground" />
-        ) : (
+        ) : neutral ? null : (
           <TriangleAlertIcon aria-hidden="true" className="text-warning" />
         )}
         <span

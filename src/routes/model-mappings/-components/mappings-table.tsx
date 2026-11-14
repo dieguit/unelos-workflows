@@ -15,14 +15,10 @@ import {
   ListRow,
   ListTable,
 } from "@/components/list-table"
-import type { ModelMappings } from "@/lib/model-mappings"
+import { usedBy, usedByLabel, type ModelMappings } from "@/lib/model-mappings"
 import type { Harness } from "@/lib/harnesses"
 import type { AgentSummary } from "@/lib/projects"
-import {
-  filterMappings,
-  usedBy,
-  usedByLabel,
-} from "../-lib/model-mappings-list"
+import { filterMappings } from "../-lib/model-mappings-list"
 
 function HarnessChip({ name, model }: { name: string; model?: string }) {
   return model ? (
