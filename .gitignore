@@ -30,5 +30,7 @@ dist-ssr
 # AI artifacts
 docs/superpowers/
 docs/ignored/
+.unelos/runs/
 .superpowers/
 .playwright-mcp/
+.slim/
