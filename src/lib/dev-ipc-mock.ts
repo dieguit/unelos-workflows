@@ -156,7 +156,7 @@ function authoringFor(root: string) {
 }
 
 const harness = (id: string, name: string, version: string | null = null): Harness => ({
-  id, name, installable: id === "opencode", detected: version !== null, installed: false, updateAvailable: false,
+  id, name, installable: id === "opencode" || id === "claude", detected: version !== null, installed: false, updateAvailable: false,
   version, integrationVersion: null, binary: version ? `${home}/.local/bin/${id}` : null, configDir: version ? `${home}/.config/${id}` : null,
 })
 const harnesses: Harness[] = [
@@ -409,6 +409,7 @@ export function installDevIpcMock() {
       }
       case "harness_models":
         await new Promise((resolve) => setTimeout(resolve, 350))
+        if ((args as { id: string }).id === "claude") return ["opus", "sonnet", "haiku"]
         if ((args as { id: string }).id !== "opencode") throw "Harness models unavailable"
         return Object.entries(harnessModels).flatMap(([provider, models]) => models.map((model) => `${provider}/${model}`)).sort()
       case "project_state":
@@ -505,7 +506,7 @@ export function installDevIpcMock() {
           harnesses: [
             { id: "opencode", name: "OpenCode", models: Object.entries(harnessModels).flatMap(([provider, models]) => models.map((model) => `${provider}/${model}`)), error: null },
             { id: "codex", name: "Codex", models: ["gpt-5", "gpt-5-mini"], error: null },
-            { id: "claude", name: "Claude Code", models: [], error: "Model listing unavailable" },
+            { id: "claude", name: "Claude Code", models: ["opus", "sonnet", "haiku"], error: null },
           ],
         }
       case "list_skills": {

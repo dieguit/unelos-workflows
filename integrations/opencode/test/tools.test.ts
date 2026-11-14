@@ -11,14 +11,15 @@ test('MCP registration, trusted context replacement and session activation',asyn
   t.onTestFinished(()=>rmSync(project,{recursive:true,force:true}));
   const binary=join(project,'cli.cjs');
   writeFileSync(binary,'#!/usr/bin/env node\nconsole.log(JSON.stringify({argv:process.argv.slice(2),controllerInstructions:"core",harnessInstructions:"adapter"}));',{mode:0o755});
-  let hook:any,command:any,registration:unknown,prompt:any;
+  type Call=(input:unknown)=>Promise<void>;
+  let hook!:Call,command!:{execute:Call},registration:unknown,prompt!:{text:string;delivery?:string};
   const session={id:'ses_main',location:{directory:project},parentID:null as string|null};
   await plugin.setup({
     options:{binary},
-    mcp:{transform:async(fn:any)=>fn({set:(name:string,value:unknown)=>{registration={name,value};}})},
-    tool:{hook:async(name:string,fn:any)=>{assert.equal(name,'execute.before');hook=fn;}},
-    session:{get:async()=>session,prompt:async(value:unknown)=>{prompt=value;}},
-    command:{transform:async(fn:any)=>fn({add:(value:unknown)=>{command=value;}})},
+    mcp:{transform:async(fn:(editor:unknown)=>void)=>fn({set:(name:string,value:unknown)=>{registration={name,value};}})},
+    tool:{hook:async(name:string,fn:Call)=>{assert.equal(name,'execute.before');hook=fn;}},
+    session:{get:async()=>session,prompt:async(value:typeof prompt)=>{prompt=value;}},
+    command:{transform:async(fn:(editor:unknown)=>void)=>fn({add:(value:typeof command)=>{command=value;}})},
   } as unknown as Plugin.Context);
   assert.deepEqual(registration,{name:'unelos',value:{type:'local',command:[binary,'mcp']}});
   for(const parentID of [null,'ses_parent']){

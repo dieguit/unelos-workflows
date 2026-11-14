@@ -11,9 +11,18 @@ test("aliasError accepts lowercase dotted/dashed names only", () => {
 
 test("filterMappings sorts and matches alias or model", () => {
   const m = { smart: { opencode: "anthropic/x" }, fast: { opencode: "openai/y" }, deep: {} }
-  expect(mod.filterMappings(m, "")).toEqual(["deep", "fast", "smart"])
-  expect(mod.filterMappings(m, "OPENAI")).toEqual(["fast"])
-  expect(mod.filterMappings(m, "dee")).toEqual(["deep"])
+  const harnesses = [{ id: "opencode" }]
+  expect(mod.filterMappings(m, "", harnesses)).toEqual(["deep", "fast", "smart"])
+  expect(mod.filterMappings(m, "OPENAI", harnesses)).toEqual(["fast"])
+  expect(mod.filterMappings(m, "dee", harnesses)).toEqual(["deep"])
+})
+
+test("filterMappings searches installed harnesses only, including Claude", () => {
+  const mappings = { smart: { claude: "sonnet", opencode: "provider/hidden" } }
+  expect(mod.filterMappings(mappings, "sonnet", [{ id: "claude" }])).toEqual(["smart"])
+  expect(mod.filterMappings(mappings, "hidden", [{ id: "claude" }])).toEqual([])
+  expect(mod.filterMappings(mappings, "", [])).toEqual(["smart"])
+  expect(mod.filterMappings(mappings, "sonnet", [])).toEqual([])
 })
 
 test("usedBy is null without a project", () => {

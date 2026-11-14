@@ -43,8 +43,6 @@ export function HarnessBuildSettings({
           ? "Harness config up to date"
           : `Harness config built: ${r.written.length} written, ${r.removed.length} removed`
       )
-      if (r.skipped.length)
-        toast.warning(`Skipped invalid workflows: ${r.skipped.join("; ")}`)
     } catch (e) {
       toast.error(`Harness config build failed: ${String(e)}`)
     } finally {

@@ -1,5 +1,7 @@
 import { useState } from "react"
 import { toast } from "sonner"
+import { useRouteContext } from "@tanstack/react-router"
+import { autoBuildHarness } from "@/lib/projects"
 import {
   installHarness,
   listHarnesses,
@@ -16,6 +18,7 @@ const without = <T>(record: Record<string, T>, key: string) => {
 }
 
 export function useHarnesses(initial: Harness[]) {
+  const { project } = useRouteContext({ from: "__root__" })
   const [harnesses, setHarnesses] = useState(initial)
   const [pending, setPending] = useState<Record<string, HarnessAction>>({})
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -28,6 +31,13 @@ export function useHarnesses(initial: Harness[]) {
       setHarnesses(
         await (action === "uninstall" ? uninstallHarness : installHarness)(h.id)
       )
+      if (project) {
+        try {
+          await autoBuildHarness(project.path)
+        } catch (e) {
+          toast.error(`Harness ${action} succeeded, but harness config build failed: ${String(e)}`)
+        }
+      }
     } catch (e) {
       setErrors((r) => ({
         ...r,

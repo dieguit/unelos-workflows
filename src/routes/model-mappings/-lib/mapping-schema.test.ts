@@ -2,6 +2,8 @@ import { expect, test } from "vitest"
 import { mappingSchema as mapping } from "./mapping-schema"
 
 test("Mappings validate aliases and model strings, not missing harness mappings", () => {
+  for (const claude of ["sonnet", "claude-sonnet-4-5"])
+    expect(mapping.safeParse({ alias: "smart", models: { claude } }).success).toBe(true)
   expect(mapping.safeParse({ alias: "fast.v2_test", models: {} }).success).toBeTruthy()
   expect(mapping.safeParse({
       alias: "fast",

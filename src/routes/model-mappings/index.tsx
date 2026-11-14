@@ -13,7 +13,8 @@ import {
   listModelMappings,
   saveModelMapping,
 } from "@/lib/model-mappings"
-import { listAgents } from "@/lib/projects"
+import { autoBuildHarness, listAgents } from "@/lib/projects"
+import { listHarnesses, sortHarnesses } from "@/lib/harnesses"
 import { MappingInspector } from "./-components/mapping-inspector"
 import { MappingsTable } from "./-components/mappings-table"
 import { useHarnessModels } from "./-hooks/use-harness-models"
@@ -26,6 +27,7 @@ export const Route = createFileRoute("/model-mappings/")({
   validateSearch: z.object({ alias: z.string().optional().catch(undefined) }),
   loader: async ({ context }) => ({
     mappings: await listModelMappings(),
+    harnesses: sortHarnesses((await listHarnesses()).filter((h) => h.installed)),
     // "Used by" is per open project; a failed agent scan shouldn't hide the page.
     agents: context.project
       ? await listAgents(context.project.path).catch(() => null)
@@ -54,7 +56,7 @@ function Header({ action }: { action?: ReactNode }) {
 function ModelMappingsHome() {
   const loaded = Route.useLoaderData()
   const [mappings, setMappings] = useState(loaded.mappings)
-  const { agents } = loaded
+  const { agents, harnesses } = loaded
   const [query, setQuery] = useState("")
   const search = useRef<HTMLInputElement>(null)
   const { alias } = Route.useSearch()
@@ -66,6 +68,13 @@ function ModelMappingsHome() {
   const [error, setError] = useState<string>()
   const [deleting, setDeleting] = useState(false)
   const discard = useDiscardChanges()
+  const { project } = Route.useRouteContext()
+  // Mappings are global; regenerate the open project's harness files so a fixed mapping takes effect.
+  const rebuild = () =>
+    project &&
+    autoBuildHarness(project.path).catch((e) =>
+      toast.error(`Saved, but harness config build failed: ${String(e)}`)
+    )
   const form = useMappingForm(
     {
       alias: creating ? "" : (selected ?? ""),
@@ -90,6 +99,7 @@ function ModelMappingsHome() {
           draft.models
         )
         setMappings(saved)
+        void rebuild()
         if (creating || draft.alias !== selected) {
           setCreating(false)
           void navigate({ search: { alias: draft.alias }, ignoreBlocker: true })
@@ -156,12 +166,13 @@ function ModelMappingsHome() {
               noun="alias"
               value={query}
               onChange={setQuery}
-              shown={filterMappings(mappings, query).length}
+              shown={filterMappings(mappings, query, harnesses).length}
               total={total}
               inputRef={search}
             />
           ) : null}
           <MappingsTable
+            harnesses={harnesses}
             mappings={mappings}
             agents={agents}
             query={query}
@@ -177,6 +188,7 @@ function ModelMappingsHome() {
       </div>
       {creating || selected ? (
         <MappingInspector
+          harnesses={harnesses}
           key={creating ? "\0new" : selected}
           original={creating ? null : selected!}
           form={form}
@@ -192,6 +204,7 @@ function ModelMappingsHome() {
             setError(undefined)
             try {
               setMappings(await deleteModelMapping(selected!))
+              void rebuild()
               toast.success(`Deleted ${selected}`)
               setCreating(false)
               void navigate({ search: {}, ignoreBlocker: true })

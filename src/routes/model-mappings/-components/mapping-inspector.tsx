@@ -9,7 +9,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { HarnessModels } from "../-hooks/use-harness-models"
-import { HARNESSES } from "../-lib/model-mappings-list"
+import type { Harness } from "@/lib/harnesses"
 import {
   Field,
   FieldError,
@@ -20,6 +20,7 @@ import type { MappingForm } from "../-hooks/use-mapping-form"
 import { ModelPicker } from "./model-picker"
 
 export function MappingInspector({
+  harnesses,
   original,
   form,
   dirty,
@@ -31,6 +32,7 @@ export function MappingInspector({
   onDelete,
   onClose,
 }: {
+  harnesses: Harness[]
   /** null while creating a new alias */
   original: string | null
   form: MappingForm
@@ -182,7 +184,7 @@ export function MappingInspector({
                   Each alias needs a model for every harness that runs it.
                 </p>
               </div>
-              {HARNESSES.map((h) => {
+              {harnesses.map((h) => {
                 return (
                   <form.Field name={`models.${h.id}`} key={h.id}>
                     {(field) => (

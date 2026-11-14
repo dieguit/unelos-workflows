@@ -16,9 +16,9 @@ import {
   ListTable,
 } from "@/components/list-table"
 import type { ModelMappings } from "@/lib/model-mappings"
+import type { Harness } from "@/lib/harnesses"
 import type { AgentSummary } from "@/lib/projects"
 import {
-  HARNESSES,
   filterMappings,
   usedBy,
   usedByLabel,
@@ -43,6 +43,7 @@ function HarnessChip({ name, model }: { name: string; model?: string }) {
 }
 
 export function MappingsTable({
+  harnesses,
   mappings,
   agents,
   query,
@@ -51,6 +52,7 @@ export function MappingsTable({
   selected,
   onSelect,
 }: {
+  harnesses: Harness[]
   mappings: ModelMappings
   agents: AgentSummary[] | null
   query: string
@@ -59,7 +61,7 @@ export function MappingsTable({
   selected?: string
   onSelect: (alias: string) => void
 }) {
-  const shown = filterMappings(mappings, query)
+  const shown = filterMappings(mappings, query, harnesses)
   if (Object.keys(mappings).length === 0)
     return (
       <EmptyState
@@ -114,7 +116,7 @@ export function MappingsTable({
             </ListCell>
             <ListCell>
               <span className="flex flex-wrap gap-1">
-                {HARNESSES.map((h) => (
+                {harnesses.map((h) => (
                   <HarnessChip
                     key={h.id}
                     name={h.name}

@@ -23,7 +23,7 @@ export function callCli(binary:string,project:string,argv:string[]):Promise<CliR
           try {
             const error=(JSON.parse(line) as Partial<CliError>|null)?.error;
             if(typeof error?.code==='string'&&typeof error.message==='string'){reject(fail(error.code,error.message));return;}
-          }catch{}
+          }catch{ /* Non-JSON stderr lines are diagnostics, not structured CLI errors. */ }
         }
         reject(fail('cli_failed','Unelos CLI failed'));return;
       }

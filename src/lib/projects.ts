@@ -191,8 +191,13 @@ export type ProjectSettings = { autoBuildHarness: boolean | null }
 export type HarnessBuild = { harnesses: string[]; written: string[]; removed: string[]; skipped: string[] }
 export const getProjectSettings = (root: string) => trackedInvoke<ProjectSettings>("get_project_settings", { root })
 export const saveProjectSettings = (root: string, settings: ProjectSettings) => trackedInvoke<void>("save_project_settings", { root, settings })
-export const buildHarnessConfig = (root: string) => trackedInvoke<HarnessBuild>("build_harness_config", { root })
-export const autoBuildHarness = (root: string) => trackedInvoke<HarnessBuild | null>("auto_build_harness", { root })
+const warnSkipped = <T extends HarnessBuild | null>(result: T): T => {
+  if (result?.skipped.length)
+    toast.warning(`Harness config skipped: ${result.skipped.join("; ")}. Check Model mappings for missing models.`)
+  return result
+}
+export const buildHarnessConfig = (root: string) => trackedInvoke<HarnessBuild>("build_harness_config", { root }).then(warnSkipped)
+export const autoBuildHarness = (root: string) => trackedInvoke<HarnessBuild | null>("auto_build_harness", { root }).then(warnSkipped)
 
 /** Rebuilds harness files after a successful save; a failed build must not fail the save. */
 const withBuild =
