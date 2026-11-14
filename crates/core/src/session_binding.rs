@@ -272,7 +272,8 @@ mod tests {
 
     fn fixture() -> (tempfile::TempDir, SessionService, SessionContext) {
         let temp = tempfile::tempdir().unwrap();
-        let root = Utf8Path::from_path(temp.path()).unwrap().to_owned();
+        // Bindings canonicalize the project (macOS temp dirs live behind /var -> /private/var).
+        let root = canonical(Utf8Path::from_path(temp.path()).unwrap()).unwrap();
         crate::install_workflow(
             &root,
             Some(

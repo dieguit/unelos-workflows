@@ -36,7 +36,8 @@ esac
 fn claude_install_uninstall_with_fake_cli() {
     let _lock = ENV.lock().unwrap();
     let temp = assert_fs::TempDir::new().unwrap();
-    let root = Utf8Path::from_path(temp.path()).unwrap();
+    // The provisioned binary path is canonical (macOS temp dirs live behind /var -> /private/var).
+    let root = &Utf8PathBuf::from_path_buf(fs::canonicalize(temp.path()).unwrap()).unwrap();
     let fake = fake_claude(root);
     let _env = Env::set(&[
         ("UNELOS_CONFIG_DIR", root.join("unelos").as_str()),
