@@ -135,7 +135,7 @@ fn resolve_model(model: &crate::AgentModel) -> Result<Option<String>> {
         crate::AgentModel::Alias(alias) => crate::list_model_mappings()?
             .get(alias)
             .and_then(|models| models.get("claude"))
-            .cloned()
+            .map(|mapped| mapped.model.clone())
             .map(Some)
             .ok_or_else(|| {
                 error(

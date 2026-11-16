@@ -2,9 +2,59 @@ use crate::{
     global_config::{atomic_write, config_dir, error, io_error},
     InstallError,
 };
+use serde::{Deserialize, Deserializer, Serialize};
 use std::{collections::BTreeMap, fs};
 
-pub type ModelMappings = BTreeMap<String, BTreeMap<String, String>>;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MappedModel {
+    pub model: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+}
+
+impl From<&str> for MappedModel {
+    fn from(value: &str) -> Self {
+        let (model, effort) = match value.split_once('#') {
+            Some((model, effort)) => (model, Some(effort.to_owned())),
+            None => (value, None),
+        };
+        Self {
+            model: model.to_owned(),
+            effort,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for MappedModel {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            model: String,
+            effort: Option<String>,
+        }
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Wire {
+            Legacy(String),
+            Object(Fields),
+        }
+        Ok(match Wire::deserialize(deserializer)? {
+            Wire::Legacy(value) => Self::from(value.as_str()),
+            Wire::Object(fields) => Self {
+                model: fields.model,
+                effort: fields.effort,
+            },
+        })
+    }
+}
+
+pub type ModelMappings = BTreeMap<String, BTreeMap<String, MappedModel>>;
+
+pub(crate) fn valid_effort(effort: &str) -> bool {
+    !effort.is_empty() && !effort.chars().any(|c| c.is_whitespace() || c == '#')
+}
 
 pub fn list_model_mappings() -> Result<ModelMappings, InstallError> {
     match fs::read(config_dir()?.join("models.json")) {
@@ -30,7 +80,7 @@ fn write(mappings: ModelMappings) -> Result<ModelMappings, InstallError> {
 pub fn save_model_mapping(
     original: Option<&str>,
     alias: &str,
-    mut models: BTreeMap<String, String>,
+    mut models: BTreeMap<String, MappedModel>,
 ) -> Result<ModelMappings, InstallError> {
     if !alias.split(['-', '_', '.']).all(|part| {
         !part.is_empty()
@@ -43,12 +93,30 @@ pub fn save_model_mapping(
             "Alias must be lowercase letters and digits separated by -, _ or .",
         ));
     }
-    models.retain(|_, model| !model.is_empty());
+    models.retain(|_, model| !model.model.is_empty());
     if models
         .values()
-        .any(|model| model.chars().any(char::is_whitespace))
+        .any(|model| model.model.chars().any(|c| c.is_whitespace() || c == '#'))
     {
-        return Err(error("invalid_model", "Model must not contain whitespace"));
+        return Err(error(
+            "invalid_model",
+            "Model must not contain whitespace or #",
+        ));
+    }
+    for model in models.values_mut() {
+        if model.effort.as_deref() == Some("") {
+            model.effort = None;
+        }
+        if model
+            .effort
+            .as_deref()
+            .is_some_and(|effort| !valid_effort(effort))
+        {
+            return Err(error(
+                "invalid_effort",
+                "Effort must not contain whitespace or #",
+            ));
+        }
     }
     let mut mappings = list_model_mappings()?;
     if let Some(original) = original {

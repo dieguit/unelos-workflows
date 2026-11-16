@@ -7,7 +7,7 @@ pub(crate) fn resolve_agent_model(model: &crate::AgentModel) -> Result<String> {
         crate::AgentModel::Alias(alias) => crate::list_model_mappings()?
             .get(alias)
             .and_then(|models| models.get("opencode"))
-            .cloned()
+            .map(|mapped| mapped.model.clone())
             .ok_or_else(|| {
                 error(
                     "unmapped_model_alias",

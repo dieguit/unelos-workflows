@@ -424,6 +424,66 @@ fn model_mapping_lifecycle() {
     let saved = save_model_mapping(None, "smart", models.clone()).unwrap();
     assert_eq!(saved["smart"].len(), 1);
     assert_eq!(list_model_mappings().unwrap(), saved);
+    let json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(root.join("models.json")).unwrap()).unwrap();
+    assert!(json["smart"]["opencode"].get("effort").is_none());
+    for effort in ["a b", "x#y"] {
+        let err = save_model_mapping(
+            Some("smart"),
+            "smart",
+            BTreeMap::from([(
+                "opencode".into(),
+                crate::MappedModel {
+                    model: "p/m".into(),
+                    effort: Some(effort.into()),
+                },
+            )]),
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "invalid_effort");
+    }
+    assert_eq!(
+        save_model_mapping(
+            Some("smart"),
+            "smart",
+            BTreeMap::from([(
+                "opencode".into(),
+                crate::MappedModel {
+                    model: "p/m#high".into(),
+                    effort: None
+                }
+            )])
+        )
+        .unwrap_err()
+        .code,
+        "invalid_model"
+    );
+    let normalized = save_model_mapping(
+        Some("smart"),
+        "smart",
+        BTreeMap::from([(
+            "opencode".into(),
+            crate::MappedModel {
+                model: "p/m".into(),
+                effort: Some("".into()),
+            },
+        )]),
+    )
+    .unwrap();
+    assert_eq!(normalized["smart"]["opencode"].effort, None);
+    for claude in ["opus", "sonnet"] {
+        let updated = save_model_mapping(
+            Some("smart"),
+            "smart",
+            BTreeMap::from([
+                ("opencode".into(), crate::MappedModel::from("p/m#high")),
+                ("claude".into(), claude.into()),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(updated["smart"]["opencode"].effort.as_deref(), Some("high"));
+    }
+    save_model_mapping(Some("smart"), "smart", models.clone()).unwrap();
     assert!(save_model_mapping(None, "smart", models.clone()).is_err());
     assert!(save_model_mapping(Some("missing"), "new", models.clone()).is_err());
     for invalid in [
@@ -462,6 +522,33 @@ fn model_mapping_lifecycle() {
         fs::read_to_string(root.join("models.json")).unwrap(),
         "not json"
     );
+}
+
+#[test]
+fn legacy_model_mappings_load() {
+    let _lock = ENV.lock().unwrap();
+    let temp = assert_fs::TempDir::new().unwrap();
+    let root = Utf8Path::from_path(temp.path()).unwrap();
+    let _env = Env::set(&[("UNELOS_CONFIG_DIR", root.as_str())]);
+    let bytes = br#"{"smart":{"opencode":"p/m#high","claude":"opus"},"fast":{"claude":{"model":"haiku","effort":"low"}}}"#;
+    fs::write(root.join("models.json"), bytes).unwrap();
+    let mappings = crate::list_model_mappings().unwrap();
+    assert_eq!(
+        mappings["smart"]["opencode"],
+        crate::MappedModel {
+            model: "p/m".into(),
+            effort: Some("high".into())
+        }
+    );
+    assert_eq!(
+        mappings["smart"]["claude"],
+        crate::MappedModel {
+            model: "opus".into(),
+            effort: None
+        }
+    );
+    assert_eq!(mappings["fast"]["claude"].effort.as_deref(), Some("low"));
+    assert_eq!(fs::read(root.join("models.json")).unwrap(), bytes);
 }
 
 #[test]

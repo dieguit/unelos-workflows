@@ -21,7 +21,7 @@ pub async fn list_model_mappings() -> Result<ModelMappings, String> {
 pub async fn save_model_mapping(
     original: Option<String>,
     alias: String,
-    models: BTreeMap<String, String>,
+    models: BTreeMap<String, unelos_core::MappedModel>,
 ) -> Result<ModelMappings, String> {
     tauri::async_runtime::spawn_blocking(move || {
         unelos_core::save_model_mapping(original.as_deref(), &alias, models)
