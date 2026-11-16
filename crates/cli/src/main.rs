@@ -17,6 +17,7 @@ mod init;
 mod opencode;
 mod runtime_output;
 mod session;
+mod uninstall;
 
 #[derive(Parser)]
 #[command(name = "unelos", version, about = "Unelos command-line tool")]
@@ -51,6 +52,11 @@ enum Command {
     },
     /// Initialize the project scaffold (integrations are installed globally).
     Init,
+    /// Remove project-local Unelos data and generated agents.
+    Uninstall {
+        #[arg(long)]
+        yes: bool,
+    },
     /// Detect harnesses and manage global integrations.
     Harness {
         #[command(subcommand)]
@@ -335,6 +341,10 @@ fn run(cli: &Cli) -> Result<(), Error> {
         Command::Init => {
             let value = init::initialize(&cli.project)?;
             emit(&value, cli.json, value["message"].as_str().unwrap().into())?;
+        }
+        Command::Uninstall { yes } => {
+            let value = uninstall::uninstall(&cli.project, *yes, cli.json)?;
+            emit(&value, cli.json, serde_json::to_string_pretty(&value)?)?;
         }
         Command::Install {
             workflow,
