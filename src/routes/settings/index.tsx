@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { PageHeader } from "@/components/page-header"
 import { getProjectSettings, requireProject } from "@/lib/projects"
 import { HarnessBuildSettings } from "./-components/harness-build-settings"
+import { UninstallProject } from "./-components/uninstall-project"
 
 export const Route = createFileRoute("/settings/")({
   beforeLoad: requireProject,
@@ -22,6 +23,7 @@ function SettingsHome() {
         description="Options for this project."
       />
       <HarnessBuildSettings key={root} root={root} initial={settings} />
+      <UninstallProject key={`uninstall-${root}`} root={root} />
     </div>
   )
 }

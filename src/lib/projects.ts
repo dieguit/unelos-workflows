@@ -99,6 +99,8 @@ export type SkillSaveResult = {
 }
 
 export const getProjectState = () => trackedInvoke<ProjectState>("project_state")
+export const uninstallProject = (root: string) =>
+  trackedInvoke<ProjectState>("uninstall_project", { root })
 const rawDuplicateAgent = (root: string, id: string, newId: string) => trackedInvoke<void>("duplicate_agent", { root, id, newId })
 export const duplicateSkill = (root: string, id: string, newId: string) => trackedInvoke<void>("duplicate_skill", { root, id, newId })
 const rawDuplicateWorkflow = (root: string, id: string, newId: string) => trackedInvoke<void>("duplicate_workflow", { root, id, newId })

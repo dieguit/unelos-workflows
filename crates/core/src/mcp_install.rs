@@ -74,6 +74,65 @@ pub(crate) fn plan_replace(
     plan_state(root, Some(state), None, prune)
 }
 
+pub(crate) fn plan_project_uninstall(
+    root: &Utf8Path,
+) -> Result<Option<(Utf8PathBuf, String)>, InstallError> {
+    check_uninstall_file(root, STATE)?;
+    let state: Workflows = match fs::read_to_string(root.join(STATE)) {
+        Ok(text) => serde_json::from_str(&text).map_err(|e| error("invalid_mcp_state", e))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(error("install_io_failed", format!("{STATE}: {e}"))),
+    };
+    let mut previous = projection(&state)?;
+    if state.values().all(BTreeMap::is_empty) {
+        return Ok(None);
+    }
+    for file in ["opencode.json", "opencode.jsonc"] {
+        check_uninstall_file(root, file)?;
+    }
+    let json = root.join("opencode.json");
+    let jsonc = root.join("opencode.jsonc");
+    if json.exists() && jsonc.exists() {
+        return Err(error(
+            "ambiguous_opencode_config",
+            "Both OpenCode configs exist",
+        ));
+    }
+    let path = if jsonc.exists() { jsonc } else { json };
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(error("install_io_failed", format!("{path}: {e}"))),
+    };
+    let empty = json!({"mcp": {}, "tools": {}});
+    crate::harness::jsonc::mcp_text(&text, &empty, &empty)?;
+    let document = jsonc_parser::cst::CstRootNode::parse(&text, &Default::default())
+        .map_err(|e| error("invalid_opencode_config", e))?;
+    let current = document.object_value().unwrap().to_serde_value().unwrap();
+    for section in ["mcp", "tools"] {
+        previous[section]
+            .as_object_mut()
+            .unwrap()
+            .retain(|key, value| current[section].get(key) == Some(value));
+    }
+    let edited = crate::harness::jsonc::mcp_text(&text, &previous, &empty)?;
+    Ok((edited != text).then_some((path, edited)))
+}
+
+fn check_uninstall_file(root: &Utf8Path, relative: &str) -> Result<(), InstallError> {
+    crate::check_install_path(root, Utf8Path::new(relative))?;
+    let path = root.join(relative);
+    match fs::symlink_metadata(&path) {
+        Ok(meta) if meta.is_file() => Ok(()),
+        Ok(_) => Err(error(
+            "invalid_path",
+            format!("Expected ordinary file: {path}"),
+        )),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(error("install_io_failed", format!("{path}: {e}"))),
+    }
+}
+
 fn plan_state(
     root: &Utf8Path,
     replacement: Option<Workflows>,
