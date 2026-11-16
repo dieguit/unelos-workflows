@@ -498,7 +498,7 @@ fn opencode_renders_effort_v1_v2() {
             effort,
         );
         for version in [Version::V1, Version::V2] {
-            let rendered = render_agents(version, &[agent.clone()]).unwrap();
+            let rendered = render_agents(version, std::slice::from_ref(&agent)).unwrap();
             let front: serde_json::Value =
                 serde_yaml_ng::from_str(rendered[0].1.split("---").nth(1).unwrap()).unwrap();
             let (base, variant) = expected
@@ -531,7 +531,7 @@ fn opencode_renders_effort_v1_v2() {
             Some(effort),
         );
         assert_eq!(
-            render_agents(Version::V2, &[agent.clone()])
+            render_agents(Version::V2, std::slice::from_ref(&agent))
                 .unwrap_err()
                 .code,
             "invalid_model"
