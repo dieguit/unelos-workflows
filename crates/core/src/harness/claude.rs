@@ -222,7 +222,7 @@ impl HarnessAdapter for Claude {
         true
     }
     fn list_models(&self) -> Result<Vec<ModelInfo>> {
-        Ok(["opus", "sonnet", "haiku"]
+        Ok(["fable", "opus", "sonnet", "haiku"]
             .map(|id| ModelInfo {
                 id: id.into(),
                 efforts: CLAUDE_EFFORTS.map(str::to_owned).into(),

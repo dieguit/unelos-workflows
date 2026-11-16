@@ -222,7 +222,7 @@ fn claude_agent_model_mapping_and_mcp_list() {
     }
     assert_eq!(
         claude::Claude.list_models().unwrap(),
-        ["opus", "sonnet", "haiku"].map(|id| ModelInfo {
+        ["fable", "opus", "sonnet", "haiku"].map(|id| ModelInfo {
             id: id.into(),
             efforts: ["low", "medium", "high", "xhigh", "max"]
                 .map(str::to_owned)
@@ -936,7 +936,7 @@ fn claude_models_have_static_efforts() {
     let models = harness_models("claude").unwrap();
     assert_eq!(
         models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
-        ["opus", "sonnet", "haiku"]
+        ["fable", "opus", "sonnet", "haiku"]
     );
     for model in models {
         assert_eq!(model.efforts, ["low", "medium", "high", "xhigh", "max"]);

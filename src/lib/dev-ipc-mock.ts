@@ -181,7 +181,7 @@ const harnessModels = {
   mistral: ["mistral-large-latest", "codestral-latest", "devstral-small-latest"],
   groq: ["llama-3.3-70b-versatile", "qwen/qwen3-32b", "openai/gpt-oss-120b"],
 }
-const claudeModels = ["opus", "sonnet", "haiku"].map((id) => ({
+const claudeModels = ["fable", "opus", "sonnet", "haiku"].map((id) => ({
   id, efforts: ["low", "medium", "high", "xhigh", "max"],
 }))
 const opencodeModels = Object.entries(harnessModels).flatMap(([provider, models]) =>
