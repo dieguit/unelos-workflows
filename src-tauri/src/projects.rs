@@ -341,6 +341,26 @@ pub fn remove_recent(app: AppHandle, path: String) -> Result<ProjectState, Strin
     Ok(state(&store, home(&app)))
 }
 
+fn uninstall_from(file: &Path, root: &Path, home: String) -> Result<ProjectState, String> {
+    let root = approved_root(&load_from(file), root)?;
+    let root = camino::Utf8Path::from_path(&root).ok_or("Project path is not UTF-8")?;
+    unelos_core::uninstall_project(root).map_err(|e| e.to_string())?;
+    let mut store = load_from(file);
+    forget(&mut store, root.as_str());
+    save_to(file, &store)
+        .map_err(|e| format!("Uninstall succeeded, but saving recent projects failed: {e}"))?;
+    Ok(state(&store, home))
+}
+
+#[tauri::command]
+pub async fn uninstall_project(app: AppHandle, root: String) -> Result<ProjectState, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        uninstall_from(&store_file(&app)?, Path::new(&root), home(&app))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 pub fn list_workflows(
     app: AppHandle,
@@ -707,6 +727,47 @@ mod tests {
         fs::create_dir_all(root.join(".unelos")).unwrap();
         fs::write(root.join(".unelos/project.yaml"), "{}").unwrap();
         root
+    }
+
+    #[test]
+    fn uninstall_requires_approval_and_preserves_other_recents() {
+        let temp = TempDir::new().unwrap();
+        let root = fs::canonicalize(project(&temp, "target")).unwrap();
+        let other = fs::canonicalize(project(&temp, "other")).unwrap();
+        let file = temp.path().join("projects.json");
+        assert!(uninstall_from(&file, &root, String::new()).is_err());
+        assert!(root.join(".unelos").exists());
+        let mut store = Store::default();
+        push_recent(&mut store, other.to_str().unwrap().into(), 1);
+        push_recent(&mut store, root.to_str().unwrap().into(), 2);
+        save_to(&file, &store).unwrap();
+        let result = uninstall_from(&file, &root, String::new()).unwrap();
+        assert!(!root.join(".unelos").exists());
+        assert!(other.join(".unelos").exists());
+        assert_eq!(result.recents.len(), 1);
+        assert_eq!(result.recents[0].path, other.to_str().unwrap());
+        assert_eq!(load_from(&file).recents[0].path, other.to_str().unwrap());
+    }
+
+    #[test]
+    fn uninstall_failure_preserves_recents_and_save_failure_is_truthful() {
+        let temp = TempDir::new().unwrap();
+        let root = fs::canonicalize(project(&temp, "target")).unwrap();
+        let file = temp.path().join("projects.json");
+        let mut store = Store::default();
+        push_recent(&mut store, root.to_str().unwrap().into(), 1);
+        save_to(&file, &store).unwrap();
+        fs::create_dir_all(root.join(".claude/agents/unelos-directory.md")).unwrap();
+        assert!(uninstall_from(&file, &root, String::new()).is_err());
+        assert_eq!(load_from(&file), store);
+        assert!(root.join(".unelos").exists());
+        fs::remove_dir(root.join(".claude/agents/unelos-directory.md")).unwrap();
+        fs::create_dir(file.with_extension("json.tmp")).unwrap();
+        let error = uninstall_from(&file, &root, String::new()).unwrap_err();
+        assert!(error.contains("Uninstall succeeded"));
+        assert!(error.contains("recent"));
+        assert!(!root.join(".unelos").exists());
+        assert_eq!(load_from(&file), store);
     }
 
     #[test]

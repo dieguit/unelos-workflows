@@ -99,6 +99,7 @@ pub fn run() {
             projects::open_project,
             projects::pick_project,
             projects::remove_recent,
+            projects::uninstall_project,
             projects::list_workflows,
             projects::duplicate_agent,
             projects::duplicate_task,

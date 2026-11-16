@@ -474,6 +474,13 @@ export function installDevIpcMock() {
       case "remove_recent":
         state.recents = state.recents.filter((r) => r.path !== path)
         return structuredClone(state)
+      case "uninstall_project": {
+        const { root } = args as { root: string }
+        if (!state.recents.some((r) => r.path === root && r.available))
+          throw "Project is not approved; select it using Open folder…"
+        state.recents = state.recents.filter((r) => r.path !== root)
+        return structuredClone(state)
+      }
       case "list_workflows": {
         const root = (args as { root: string }).root
         if (mode === "switch") await new Promise((resolve) => setTimeout(resolve, 900))

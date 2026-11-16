@@ -1,12 +1,22 @@
 import { beforeEach, expect, test, vi } from "vitest"
 import { toast } from "sonner"
 import { trackedInvoke } from "./tauri"
-import { autoBuildHarness, buildHarnessConfig } from "./projects"
+import { autoBuildHarness, buildHarnessConfig, uninstallProject } from "./projects"
 
 vi.mock("./tauri", () => ({ trackedInvoke: vi.fn() }))
 vi.mock("sonner", () => ({ toast: { warning: vi.fn(), error: vi.fn() } }))
 
-beforeEach(() => vi.clearAllMocks())
+beforeEach(() => vi.resetAllMocks())
+
+test("uninstall invokes only its command and passes through state and errors", async () => {
+  const state = { home: "/home", recents: [] }
+  vi.mocked(trackedInvoke).mockResolvedValueOnce(state)
+  expect(await uninstallProject("/project")).toBe(state)
+  expect(trackedInvoke).toHaveBeenCalledExactlyOnceWith("uninstall_project", { root: "/project" })
+  vi.mocked(trackedInvoke).mockRejectedValueOnce(new Error("refused"))
+  await expect(uninstallProject("/project")).rejects.toThrow("refused")
+  expect(trackedInvoke).toHaveBeenCalledTimes(2)
+})
 
 test("manual and automatic builds warn once with skipped entries and mapping guidance", async () => {
   const result = { harnesses: ["opencode"], written: [], removed: [], skipped: ["claude: No Claude model mapped for alias 'smart'", "invalid workflow"] }
