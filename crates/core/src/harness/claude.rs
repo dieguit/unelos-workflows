@@ -221,8 +221,13 @@ impl HarnessAdapter for Claude {
     fn installable(&self) -> bool {
         true
     }
-    fn list_models(&self) -> Result<Vec<Model>> {
-        Ok(["opus", "sonnet", "haiku"].map(str::to_owned).into())
+    fn list_models(&self) -> Result<Vec<ModelInfo>> {
+        Ok(["opus", "sonnet", "haiku"]
+            .map(|id| ModelInfo {
+                id: id.into(),
+                efforts: CLAUDE_EFFORTS.map(str::to_owned).into(),
+            })
+            .into())
     }
     fn validate(&self) -> Result<()> {
         read_state()?;

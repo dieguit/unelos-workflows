@@ -41,7 +41,7 @@ pub async fn delete_model_mapping(alias: String) -> Result<ModelMappings, String
 }
 
 #[tauri::command]
-pub async fn harness_models(id: String) -> Result<Vec<String>, String> {
+pub async fn harness_models(id: String) -> Result<Vec<unelos_core::ModelInfo>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         unelos_core::harness_models(&id).map_err(|e| e.to_string())
     })

@@ -222,7 +222,12 @@ fn claude_agent_model_mapping_and_mcp_list() {
     }
     assert_eq!(
         claude::Claude.list_models().unwrap(),
-        ["opus", "sonnet", "haiku"]
+        ["opus", "sonnet", "haiku"].map(|id| ModelInfo {
+            id: id.into(),
+            efforts: ["low", "medium", "high", "xhigh", "max"]
+                .map(str::to_owned)
+                .into(),
+        })
     );
 }
 
@@ -876,11 +881,66 @@ fn path_detection_version_models_and_timeout() {
     fs::write(&bin, "#!/bin/sh\nif [ \"$1\" = models ]; then printf 'a/model\\nb/model\\n'; else echo 'opencode v2.3.4'; fi\n").unwrap();
     fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
     assert_eq!(list_harnesses()[0].version.as_deref(), Some("2.3.4"));
-    assert_eq!(harness_models("opencode").unwrap(), ["a/model", "b/model"]);
+    assert_eq!(
+        harness_models("opencode").unwrap(),
+        ["a/model", "b/model"].map(|id| ModelInfo {
+            id: id.into(),
+            efforts: vec![],
+        })
+    );
+    fs::write(&bin, format!("#!/bin/sh\nif [ \"$1\" = api ] && [ \"$2\" = model.list ]; then printf '%s' '{}'; else exit 1; fi\n", MODEL_LIST)).unwrap();
+    assert_eq!(harness_models("opencode").unwrap(), expected_model_list());
     fs::write(&bin, "#!/bin/sh\nwhile :; do :; done\n").unwrap();
     let start = Instant::now();
     assert_eq!(opencode::OpenCode.version(&bin), None);
     assert!(start.elapsed() < Duration::from_secs(4));
+}
+
+const MODEL_LIST: &str = r#"{"location":"x","data":[{"providerID":"openai","id":"gpt","variants":[{"id":"none"},{"id":"high"}]},{"providerID":"anthropic","id":"opus","variants":[]}]}"#;
+
+fn expected_model_list() -> Vec<ModelInfo> {
+    vec![
+        ModelInfo {
+            id: "anthropic/opus".into(),
+            efforts: vec![],
+        },
+        ModelInfo {
+            id: "openai/gpt".into(),
+            efforts: vec!["none".into(), "high".into()],
+        },
+    ]
+}
+
+#[test]
+fn parse_opencode_model_list_reads_variants() {
+    assert_eq!(
+        opencode::parse_opencode_model_list(MODEL_LIST),
+        Some(expected_model_list())
+    );
+    for invalid in [
+        "not json",
+        "{}",
+        r#"{"data":[{"providerID":"p","id":"m"}]}"#,
+        r#"{"data":[{"providerID":"p","id":"m","variants":[{}]}]}"#,
+    ] {
+        assert_eq!(opencode::parse_opencode_model_list(invalid), None);
+    }
+    assert_eq!(
+        opencode::parse_opencode_model_list(r#"{"data":[]}"#),
+        Some(vec![])
+    );
+}
+
+#[test]
+fn claude_models_have_static_efforts() {
+    let models = harness_models("claude").unwrap();
+    assert_eq!(
+        models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+        ["opus", "sonnet", "haiku"]
+    );
+    for model in models {
+        assert_eq!(model.efforts, ["low", "medium", "high", "xhigh", "max"]);
+    }
 }
 
 #[test]

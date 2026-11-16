@@ -142,7 +142,7 @@ pub fn save_agent(
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentModelOptions {
-    pub aliases: Vec<String>,
+    pub mappings: crate::ModelMappings,
     pub harnesses: Vec<HarnessModelOptions>,
 }
 #[derive(Serialize)]
@@ -150,16 +150,13 @@ pub struct AgentModelOptions {
 pub struct HarnessModelOptions {
     pub id: String,
     pub name: String,
-    pub models: Vec<String>,
+    pub models: Vec<crate::ModelInfo>,
     pub error: Option<String>,
 }
 
 pub fn agent_model_options() -> AgentModelOptions {
     AgentModelOptions {
-        aliases: crate::list_model_mappings()
-            .unwrap_or_default()
-            .into_keys()
-            .collect(),
+        mappings: crate::list_model_mappings().unwrap_or_default(),
         harnesses: crate::list_harnesses()
             .into_iter()
             .filter(|h| h.detected || h.installed)

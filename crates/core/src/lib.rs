@@ -47,7 +47,7 @@ pub mod global_config;
 pub mod harness;
 pub use harness::{
     harness_models, install_harness, list_harnesses, provision_cli, uninstall_harness,
-    HarnessStatus,
+    HarnessStatus, ModelInfo,
 };
 mod definitions;
 mod execution;
