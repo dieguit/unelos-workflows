@@ -1,0 +1,7 @@
+instructionsFile: instructions.md
+skills:
+- code-review
+model:
+  harness: opencode
+  model: openai/gpt-6.1-sol
+effort: high

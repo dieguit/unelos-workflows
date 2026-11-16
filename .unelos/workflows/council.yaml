@@ -1,0 +1,67 @@
+name: council
+description: "Agree an assignment, run independent councillors in parallel on different models, synthesize a council report, then approve."
+start: assignment
+nodes:
+  assignment:
+    taskDefinition:
+      instructions: |
+        Interview the user until the question, relevant context and constraints,
+        and what a good answer looks like are agreed. Write them to the bound
+        question.md so councillors need no conversation history. On re-entry,
+        update question.md in place.
+    agent: council-chair
+    execution: main
+    outputs: [question.md]
+    next: council
+  council:
+    type: parallel
+    inputs: [question.md]
+    tasks:
+      - taskDefinition:
+          description: Alpha opinion
+          instructions: |
+            Answer question.md independently using read-only codebase inspection.
+            Write your answer to your supplied report following the
+            council-deliberation skill. If you cannot answer, still finish and
+            state why in the report. On re-entry, read feedback and your existing
+            report and update it in place.
+        agent: councillor-alpha
+      - taskDefinition:
+          description: Beta opinion
+          instructions: |
+            Answer question.md independently using read-only codebase inspection.
+            Write your answer to your supplied report following the
+            council-deliberation skill. If you cannot answer, still finish and
+            state why in the report. On re-entry, read feedback and your existing
+            report and update it in place.
+        agent: councillor-beta
+      - taskDefinition:
+          description: Gamma opinion
+          instructions: |
+            Answer question.md independently using read-only codebase inspection.
+            Write your answer to your supplied report following the
+            council-deliberation skill. If you cannot answer, still finish and
+            state why in the report. On re-entry, read feedback and your existing
+            report and update it in place.
+        agent: councillor-gamma
+    outputs: [council-responses.md]
+    next: synthesis
+  synthesis:
+    taskDefinition:
+      instructions: |
+        Read question.md and council-responses.md (follow its report links).
+        Synthesize the council's answer into the bound council-report.md using
+        the structure in your agent instructions. On re-entry, update it in place.
+    agent: council
+    execution: main
+    inputs: [question.md, council-responses.md]
+    outputs: [council-report.md]
+    next: approve-council
+  approve-council:
+    type: human-gate
+    inputs: [council-report.md, council-responses.md]
+    next:
+      approved: done
+      rejected: council
+  done:
+    type: end

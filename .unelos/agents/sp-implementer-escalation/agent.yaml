@@ -1,0 +1,9 @@
+instructionsFile: instructions.md
+skills:
+- test-driven-development
+- verification-before-completion
+- receiving-code-review
+- systematic-debugging
+model:
+  harness: opencode
+  model: anthropic/claude-opus-5-5

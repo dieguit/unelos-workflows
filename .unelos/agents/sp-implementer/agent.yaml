@@ -1,0 +1,10 @@
+instructionsFile: instructions.md
+skills:
+- test-driven-development
+- verification-before-completion
+- receiving-code-review
+- systematic-debugging
+model:
+  harness: opencode
+  model: openai/gpt-6.1-sol
+effort: low
