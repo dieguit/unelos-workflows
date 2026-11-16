@@ -12,7 +12,7 @@ use std::{
 pub struct AgentExport {
     pub id: String,
     pub instructions: String,
-    pub model: Option<String>,
+    pub model: Option<crate::AgentModel>,
     pub tools: Vec<String>,
     pub mcps: Vec<String>,
     #[serde(skip)]
@@ -42,26 +42,6 @@ pub(crate) fn fail(code: &'static str, message: impl Into<String>) -> InstallErr
 }
 pub(crate) fn io_error(error: io::Error) -> InstallError {
     fail("install_io_failed", error.to_string())
-}
-
-pub(crate) fn resolve_agent_model(model: &crate::AgentModel) -> Result<String, InstallError> {
-    match model {
-        crate::AgentModel::Alias(alias) => crate::list_model_mappings()?
-            .get(alias)
-            .and_then(|models| models.get("opencode"))
-            .cloned()
-            .ok_or_else(|| {
-                fail(
-                    "unmapped_model_alias",
-                    format!("No OpenCode model mapped for alias '{alias}'"),
-                )
-            }),
-        crate::AgentModel::Harness { harness, model } if harness == "opencode" => Ok(model.clone()),
-        crate::AgentModel::Harness { harness, .. } => Err(fail(
-            "model_harness_mismatch",
-            format!("Model targets {harness}, expected opencode"),
-        )),
-    }
 }
 
 use crate::project::safe_id;
@@ -111,6 +91,9 @@ fn export(project: &LoadedProject) -> Result<Vec<AgentExport>, InstallError> {
             let mut mcp_servers = BTreeMap::new();
             for mcp in &agent.mcps {
                 let bare = mcp.strip_prefix("global/").unwrap_or(mcp);
+                if bare == "unelos" {
+                    return Err(fail("reserved_mcp_id", "MCP ID 'unelos' is reserved"));
+                }
                 if let Some(previous) = scopes.insert(bare.to_owned(), mcp.clone()) {
                     if previous != *mcp {
                         return Err(fail(
@@ -132,25 +115,10 @@ fn export(project: &LoadedProject) -> Result<Vec<AgentExport>, InstallError> {
                 })?;
                 mcp_servers.insert(bare.to_owned(), document.server);
             }
-            let model = agent.model.as_ref().map(resolve_agent_model).transpose()?;
-            if let Some(model) = &model {
-                let (provider, rest) = model
-                    .split_once('/')
-                    .ok_or_else(|| fail("invalid_model", "Expected provider/model[#variant]"))?;
-                let parts: Vec<_> = rest.split('#').collect();
-                if provider.is_empty()
-                    || parts.len() > 2
-                    || parts.iter().any(|s| s.is_empty())
-                    || model.chars().any(|c| c.is_whitespace() || c == '\0')
-                    || provider.contains('#')
-                {
-                    return Err(fail("invalid_model", "Expected provider/model[#variant]"));
-                }
-            }
             Ok(AgentExport {
                 id,
                 instructions: agent.instructions.clone(),
-                model,
+                model: agent.model.clone(),
                 tools: agent.tools.clone(),
                 mcps: agent.mcps.clone(),
                 mcp_servers,

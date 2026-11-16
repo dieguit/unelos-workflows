@@ -20,6 +20,7 @@ import {
   removeAgent,
   type AgentDocument,
 } from "@/lib/projects"
+import { loadReferences, usedByFor } from "@/lib/references"
 import { AgentInspector } from "./-components/agent-inspector"
 import { AgentsList, filterAgents } from "./-components/agents-list"
 import { emptyAgent, useAgentForm } from "./-hooks/use-agent-form"
@@ -30,6 +31,7 @@ export const Route = createFileRoute("/agents/")({
   loader: async ({ context }) => ({
     root: context.project.path,
     agents: await listAgents(context.project.path),
+    references: await loadReferences(context.project.path),
   }),
   component: AgentsRoute,
   pendingComponent: () => <p role="status">Loading agents…</p>,
@@ -52,7 +54,8 @@ function AgentsRoute() {
 }
 
 function AgentsHome() {
-  const { root, agents } = Route.useLoaderData()
+  const { root, agents, references } = Route.useLoaderData()
+  const usedBy = usedByFor(references?.agents)
   const { project } = Route.useRouteContext()
   const [query, setQuery] = useState("")
   const search = useRef<HTMLInputElement>(null)
@@ -220,6 +223,7 @@ function AgentsHome() {
             ) : null}
             <AgentsList
               agents={agents}
+              usedBy={usedBy}
               selected={selected ?? undefined}
               onSelect={(id) => void select(id)}
               onCreate={() => void select(null)}
@@ -237,6 +241,7 @@ function AgentsHome() {
         <AgentInspector
           key={selected ?? "\0new"}
           root={root}
+          usedBy={typeof selected === "string" ? usedBy.of(selected) : null}
           originalId={selected}
           form={form}
           footer={typeof selected === "string" && loaded ? actions(selected, "footer") : undefined}

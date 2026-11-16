@@ -105,19 +105,41 @@ fn rebuild_merges_prunes_preserves_and_replaces_mcp_ownership() {
         before,
         fs::metadata(&controller).unwrap().modified().unwrap()
     );
+    let ownership_path = root.join(".unelos/opencode-mcps.json");
+    let config_path = root.join("opencode.json");
+    let ownership_before = fs::read(&ownership_path).unwrap();
+    let config_before = fs::read(&config_path).unwrap();
+    fs::write(&second, "invalid: workflow").unwrap();
+    let built = build_harness_config(root).unwrap();
+    assert_eq!(built.skipped.len(), 1);
+    assert!(built.skipped[0].starts_with("second: "));
+    assert!(controller.exists());
+    assert_eq!(fs::read(&ownership_path).unwrap(), ownership_before);
+    assert_eq!(fs::read(&config_path).unwrap(), config_before);
+    fs::write(
+        &second,
+        text.replace("name: simple-plan-execute-review", "name: second")
+            .replace("execution: main", "execution: subagent"),
+    )
+    .unwrap();
     fs::write(
         root.join(".unelos/workflows/broken.yaml"),
         "invalid: workflow",
     )
     .unwrap();
+    let stale = root.join(".opencode/agents/unelos-stale.md");
+    fs::write(&stale, "keep").unwrap();
+    fs::write(&controller, "outdated").unwrap();
     let built = build_harness_config(root).unwrap();
     assert_eq!(built.skipped.len(), 1);
     assert!(built.skipped[0].starts_with("broken: "));
-    assert!(built.written.is_empty() && built.removed.is_empty());
-    assert_eq!(
-        before,
-        fs::metadata(&controller).unwrap().modified().unwrap()
-    );
+    assert!(built.written.contains(&controller));
+    assert!(built.removed.is_empty());
+    assert_eq!(fs::read_to_string(&stale).unwrap(), "keep");
+    assert!(fs::read_to_string(&controller)
+        .unwrap()
+        .contains("mode: all"));
+    fs::remove_file(stale).unwrap();
     fs::remove_file(root.join(".unelos/workflows/broken.yaml")).unwrap();
     fs::remove_file(&second).unwrap();
     fs::write(

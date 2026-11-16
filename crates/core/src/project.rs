@@ -11,6 +11,116 @@ use crate::{
     ProjectValidationError, TaskSelection, WorkflowDefinition,
 };
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+pub struct Reference {
+    pub kind: String,
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Default, serde::Serialize)]
+pub struct ProjectReferences {
+    pub agents: BTreeMap<String, Vec<Reference>>,
+    pub tasks: BTreeMap<String, Vec<Reference>>,
+    pub skills: BTreeMap<String, Vec<Reference>>,
+    pub mcps: BTreeMap<String, Vec<Reference>>,
+}
+
+fn add_reference(map: &mut BTreeMap<String, Vec<Reference>>, id: &str, reference: &Reference) {
+    if !id.is_empty() {
+        map.entry(id.into()).or_default().push(reference.clone());
+    }
+}
+
+impl ProjectReferences {
+    fn task(&mut self, task: &TaskSelection, agent: &str, reference: &Reference) {
+        add_reference(&mut self.agents, agent, reference);
+        match task {
+            TaskSelection::Named(id) => add_reference(&mut self.tasks, id, reference),
+            TaskSelection::Inline(task) => {
+                for skill in &task.skills {
+                    add_reference(&mut self.skills, skill, reference);
+                }
+            }
+        }
+    }
+}
+
+pub fn project_references(root: &Utf8Path) -> Result<ProjectReferences, ProjectLoadError> {
+    let (root, workflows) = workflow_files(root)?;
+    let mut references = ProjectReferences::default();
+    for agent in agent_summaries(&root)?
+        .into_iter()
+        .filter(|a| a.problem.is_none())
+    {
+        let reference = Reference {
+            kind: "agent".into(),
+            id: agent.name.clone(),
+            name: agent.name,
+        };
+        for skill in agent.skills {
+            add_reference(&mut references.skills, &skill, &reference);
+        }
+        for mcp in agent.mcps {
+            add_reference(&mut references.mcps, &mcp, &reference);
+        }
+    }
+    for task in task_summaries(&root)?
+        .into_iter()
+        .filter(|t| t.problem.is_none())
+    {
+        let reference = Reference {
+            kind: "task".into(),
+            id: task.name.clone(),
+            name: task.name,
+        };
+        for skill in task.skills {
+            add_reference(&mut references.skills, &skill, &reference);
+        }
+    }
+    for id in workflows {
+        let source = bounded_path(
+            &root.join(".unelos"),
+            &Utf8PathBuf::from(format!("workflows/{id}.yaml")),
+            &root.join(".unelos"),
+            "workflow",
+        );
+        let Ok(workflow) = source
+            .and_then(|source| Ok(parse_workflow_definition(source.as_str(), &read(&source)?)?))
+        else {
+            continue;
+        };
+        let reference = Reference {
+            kind: "workflow".into(),
+            id,
+            name: workflow.name,
+        };
+        for node in workflow.nodes.values() {
+            match node {
+                NodeDefinition::Task(task) => references.task(&task.task, &task.agent, &reference),
+                NodeDefinition::Parallel(parallel) => {
+                    for worker in &parallel.tasks {
+                        references.task(&worker.task, &worker.agent, &reference);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    for map in [
+        &mut references.agents,
+        &mut references.tasks,
+        &mut references.skills,
+        &mut references.mcps,
+    ] {
+        for entries in map.values_mut() {
+            entries.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.cmp(b)));
+            entries.dedup();
+        }
+    }
+    Ok(references)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoadedProject {
     pub project_root: Utf8PathBuf,

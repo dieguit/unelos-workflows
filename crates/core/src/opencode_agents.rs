@@ -11,6 +11,9 @@ pub enum Version {
 
 pub fn check_agents(root: &Utf8Path, agents: &[AgentExport]) -> Result<(), InstallError> {
     for agent in agents {
+        if let Some(model) = &agent.model {
+            crate::harness::opencode::resolve_agent_model(model)?;
+        }
         crate::check_install_path(
             root,
             &Utf8PathBuf::from(format!(".opencode/agents/unelos-{}.md", agent.id)),
@@ -38,7 +41,12 @@ pub fn render_agents(
             }
             front["tools"][format!("{id}_*")] = true.into();
         }
-        if let Some(model) = &agent.model {
+        if let Some(model) = agent
+            .model
+            .as_ref()
+            .map(crate::harness::opencode::resolve_agent_model)
+            .transpose()?
+        {
             match version {
                 Version::V2 => front["model"] = model.clone().into(),
                 Version::V1 => {

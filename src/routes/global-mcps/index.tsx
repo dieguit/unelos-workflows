@@ -2,6 +2,7 @@ import type { ReactNode } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { z } from "zod"
 import { PageHeader } from "@/components/page-header"
+import { loadReferences, usedByFor } from "@/lib/references"
 import { McpsError, McpsPage } from "@/components/mcps-page"
 import {
   getGlobalMcp,
@@ -12,7 +13,10 @@ import {
 
 export const Route = createFileRoute("/global-mcps/")({
   validateSearch: z.object({ mcp: z.string().optional().catch(undefined) }),
-  loader: async () => ({ mcps: await listGlobalMcps() }),
+  loader: async ({ context }) => ({
+    mcps: await listGlobalMcps(),
+    references: await loadReferences(context.project?.path),
+  }),
   component: GlobalMcpsRoute,
   pendingComponent: () => <p role="status">Loading global MCPs…</p>,
   errorComponent: ({ error }) => <McpsError error={error} header={Header} />,
@@ -29,13 +33,14 @@ function Header({ action }: { action?: ReactNode }) {
 }
 
 function GlobalMcpsRoute() {
-  const { mcps } = Route.useLoaderData()
+  const { mcps, references } = Route.useLoaderData()
   const { mcp } = Route.useSearch()
   const { project } = Route.useRouteContext()
   const root = project?.path ?? null
   return (
     <McpsPage
       mcps={mcps}
+      usedBy={usedByFor(references?.mcps, { global: true, project: project?.name })}
       initial={mcp}
       scope={{ path: "global/mcps", label: "Global MCP" }}
       header={Header}

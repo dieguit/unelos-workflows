@@ -1,5 +1,6 @@
+mod claude;
 pub(crate) mod jsonc;
-mod opencode;
+pub(crate) mod opencode;
 
 use crate::{
     global_config::{self, env_path, error, home, io_error, Installed},
@@ -22,6 +23,17 @@ pub struct Ctx {
 }
 
 pub trait HarnessAdapter {
+    fn validate(&self) -> Result<()> {
+        Ok(())
+    }
+    fn build_project(
+        &self,
+        _root: &Utf8Path,
+        _workflows: &std::collections::BTreeMap<String, Vec<crate::AgentExport>>,
+        _prune: bool,
+    ) -> Result<crate::HarnessBuild> {
+        Err(error("harness_not_installable", self.id()))
+    }
     fn id(&self) -> &str;
     fn name(&self) -> &str;
     fn binaries(&self) -> &[&str];
@@ -71,15 +83,9 @@ impl HarnessAdapter for DetectOnly {
 }
 
 pub fn registry() -> Vec<Box<dyn HarnessAdapter>> {
-    let mut adapters: Vec<Box<dyn HarnessAdapter>> = vec![Box::new(opencode::OpenCode)];
+    let mut adapters: Vec<Box<dyn HarnessAdapter>> =
+        vec![Box::new(opencode::OpenCode), Box::new(claude::Claude)];
     for (id, name, bins, env, default) in [
-        (
-            "claude",
-            "Claude Code",
-            &["claude", "claude-code"][..],
-            "CLAUDE_CONFIG_DIR",
-            ".claude",
-        ),
         ("codex", "Codex", &["codex"][..], "CODEX_HOME", ".codex"),
         ("pi", "Pi", &["pi"][..], "PI_CODING_AGENT_DIR", ".pi/agent"),
         (
@@ -276,7 +282,7 @@ pub fn install_harness(id: &str, cli_src: &Utf8Path) -> Result<Vec<HarnessStatus
         return Err(error("harness_not_installable", id));
     }
     // Validate config before provisioning or writing integration files.
-    opencode::validate()?;
+    adapter.validate()?;
     let binary = provision_cli(cli_src)?;
     adapter.install(&Ctx { binary })?;
     Ok(list_harnesses())

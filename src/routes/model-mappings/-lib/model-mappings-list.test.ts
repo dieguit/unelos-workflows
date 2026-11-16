@@ -1,4 +1,5 @@
 import * as mod from "@/routes/model-mappings/-lib/model-mappings-list"
+import { usedBy, usedByLabel } from "@/lib/model-mappings"
 import { expect, test } from "vitest"
 
 
@@ -11,9 +12,18 @@ test("aliasError accepts lowercase dotted/dashed names only", () => {
 
 test("filterMappings sorts and matches alias or model", () => {
   const m = { smart: { opencode: "anthropic/x" }, fast: { opencode: "openai/y" }, deep: {} }
-  expect(mod.filterMappings(m, "")).toEqual(["deep", "fast", "smart"])
-  expect(mod.filterMappings(m, "OPENAI")).toEqual(["fast"])
-  expect(mod.filterMappings(m, "dee")).toEqual(["deep"])
+  const harnesses = [{ id: "opencode" }]
+  expect(mod.filterMappings(m, "", harnesses)).toEqual(["deep", "fast", "smart"])
+  expect(mod.filterMappings(m, "OPENAI", harnesses)).toEqual(["fast"])
+  expect(mod.filterMappings(m, "dee", harnesses)).toEqual(["deep"])
+})
+
+test("filterMappings searches installed harnesses only, including Claude", () => {
+  const mappings = { smart: { claude: "sonnet", opencode: "provider/hidden" } }
+  expect(mod.filterMappings(mappings, "sonnet", [{ id: "claude" }])).toEqual(["smart"])
+  expect(mod.filterMappings(mappings, "hidden", [{ id: "claude" }])).toEqual([])
+  expect(mod.filterMappings(mappings, "", [])).toEqual(["smart"])
+  expect(mod.filterMappings(mappings, "sonnet", [])).toEqual([])
 })
 
 test("usedBy is null without a project", () => {
@@ -21,8 +31,8 @@ test("usedBy is null without a project", () => {
     { name: "Planner", model: "smart", skills: [], mcps: [], problem: null },
     { name: "Eng", model: "fast", skills: [], mcps: [], problem: null },
   ]
-  expect(mod.usedBy(agents, "smart")).toEqual(["Planner"])
-  expect(mod.usedBy(null, "smart")).toBe(null)
-  expect(mod.usedByLabel(null)).toBe("—")
-  expect(mod.usedByLabel(["a", "b"])).toBe("2 agents")
+  expect(usedBy(agents, "smart")).toEqual(["Planner"])
+  expect(usedBy(null, "smart")).toBe(null)
+  expect(usedByLabel(null)).toBe("—")
+  expect(usedByLabel(["a", "b"])).toBe("2 agents")
 })

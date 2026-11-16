@@ -15,6 +15,10 @@ tracing.workspace = true
 jsonc-parser = { version = "0.34", features = ["cst", "serde", "serde_json"] }
 url = "2"
 tempfile = "3"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4"] }
+rmcp = { version = "3.10", default-features = false, features = ["server", "transport-io"] }
+tokio.workspace = true
 
 [dev-dependencies]
 assert_fs.workspace = true

@@ -1,4 +1,4 @@
-# Unelos native OpenCode tools
+# Unelos OpenCode MCP adapter
 
 Thin adapter for OpenCode V2. Shared instructions, execution
 prompts, result validation and guarded progression live in Rust core. The model
@@ -83,7 +83,9 @@ independent runs do not isolate edits to shared source files.
 
 Native tools: `unelos_next`, `unelos_start`, `unelos_resume`, `unelos_complete`, `unelos_approve`,
 `unelos_reject`, `unelos_status`, `unelos_inspect`, `unelos_rename`.
-Tools call CLI once. Completion/decisions check full expected identity inside the
+Tools use the local `unelos mcp` server. The plugin replaces tool context with the
+native session, canonical project and controller/worker role before dispatch.
+Completion/decisions check full expected identity inside the
 core runtime lock and return the resulting package. No shell-called JS helper,
 status-then-next loop, worker tracking or per-model-request polling.
 
@@ -104,6 +106,10 @@ This is option A: native configuration applies settings, but the adapter does no
 prove that the controller selected the right agent or forwarded the exact prompt.
 Core guards progression; this is not a security sandbox. Only explicitly activated
 main sessions can use controller tools; ordinary sessions produce no automatic reads.
+
+Session bindings live in core, not OpenCode metadata. Existing metadata bindings
+are ignored: use `/unelos resume` to rebind. Restart OpenCode after upgrading the
+binary/plugin; running MCP processes do not hot-reload.
 
 Historical evidence: [T15](../../docs/opencode-delivery-verification.md),
 [T16](../../docs/opencode-execution-verification.md). Those reports describe earlier

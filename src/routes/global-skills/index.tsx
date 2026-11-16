@@ -2,6 +2,7 @@ import type { ReactNode } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { z } from "zod"
 import { PageHeader } from "@/components/page-header"
+import { loadReferences, usedByFor } from "@/lib/references"
 import { SkillsError, SkillsPage } from "@/components/skills-page"
 import {
   createGlobalSkill,
@@ -14,7 +15,10 @@ import {
 
 export const Route = createFileRoute("/global-skills/")({
   validateSearch: z.object({ skill: z.string().optional().catch(undefined) }),
-  loader: async () => ({ skills: await listGlobalSkills() }),
+  loader: async ({ context }) => ({
+    skills: await listGlobalSkills(),
+    references: await loadReferences(context.project?.path),
+  }),
   component: GlobalSkillsRoute,
   pendingComponent: () => <p role="status">Loading global skills…</p>,
   errorComponent: ({ error }) => <SkillsError error={error} header={Header} />,
@@ -31,7 +35,7 @@ function Header({ action }: { action?: ReactNode }) {
 }
 
 function GlobalSkillsRoute() {
-  const { skills } = Route.useLoaderData()
+  const { skills, references } = Route.useLoaderData()
   const { skill } = Route.useSearch()
   const { project } = Route.useRouteContext()
   const navigate = Route.useNavigate()
@@ -39,6 +43,7 @@ function GlobalSkillsRoute() {
   return (
     <SkillsPage
       skills={skills}
+      usedBy={usedByFor(references?.skills, { global: true, project: project?.name })}
       id={skill}
       scope="global"
       header={Header}

@@ -11,7 +11,8 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import type { SkillForm } from "@/hooks/use-skill-form"
-import type { SkillDocument } from "@/lib/projects"
+import type { Reference, SkillDocument } from "@/lib/projects"
+import { UsedByRow } from "@/components/used-by"
 
 function Shell({
   title,
@@ -80,8 +81,12 @@ export function SkillInspector({
   editing,
   isNew,
   footer,
+  usedBy,
+  project,
 }: {
   footer?: ReactNode
+  usedBy: Reference[] | null
+  project?: string
   isNew?: boolean
   id: string
   doc?: SkillDocument
@@ -235,6 +240,7 @@ export function SkillInspector({
           </Field>
         )}
       </form.Field>
+      {isNew ? null : <UsedByRow refs={usedBy} project={project} />}
     </Shell>
   )
 }

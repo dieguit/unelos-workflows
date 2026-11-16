@@ -9,6 +9,9 @@ export type RecentProject = {
   available: boolean
 }
 export type ProjectState = { home: string; recents: RecentProject[] }
+export type Reference = { kind: "workflow" | "agent" | "task"; id: string; name: string }
+export type ProjectReferences = { agents: Record<string, Reference[]>; tasks: Record<string, Reference[]>; skills: Record<string, Reference[]>; mcps: Record<string, Reference[]> }
+export const getProjectReferences = (root: string) => trackedInvoke<ProjectReferences>("project_references", { root })
 export type WorkflowSummary = {
   name: string
   file: string
@@ -191,8 +194,13 @@ export type ProjectSettings = { autoBuildHarness: boolean | null }
 export type HarnessBuild = { harnesses: string[]; written: string[]; removed: string[]; skipped: string[] }
 export const getProjectSettings = (root: string) => trackedInvoke<ProjectSettings>("get_project_settings", { root })
 export const saveProjectSettings = (root: string, settings: ProjectSettings) => trackedInvoke<void>("save_project_settings", { root, settings })
-export const buildHarnessConfig = (root: string) => trackedInvoke<HarnessBuild>("build_harness_config", { root })
-export const autoBuildHarness = (root: string) => trackedInvoke<HarnessBuild | null>("auto_build_harness", { root })
+const warnSkipped = <T extends HarnessBuild | null>(result: T): T => {
+  if (result?.skipped.length)
+    toast.warning(`Harness config skipped: ${result.skipped.join("; ")}. Check Model mappings for missing models.`)
+  return result
+}
+export const buildHarnessConfig = (root: string) => trackedInvoke<HarnessBuild>("build_harness_config", { root }).then(warnSkipped)
+export const autoBuildHarness = (root: string) => trackedInvoke<HarnessBuild | null>("auto_build_harness", { root }).then(warnSkipped)
 
 /** Rebuilds harness files after a successful save; a failed build must not fail the save. */
 const withBuild =

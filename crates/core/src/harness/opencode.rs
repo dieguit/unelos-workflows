@@ -2,6 +2,40 @@ use super::*;
 use global_config::{atomic_write, read_state, write_state};
 
 pub struct OpenCode;
+pub(crate) fn resolve_agent_model(model: &crate::AgentModel) -> Result<String> {
+    let model = match model {
+        crate::AgentModel::Alias(alias) => crate::list_model_mappings()?
+            .get(alias)
+            .and_then(|models| models.get("opencode"))
+            .cloned()
+            .ok_or_else(|| {
+                error(
+                    "unmapped_model_alias",
+                    format!("No OpenCode model mapped for alias '{alias}'"),
+                )
+            })?,
+        crate::AgentModel::Harness { harness, model } if harness == "opencode" => model.clone(),
+        crate::AgentModel::Harness { harness, .. } => {
+            return Err(error(
+                "model_harness_mismatch",
+                format!("Model targets {harness}, expected opencode"),
+            ))
+        }
+    };
+    let (provider, rest) = model
+        .split_once('/')
+        .ok_or_else(|| error("invalid_model", "Expected provider/model[#variant]"))?;
+    let parts: Vec<_> = rest.split('#').collect();
+    if provider.is_empty()
+        || parts.len() > 2
+        || parts.iter().any(|s| s.is_empty())
+        || model.chars().any(|c| c.is_whitespace() || c == '\0')
+        || provider.contains('#')
+    {
+        return Err(error("invalid_model", "Expected provider/model[#variant]"));
+    }
+    Ok(model)
+}
 const FILES: &[(&str, &[u8])] = &[
     (
         "package.json",
@@ -55,6 +89,34 @@ pub(super) fn validate() -> Result<()> {
     Ok(())
 }
 impl HarnessAdapter for OpenCode {
+    fn validate(&self) -> Result<()> {
+        validate()
+    }
+    fn build_project(
+        &self,
+        root: &Utf8Path,
+        workflows: &std::collections::BTreeMap<String, Vec<crate::AgentExport>>,
+        prune: bool,
+    ) -> Result<crate::HarnessBuild> {
+        let agents = crate::harness_build::merge_agents(workflows)?;
+        crate::opencode_agents::check_agents(root, &agents)?;
+        let mut rendered =
+            crate::opencode_agents::render_agents(crate::opencode_agents::Version::V2, &agents)?;
+        let (path, text, state) = crate::mcp_install::plan_replace(root, workflows, prune)?;
+        if state.values().any(|servers| !servers.is_empty())
+            || root.join(".unelos/opencode-mcps.json").exists()
+        {
+            rendered.push((
+                Utf8PathBuf::from(".unelos/opencode-mcps.json"),
+                serde_json::to_string_pretty(&state).map_err(io_error)?,
+            ));
+            rendered.push((path.strip_prefix(root).unwrap().to_owned(), text));
+        }
+        let mut result =
+            crate::harness_build::write_agents(root, ".opencode/agents", rendered, prune)?;
+        result.harnesses.push(self.id().into());
+        Ok(result)
+    }
     fn id(&self) -> &str {
         "opencode"
     }

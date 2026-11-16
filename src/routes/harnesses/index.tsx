@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { ListSearch } from "@/components/list-search"
 import { PageHeader } from "@/components/page-header"
 import { listHarnesses } from "@/lib/harnesses"
+import { MapModelsDialog } from "./-components/map-models-dialog"
 import { HarnessesTable } from "./-components/harnesses-table"
 import { useHarnesses } from "./-hooks/use-harnesses"
 import { filterHarnesses } from "./-lib/harnesses-list"
@@ -32,7 +33,7 @@ function Header({ action }: { action?: ReactNode }) {
 }
 
 function HarnessesHome() {
-  const { harnesses, pending, errors, scanning, run, rescan } = useHarnesses(
+  const { harnesses, pending, errors, scanning, run, rescan, mapping, closeMapping } = useHarnesses(
     Route.useLoaderData()
   )
   const [query, setQuery] = useState("")
@@ -76,6 +77,13 @@ function HarnessesHome() {
         errors={errors}
         onAction={(h, action) => void run(h, action)}
       />
+      {mapping ? (
+        <MapModelsDialog
+          harness={mapping.harness}
+          rows={mapping.rows}
+          onClose={() => void closeMapping()}
+        />
+      ) : null}
     </div>
   )
 }

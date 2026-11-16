@@ -3,6 +3,7 @@ import { type ReactNode } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { z } from "zod"
 import { PageHeader } from "@/components/page-header"
+import { loadReferences, usedByFor } from "@/lib/references"
 import { TasksError, TasksPage } from "@/components/tasks-page"
 import {
   duplicateGlobalTask,
@@ -15,7 +16,10 @@ import {
 export const Route = createFileRoute("/global-tasks/")({
   // Opens a task directly, e.g. from a workflow step that uses it.
   validateSearch: z.object({ task: z.string().optional().catch(undefined) }),
-  loader: async () => ({ tasks: await listGlobalTasks() }),
+  loader: async ({ context }) => ({
+    tasks: await listGlobalTasks(),
+    references: await loadReferences(context.project?.path),
+  }),
   component: GlobalTasksRoute,
   pendingComponent: () => <p role="status">Loading global tasks…</p>,
   errorComponent: ({ error }) => <TasksError error={error} header={Header} />,
@@ -39,11 +43,13 @@ const api = {
 }
 
 function GlobalTasksRoute() {
-  const { tasks } = Route.useLoaderData()
+  const { tasks, references } = Route.useLoaderData()
   const { task } = Route.useSearch()
+  const { project } = Route.useRouteContext()
   return (
     <TasksPage
       tasks={tasks}
+      usedBy={usedByFor(references?.tasks, { global: true, project: project?.name })}
       initial={task}
       fetchSkills={listGlobalPrefixedSkills}
       scope={{ path: "global", label: "Global Task" }}

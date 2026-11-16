@@ -60,6 +60,7 @@ pub use import::{
     ImportWorkflow, SourceSpec,
 };
 mod project;
+pub use project::{project_references, ProjectReferences, Reference};
 mod runtime;
 mod settings;
 mod skill_document;
@@ -107,3 +108,5 @@ pub use work::{
     NodeInspection, ParallelInspection, ParallelPacket, TaskWorkPacket, WorkPacket,
     WorkRuntimeInput, WorkerInspection, WorkerPacket, WorkerReportBinding,
 };
+pub mod controller_mcp;
+pub mod session_binding;

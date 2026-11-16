@@ -17,6 +17,9 @@ fn projection(workflows: &Workflows) -> Result<Value, InstallError> {
     let mut result = json!({"mcp": {}, "tools": {}});
     for servers in workflows.values() {
         for (id, server) in servers {
+            if id == "unelos" {
+                return Err(error("reserved_mcp_id", "MCP ID 'unelos' is reserved"));
+            }
             let mut value = serde_json::to_value(server).map_err(|e| error("invalid_mcp", e))?;
             value["enabled"] = true.into();
             if let Some(existing) = result["mcp"].get(id) {
@@ -39,12 +42,13 @@ fn plan(
     workflow: &str,
     agents: &[AgentExport],
 ) -> Result<(Utf8PathBuf, String, Workflows), InstallError> {
-    plan_state(root, None, Some((workflow, agents)))
+    plan_state(root, None, Some((workflow, agents)), false)
 }
 
 pub(crate) fn plan_replace(
     root: &Utf8Path,
     workflows: &BTreeMap<String, Vec<AgentExport>>,
+    prune: bool,
 ) -> Result<(Utf8PathBuf, String, Workflows), InstallError> {
     let mut scopes = BTreeMap::new();
     for reference in workflows.values().flatten().flat_map(|agent| &agent.mcps) {
@@ -67,13 +71,14 @@ pub(crate) fn plan_replace(
             )
         })
         .collect();
-    plan_state(root, Some(state), None)
+    plan_state(root, Some(state), None, prune)
 }
 
 fn plan_state(
     root: &Utf8Path,
     replacement: Option<Workflows>,
     update: Option<(&str, &[AgentExport])>,
+    prune: bool,
 ) -> Result<(Utf8PathBuf, String, Workflows), InstallError> {
     for file in [STATE, "opencode.json", "opencode.jsonc"] {
         crate::check_install_path(root, Utf8Path::new(file))?;
@@ -85,7 +90,10 @@ fn plan_state(
     };
     let previous = projection(&state)?;
     if let Some(replacement) = replacement {
-        state = replacement;
+        if prune {
+            state.clear();
+        }
+        state.extend(replacement);
     }
     if let Some((workflow, agents)) = update {
         state.insert(
@@ -153,7 +161,7 @@ pub fn replace_opencode_mcps(
     root: &Utf8Path,
     workflows: &BTreeMap<String, Vec<AgentExport>>,
 ) -> Result<Vec<Utf8PathBuf>, InstallError> {
-    let (path, text, state) = plan_replace(root, workflows)?;
+    let (path, text, state) = plan_replace(root, workflows, true)?;
     if state.values().all(BTreeMap::is_empty) && !root.join(STATE).exists() {
         return Ok(Vec::new());
     }
@@ -177,4 +185,33 @@ pub fn replace_opencode_mcps(
 
 pub fn uninstall_opencode_mcps(root: &Utf8Path, workflow: &str) -> Result<(), InstallError> {
     write_opencode_mcps(root, workflow, &[])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retained_workflow_mcps_are_checked_for_collisions() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = Utf8Path::from_path(temp.path()).unwrap();
+        fs::create_dir(root.join(".unelos")).unwrap();
+        let server = |command: &str| crate::McpServer::Local {
+            command: vec![command.into()],
+            environment: Default::default(),
+        };
+        let previous: Workflows =
+            [("broken".into(), [("shared".into(), server("old"))].into())].into();
+        fs::write(root.join(STATE), serde_json::to_vec(&previous).unwrap()).unwrap();
+        let replacement: Workflows =
+            [("valid".into(), [("shared".into(), server("new"))].into())].into();
+        let error = plan_state(root, Some(replacement.clone()), None, false).unwrap_err();
+        assert_eq!(error.code, "mcp_collision");
+        assert_eq!(
+            plan_state(root, Some(replacement.clone()), None, true)
+                .unwrap()
+                .2,
+            replacement
+        );
+    }
 }

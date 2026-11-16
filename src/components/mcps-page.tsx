@@ -31,7 +31,9 @@ import {
 import { useDiscardChanges } from "@/hooks/use-discard-changes"
 import { useProjectDiscardGuard } from "@/hooks/use-project-discard-guard"
 import { useDelayedFlag } from "@/hooks/use-delayed-flag"
+import { UsedByCell, UsedByHead, UsedByRow } from "@/components/used-by"
 import type { McpDocument, McpSummary } from "@/lib/projects"
+import type { UsedBy } from "@/lib/references"
 
 type McpsApi = {
   get: (id: string) => Promise<McpDocument>
@@ -43,12 +45,14 @@ type McpsApi = {
 
 export function McpsPage({
   mcps,
+  usedBy,
   initial,
   api,
   scope,
   header: Header,
 }: {
   mcps: McpSummary[]
+  usedBy: UsedBy
   initial?: string
   api: McpsApi
   scope: { path: string; label: string }
@@ -222,6 +226,7 @@ export function McpsPage({
                 <ListHead className="w-[26%]">Name</ListHead>
                 <ListHead>Type</ListHead>
                 <ListHead>Target</ListHead>
+                <UsedByHead className="w-28" project={usedBy.project} />
                 <ListHead className="w-14">
                   <span className="sr-only">Actions</span>
                 </ListHead>
@@ -252,6 +257,7 @@ export function McpsPage({
                     <ListCell className="font-mono text-xs text-foreground-dim">
                       {m.target ? <Truncated text={m.target} /> : "—"}
                     </ListCell>
+                    <UsedByCell refs={usedBy.of(m.name)} />
                     <ListCell>
                       {actions(m.name)}
                     </ListCell>
@@ -310,6 +316,11 @@ export function McpsPage({
                   <code className="font-mono">{"{env:VAR_NAME}"}</code>.
                 </p>
                 <McpFields draft={draft} onChange={setDraft} />
+                {typeof selected === "string" ? (
+                  <div className="mt-4">
+                    <UsedByRow refs={usedBy.of(selected)} project={usedBy.project} />
+                  </div>
+                ) : null}
               </>
             )}
             {error && (

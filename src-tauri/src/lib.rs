@@ -95,6 +95,7 @@ pub fn run() {
             harnesses::install_harness,
             harnesses::uninstall_harness,
             projects::project_state,
+            projects::project_references,
             projects::open_project,
             projects::pick_project,
             projects::remove_recent,

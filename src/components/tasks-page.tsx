@@ -16,6 +16,7 @@ import { TasksList, filterTasks } from "@/components/tasks-list"
 import { emptyTask, useTaskForm } from "@/hooks/use-task-form"
 import { taskSchema } from "@/lib/task-schema"
 import { outcomeRenames } from "@/lib/outcome-renames"
+import type { UsedBy } from "@/lib/references"
 
 export type TasksApi = {
   get: (id: string) => Promise<TaskDocument>
@@ -29,6 +30,7 @@ export type TasksApi = {
 /** List + inspector for a task store: the open project's tasks or the machine-wide global ones. */
 export function TasksPage({
   tasks,
+  usedBy,
   initial,
   api,
   fetchSkills,
@@ -36,6 +38,7 @@ export function TasksPage({
   header: Header,
 }: {
   tasks: TaskSummary[]
+  usedBy: UsedBy
   /** Task to open on mount (from the URL). */
   initial?: string
   api: TasksApi
@@ -226,6 +229,7 @@ export function TasksPage({
             ) : null}
             <TasksList
               tasks={tasks}
+              usedBy={usedBy}
               selected={selected ?? undefined}
               onSelect={(id) => void select(id)}
               onCreate={() => void select(null)}
@@ -244,6 +248,8 @@ export function TasksPage({
           key={selected ?? "\0new"}
           fetchSkills={fetchSkills}
           scope={scope}
+          usedBy={typeof selected === "string" ? usedBy.of(selected) : null}
+          project={usedBy.project}
           originalId={selected}
           form={form}
           footer={typeof selected === "string" && loaded ? actions(selected, "footer") : undefined}

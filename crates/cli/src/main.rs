@@ -16,6 +16,7 @@ mod import;
 mod init;
 mod opencode;
 mod runtime_output;
+mod session;
 
 #[derive(Parser)]
 #[command(name = "unelos", version, about = "Unelos command-line tool")]
@@ -38,6 +39,16 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Serve the controller MCP over stdio.
+    Mcp,
+    Session {
+        #[command(subcommand)]
+        command: session::SessionCommand,
+    },
+    Hook {
+        #[command(subcommand)]
+        command: session::HookCommand,
+    },
     /// Initialize the project scaffold (integrations are installed globally).
     Init,
     /// Detect harnesses and manage global integrations.
@@ -133,9 +144,17 @@ enum ConfigCommand {
 #[derive(Subcommand)]
 enum HarnessCommand {
     List,
-    Install { id: String },
-    Uninstall { id: String },
-    Models { id: String },
+    Install {
+        id: String,
+    },
+    Uninstall {
+        id: String,
+    },
+    Models {
+        id: String,
+    },
+    /// Generate native agents/MCP config for every installed harness in the project.
+    Build,
 }
 
 #[derive(Subcommand)]
@@ -178,7 +197,14 @@ struct RunSelector {
 #[tokio::main]
 async fn main() -> ExitCode {
     let cli = Cli::parse();
-    match run(&cli) {
+    let result = if matches!(cli.command, Command::Mcp) {
+        unelos_core::controller_mcp::serve_stdio()
+            .await
+            .map_err(Error::from)
+    } else {
+        run(&cli)
+    };
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(Error::Output(error)) if error.kind() == io::ErrorKind::BrokenPipe => ExitCode::SUCCESS,
         Err(error) => {
@@ -278,6 +304,9 @@ fn run(cli: &Cli) -> Result<(), Error> {
         subscriber.try_init().map_err(Error::Logging)?;
     }
     match &cli.command {
+        Command::Mcp => unreachable!(),
+        Command::Session { command } => session::activate(cli, command)?,
+        Command::Hook { command } => session::hook(command)?,
         Command::Harness { command } => {
             let value = match command {
                 HarnessCommand::List => serde_json::to_value(unelos_core::list_harnesses())?,
@@ -296,6 +325,9 @@ fn run(cli: &Cli) -> Result<(), Error> {
                 }
                 HarnessCommand::Models { id } => {
                     serde_json::to_value(unelos_core::harness_models(id)?)?
+                }
+                HarnessCommand::Build => {
+                    serde_json::to_value(unelos_core::build_harness_config(&cli.project)?)?
                 }
             };
             emit(&value, cli.json, serde_json::to_string_pretty(&value)?)?;

@@ -12,8 +12,19 @@ const agents = [
 const broken = { name: "broken", model: null, skills: [], mcps: [], problem: "bad <yaml>" }
 const render = (agents: AgentSummary[], query = "") =>
   renderToStaticMarkup(
-    createElement(mod.AgentsList, { agents, query, onClear() {} })
+    createElement(mod.AgentsList, {
+      agents,
+      query,
+      onClear() {},
+      usedBy: { of: (id) => (id === "engineer" ? [{ kind: "workflow", id: "w", name: "w" }] : []) },
+    })
   )
+
+test("used-by column shows workflow count", () => {
+  const html = render(agents)
+  expect(html).toMatch(/>Used by<\/th>/)
+  expect(html).toMatch(/>1 workflow<\/td>/)
+})
 
 test("filterAgents matches names only, case-insensitive, trimmed", () => {
   expect(mod.filterAgents(agents, " ENGINE ").map((a) => a.name)).toEqual(["engineer"])

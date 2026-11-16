@@ -2,6 +2,7 @@ import type { ReactNode } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { z } from "zod"
 import { PageHeader } from "@/components/page-header"
+import { loadReferences, usedByFor } from "@/lib/references"
 import { McpsError, McpsPage } from "@/components/mcps-page"
 import {
   getMcp,
@@ -18,6 +19,7 @@ export const Route = createFileRoute("/mcps/")({
   loader: async ({ context }) => ({
     root: context.project.path,
     mcps: await listMcps(context.project.path),
+    references: await loadReferences(context.project.path),
   }),
   component: McpsRoute,
   pendingComponent: () => <p role="status">Loading MCPs…</p>,
@@ -35,7 +37,7 @@ function Header({ action }: { action?: ReactNode }) {
 }
 
 function McpsRoute() {
-  const { root, mcps } = Route.useLoaderData()
+  const { root, mcps, references } = Route.useLoaderData()
   const { project } = Route.useRouteContext()
   const { mcp } = Route.useSearch()
   if (root !== project.path) return <p role="status">Loading MCPs…</p>
@@ -43,6 +45,7 @@ function McpsRoute() {
     <McpsPage
       key={root}
       mcps={mcps}
+      usedBy={usedByFor(references?.mcps)}
       initial={mcp}
       scope={{ path: "mcps", label: "Project MCP" }}
       header={Header}

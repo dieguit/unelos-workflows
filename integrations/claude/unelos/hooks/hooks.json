@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "PreToolUse": [{
+      "matcher": "mcp__plugin_unelos_unelos__.*",
+      "hooks": [{"type": "command", "command": "{{UNELOS_BIN_SHELL_JSON}} hook claude pre-tool-use"}]
+    }],
+    "SessionStart": [{
+      "hooks": [{"type": "command", "command": "{{UNELOS_BIN_SHELL_JSON}} hook claude session-start"}]
+    }]
+  }
+}

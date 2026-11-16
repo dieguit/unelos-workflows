@@ -2,6 +2,7 @@ import type { ReactNode } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { z } from "zod"
 import { PageHeader } from "@/components/page-header"
+import { loadReferences, usedByFor } from "@/lib/references"
 import { SkillsError, SkillsPage } from "@/components/skills-page"
 import {
   listSkills,
@@ -20,6 +21,7 @@ export const Route = createFileRoute("/skills/")({
   loader: async ({ context }) => ({
     root: context.project.path,
     skills: await listSkills(context.project.path),
+    references: await loadReferences(context.project.path),
   }),
   component: SkillsRoute,
   pendingComponent: () => <p role="status">Loading skills…</p>,
@@ -37,7 +39,7 @@ function Header({ action }: { action?: ReactNode }) {
 }
 
 function SkillsRoute() {
-  const { root, skills } = Route.useLoaderData()
+  const { root, skills, references } = Route.useLoaderData()
   const { project } = Route.useRouteContext()
   const { skill } = Route.useSearch()
   const navigate = Route.useNavigate()
@@ -52,6 +54,7 @@ function SkillsRoute() {
     <SkillsPage
       key={project.path}
       skills={skills}
+      usedBy={usedByFor(references?.skills)}
       id={skill}
       scope={root}
       header={Header}
