@@ -2,25 +2,29 @@ use super::*;
 use global_config::{atomic_write, read_state, write_state};
 
 pub struct OpenCode;
-pub(crate) fn resolve_agent_model(model: &crate::AgentModel) -> Result<String> {
-    let model = match model {
-        crate::AgentModel::Alias(alias) => crate::list_model_mappings()?
-            .get(alias)
-            .and_then(|models| models.get("opencode"))
-            .map(|mapped| mapped.model.clone())
-            .ok_or_else(|| {
-                error(
-                    "unmapped_model_alias",
-                    format!("No OpenCode model mapped for alias '{alias}'"),
-                )
-            })?,
-        crate::AgentModel::Harness { harness, model } if harness == "opencode" => model.clone(),
-        crate::AgentModel::Harness { harness, .. } => {
-            return Err(error(
+pub(crate) fn resolve_agent_model(
+    model: &crate::AgentModel,
+    effort: Option<&str>,
+) -> Result<String> {
+    let resolved = crate::model_mappings::resolve_harness_model(model, effort, "opencode")?
+        .ok_or_else(|| {
+            let crate::AgentModel::Harness { harness, .. } = model else {
+                unreachable!()
+            };
+            error(
                 "model_harness_mismatch",
                 format!("Model targets {harness}, expected opencode"),
-            ))
-        }
+            )
+        })?;
+    if effort.is_some() && resolved.model.contains('#') {
+        return Err(error(
+            "invalid_model",
+            "Expected provider/model without inline variant when effort is set",
+        ));
+    }
+    let model = match resolved.effort {
+        Some(effort) => format!("{}#{effort}", resolved.model),
+        None => resolved.model,
     };
     let (provider, rest) = model
         .split_once('/')

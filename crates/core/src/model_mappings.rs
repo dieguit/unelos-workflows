@@ -52,6 +52,42 @@ impl<'de> Deserialize<'de> for MappedModel {
 
 pub type ModelMappings = BTreeMap<String, BTreeMap<String, MappedModel>>;
 
+pub(crate) fn resolve_harness_model(
+    model: &crate::AgentModel,
+    effort: Option<&str>,
+    harness: &str,
+) -> Result<Option<MappedModel>, InstallError> {
+    let mut resolved = match model {
+        crate::AgentModel::Alias(alias) => list_model_mappings()?
+            .get(alias)
+            .and_then(|models| models.get(harness))
+            .cloned()
+            .ok_or_else(|| {
+                let name = match harness {
+                    "opencode" => "OpenCode",
+                    "claude" => "Claude",
+                    other => other,
+                };
+                error(
+                    "unmapped_model_alias",
+                    format!("No {name} model mapped for alias '{alias}'"),
+                )
+            })?,
+        crate::AgentModel::Harness {
+            harness: target,
+            model,
+        } if target == harness => MappedModel {
+            model: model.clone(),
+            effort: None,
+        },
+        _ => return Ok(None),
+    };
+    if let Some(effort) = effort {
+        resolved.effort = (effort != "default").then(|| effort.to_owned());
+    }
+    Ok(Some(resolved))
+}
+
 pub(crate) fn valid_effort(effort: &str) -> bool {
     !effort.is_empty() && !effort.chars().any(|c| c.is_whitespace() || c == '#')
 }

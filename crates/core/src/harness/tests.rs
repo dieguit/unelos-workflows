@@ -379,25 +379,209 @@ fn agent_models_resolve_global_aliases_for_opencode() {
     let _env = Env::set(&[("UNELOS_CONFIG_DIR", root.as_str())]);
     let alias = AgentModel::Alias("smart".into());
     assert_eq!(
-        resolve_agent_model(&alias).unwrap_err().code,
+        resolve_agent_model(&alias, None).unwrap_err().code,
         "unmapped_model_alias"
     );
     crate::save_model_mapping(
         Some("smart"),
         "smart",
-        [("opencode".into(), "provider/model".into())].into(),
+        [("opencode".into(), "provider/model#high".into())].into(),
     )
     .unwrap();
-    assert_eq!(resolve_agent_model(&alias).unwrap(), "provider/model");
     assert_eq!(
-        resolve_agent_model(&AgentModel::Harness {
-            harness: "claude".into(),
-            model: "x".into()
-        })
+        resolve_agent_model(&alias, None).unwrap(),
+        "provider/model#high"
+    );
+    assert_eq!(
+        resolve_agent_model(&alias, Some("default")).unwrap(),
+        "provider/model"
+    );
+    assert_eq!(
+        resolve_agent_model(
+            &AgentModel::Harness {
+                harness: "claude".into(),
+                model: "x".into()
+            },
+            None
+        )
         .unwrap_err()
         .code,
         "model_harness_mismatch"
     );
+}
+
+#[test]
+fn resolve_effort_matrix() {
+    use crate::{model_mappings::resolve_harness_model, AgentModel, MappedModel};
+    let _lock = ENV.lock().unwrap();
+    let temp = assert_fs::TempDir::new().unwrap();
+    let root = Utf8Path::from_path(temp.path()).unwrap();
+    let _env = Env::set(&[("UNELOS_CONFIG_DIR", root.as_str())]);
+    crate::save_model_mapping(
+        Some("smart"),
+        "smart",
+        [
+            ("opencode".into(), "p/m#high".into()),
+            ("claude".into(), "opus#max".into()),
+        ]
+        .into(),
+    )
+    .unwrap();
+    let alias = AgentModel::Alias("smart".into());
+    let direct = AgentModel::Harness {
+        harness: "claude".into(),
+        model: "sonnet".into(),
+    };
+    for (model, effort, harness, expected) in [
+        (&alias, None, "opencode", Some("p/m#high")),
+        (&alias, None, "claude", Some("opus#max")),
+        (&alias, Some("low"), "claude", Some("opus#low")),
+        (&alias, Some("default"), "opencode", Some("p/m")),
+        (&alias, Some("default"), "claude", Some("opus")),
+        (&direct, None, "claude", Some("sonnet")),
+        (&direct, Some("high"), "claude", Some("sonnet#high")),
+        (&direct, Some("default"), "claude", Some("sonnet")),
+        (&direct, Some("high"), "opencode", None),
+    ] {
+        assert_eq!(
+            resolve_harness_model(model, effort, harness).unwrap(),
+            expected.map(MappedModel::from)
+        );
+    }
+    for (harness, name) in [("opencode", "OpenCode"), ("claude", "Claude")] {
+        let err =
+            resolve_harness_model(&AgentModel::Alias("missing".into()), None, harness).unwrap_err();
+        assert_eq!(err.code, "unmapped_model_alias");
+        assert_eq!(
+            err.message,
+            format!("No {name} model mapped for alias 'missing'")
+        );
+    }
+}
+
+fn effort_agent(model: crate::AgentModel, effort: Option<&str>) -> crate::AgentExport {
+    crate::AgentExport {
+        id: "effort".into(),
+        instructions: "Work".into(),
+        model: Some(model),
+        effort: effort.map(str::to_owned),
+        tools: vec![],
+        mcps: vec![],
+        mcp_servers: Default::default(),
+        main: true,
+        subagent: true,
+    }
+}
+
+#[test]
+fn opencode_renders_effort_v1_v2() {
+    use crate::{
+        opencode_agents::{render_agents, Version},
+        AgentModel,
+    };
+    for (model, effort, expected) in [
+        ("p/m", Some("max"), "p/m#max"),
+        ("p/m", None, "p/m"),
+        ("p/m", Some("default"), "p/m"),
+        ("p/m#high", None, "p/m#high"),
+    ] {
+        let agent = effort_agent(
+            AgentModel::Harness {
+                harness: "opencode".into(),
+                model: model.into(),
+            },
+            effort,
+        );
+        for version in [Version::V1, Version::V2] {
+            let rendered = render_agents(version, &[agent.clone()]).unwrap();
+            let front: serde_json::Value =
+                serde_yaml_ng::from_str(rendered[0].1.split("---").nth(1).unwrap()).unwrap();
+            let (base, variant) = expected
+                .split_once('#')
+                .map_or((expected, None), |(m, v)| (m, Some(v)));
+            assert_eq!(
+                front["model"],
+                if version == Version::V2 {
+                    expected
+                } else {
+                    base
+                }
+            );
+            assert_eq!(
+                front.get("variant").and_then(|v| v.as_str()),
+                if version == Version::V1 {
+                    variant
+                } else {
+                    None
+                }
+            );
+        }
+    }
+    for effort in ["max", "default"] {
+        let agent = effort_agent(
+            AgentModel::Harness {
+                harness: "opencode".into(),
+                model: "p/m#high".into(),
+            },
+            Some(effort),
+        );
+        assert_eq!(
+            render_agents(Version::V2, &[agent.clone()])
+                .unwrap_err()
+                .code,
+            "invalid_model"
+        );
+        assert_eq!(
+            crate::opencode_agents::check_agents(Utf8Path::new("."), &[agent])
+                .unwrap_err()
+                .code,
+            "invalid_model"
+        );
+    }
+}
+
+#[test]
+fn claude_renders_effort() {
+    use crate::AgentModel;
+    let _lock = ENV.lock().unwrap();
+    let temp = assert_fs::TempDir::new().unwrap();
+    let root = Utf8Path::from_path(temp.path()).unwrap();
+    let _env = Env::set(&[("UNELOS_CONFIG_DIR", root.join("global").as_str())]);
+    crate::save_model_mapping(
+        Some("smart"),
+        "smart",
+        [("claude".into(), "opus#max".into())].into(),
+    )
+    .unwrap();
+    for (effort, expected) in [
+        (None, Some("max")),
+        (Some("default"), None),
+        (Some("low"), Some("low")),
+        (Some("medium"), Some("medium")),
+        (Some("high"), Some("high")),
+        (Some("xhigh"), Some("xhigh")),
+    ] {
+        let agent = effort_agent(AgentModel::Alias("smart".into()), effort);
+        claude::Claude
+            .build_project(root, &[("workflow".into(), vec![agent])].into(), true)
+            .unwrap();
+        let text = fs::read_to_string(root.join(".claude/agents/unelos-effort.md")).unwrap();
+        let front: serde_json::Value =
+            serde_yaml_ng::from_str(text.split("---").nth(1).unwrap()).unwrap();
+        assert_eq!(front["model"], "opus");
+        assert_eq!(front.get("effort").and_then(|v| v.as_str()), expected);
+    }
+    let path = root.join(".claude/agents/unelos-effort.md");
+    let before = fs::read(&path).unwrap();
+    let agent = effort_agent(AgentModel::Alias("smart".into()), Some("none"));
+    assert_eq!(
+        claude::Claude
+            .build_project(root, &[("workflow".into(), vec![agent])].into(), true)
+            .unwrap_err()
+            .code,
+        "invalid_effort"
+    );
+    assert_eq!(fs::read(path).unwrap(), before);
 }
 
 #[test]
