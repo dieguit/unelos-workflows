@@ -5,6 +5,7 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
 pub struct Claude;
+pub(super) const CLAUDE_EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 const PLUGIN: &str = "unelos@unelos-local";
 const FILES: &[(&str, &[u8])] = &[
     (
@@ -130,26 +131,6 @@ fn listed(args: &[&str], id: &str) -> Result<bool> {
     Ok(contains_id(&value, id))
 }
 
-fn resolve_model(model: &crate::AgentModel) -> Result<Option<String>> {
-    match model {
-        crate::AgentModel::Alias(alias) => crate::list_model_mappings()?
-            .get(alias)
-            .and_then(|models| models.get("claude"))
-            .cloned()
-            .map(Some)
-            .ok_or_else(|| {
-                error(
-                    "unmapped_model_alias",
-                    format!("No Claude model mapped for alias '{alias}'"),
-                )
-            }),
-        crate::AgentModel::Harness { harness, model } if harness == "claude" => {
-            Ok(Some(model.clone()))
-        }
-        _ => Ok(None),
-    }
-}
-
 fn render_agents(agents: &[crate::AgentExport]) -> Result<Vec<(Utf8PathBuf, String)>> {
     agents
         .iter()
@@ -161,11 +142,26 @@ fn render_agents(agents: &[crate::AgentExport]) -> Result<Vec<(Utf8PathBuf, Stri
             if let Some(model) = agent
                 .model
                 .as_ref()
-                .map(resolve_model)
+                .map(|model| {
+                    crate::model_mappings::resolve_harness_model(
+                        model,
+                        agent.effort.as_deref(),
+                        "claude",
+                    )
+                })
                 .transpose()?
                 .flatten()
             {
-                front["model"] = model.into();
+                front["model"] = model.model.into();
+                if let Some(effort) = model.effort {
+                    if !CLAUDE_EFFORTS.contains(&effort.as_str()) {
+                        return Err(error(
+                            "invalid_effort",
+                            format!("Invalid Claude effort '{effort}'"),
+                        ));
+                    }
+                    front["effort"] = effort.into();
+                }
             }
             let mut servers = Vec::new();
             for (id, server) in &agent.mcp_servers {
@@ -225,8 +221,13 @@ impl HarnessAdapter for Claude {
     fn installable(&self) -> bool {
         true
     }
-    fn list_models(&self) -> Result<Vec<Model>> {
-        Ok(["opus", "sonnet", "haiku"].map(str::to_owned).into())
+    fn list_models(&self) -> Result<Vec<ModelInfo>> {
+        Ok(["fable", "opus", "sonnet", "haiku"]
+            .map(|id| ModelInfo {
+                id: id.into(),
+                efforts: CLAUDE_EFFORTS.map(str::to_owned).into(),
+            })
+            .into())
     }
     fn validate(&self) -> Result<()> {
         read_state()?;

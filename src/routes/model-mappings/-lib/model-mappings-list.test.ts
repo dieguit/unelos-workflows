@@ -11,7 +11,7 @@ test("aliasError accepts lowercase dotted/dashed names only", () => {
 })
 
 test("filterMappings sorts and matches alias or model", () => {
-  const m = { smart: { opencode: "anthropic/x" }, fast: { opencode: "openai/y" }, deep: {} }
+  const m = { smart: { opencode: { model: "anthropic/x", effort: "high" } }, fast: { opencode: { model: "openai/y" } }, deep: {} }
   const harnesses = [{ id: "opencode" }]
   expect(mod.filterMappings(m, "", harnesses)).toEqual(["deep", "fast", "smart"])
   expect(mod.filterMappings(m, "OPENAI", harnesses)).toEqual(["fast"])
@@ -19,7 +19,7 @@ test("filterMappings sorts and matches alias or model", () => {
 })
 
 test("filterMappings searches installed harnesses only, including Claude", () => {
-  const mappings = { smart: { claude: "sonnet", opencode: "provider/hidden" } }
+  const mappings = { smart: { claude: { model: "sonnet" }, opencode: { model: "provider/hidden" } } }
   expect(mod.filterMappings(mappings, "sonnet", [{ id: "claude" }])).toEqual(["smart"])
   expect(mod.filterMappings(mappings, "hidden", [{ id: "claude" }])).toEqual([])
   expect(mod.filterMappings(mappings, "", [])).toEqual(["smart"])

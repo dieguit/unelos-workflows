@@ -41,13 +41,13 @@ pub use mcp_install::{
 };
 mod model_mappings;
 pub use model_mappings::{
-    delete_model_mapping, list_model_mappings, save_model_mapping, ModelMappings,
+    delete_model_mapping, list_model_mappings, save_model_mapping, MappedModel, ModelMappings,
 };
 pub mod global_config;
 pub mod harness;
 pub use harness::{
     harness_models, install_harness, list_harnesses, provision_cli, uninstall_harness,
-    HarnessStatus,
+    HarnessStatus, ModelInfo,
 };
 mod definitions;
 mod execution;

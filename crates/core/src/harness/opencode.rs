@@ -2,25 +2,62 @@ use super::*;
 use global_config::{atomic_write, read_state, write_state};
 
 pub struct OpenCode;
-pub(crate) fn resolve_agent_model(model: &crate::AgentModel) -> Result<String> {
-    let model = match model {
-        crate::AgentModel::Alias(alias) => crate::list_model_mappings()?
-            .get(alias)
-            .and_then(|models| models.get("opencode"))
-            .cloned()
-            .ok_or_else(|| {
-                error(
-                    "unmapped_model_alias",
-                    format!("No OpenCode model mapped for alias '{alias}'"),
-                )
-            })?,
-        crate::AgentModel::Harness { harness, model } if harness == "opencode" => model.clone(),
-        crate::AgentModel::Harness { harness, .. } => {
-            return Err(error(
+
+pub(crate) fn parse_opencode_model_list(json: &str) -> Option<Vec<ModelInfo>> {
+    #[derive(Deserialize)]
+    struct Listing {
+        data: Vec<Model>,
+    }
+    #[derive(Deserialize)]
+    struct Model {
+        #[serde(rename = "providerID")]
+        provider_id: String,
+        id: String,
+        variants: Vec<Variant>,
+    }
+    #[derive(Deserialize)]
+    struct Variant {
+        id: String,
+    }
+    let listing: Listing = serde_json::from_str(json).ok()?;
+    let mut models: Vec<_> = listing
+        .data
+        .into_iter()
+        .map(|model| ModelInfo {
+            id: format!("{}/{}", model.provider_id, model.id),
+            efforts: model
+                .variants
+                .into_iter()
+                .map(|variant| variant.id)
+                .collect(),
+        })
+        .collect();
+    models.sort_by(|a, b| a.id.cmp(&b.id));
+    Some(models)
+}
+pub(crate) fn resolve_agent_model(
+    model: &crate::AgentModel,
+    effort: Option<&str>,
+) -> Result<String> {
+    let resolved = crate::model_mappings::resolve_harness_model(model, effort, "opencode")?
+        .ok_or_else(|| {
+            let crate::AgentModel::Harness { harness, .. } = model else {
+                unreachable!()
+            };
+            error(
                 "model_harness_mismatch",
                 format!("Model targets {harness}, expected opencode"),
-            ))
-        }
+            )
+        })?;
+    if effort.is_some() && resolved.model.contains('#') {
+        return Err(error(
+            "invalid_model",
+            "Expected provider/model without inline variant when effort is set",
+        ));
+    }
+    let model = match resolved.effort {
+        Some(effort) => format!("{}#{effort}", resolved.model),
+        None => resolved.model,
     };
     let (provider, rest) = model
         .split_once('/')
@@ -236,14 +273,23 @@ impl HarnessAdapter for OpenCode {
         }
         Ok(())
     }
-    fn list_models(&self) -> Result<Vec<Model>> {
+    fn list_models(&self) -> Result<Vec<ModelInfo>> {
         let bin = find_binary(self.binaries())
             .ok_or_else(|| error("harness_not_detected", "opencode is not on PATH"))?;
+        if let Some(models) = process_output(&bin, &["api", "model.list"], Duration::from_secs(30))
+            .ok()
+            .and_then(|json| parse_opencode_model_list(&json))
+        {
+            return Ok(models);
+        }
         Ok(process_output(&bin, &["models"], Duration::from_secs(30))?
             .lines()
             .map(str::trim)
             .filter(|l| !l.is_empty())
-            .map(str::to_owned)
+            .map(|id| ModelInfo {
+                id: id.into(),
+                efforts: vec![],
+            })
             .collect())
     }
 }

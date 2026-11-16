@@ -11,12 +11,13 @@ export const mappingSchema = z.object({
     ),
   models: z.record(
     z.string(),
-    z
-      .string()
-      .refine(
-        (model) => !/\s/u.test(model),
-        "Model must not contain whitespace."
-      )
+    z.object({
+      model: z.string().refine(
+        (model) => !/[\s#]/u.test(model),
+        "Model must not contain whitespace or #."
+      ),
+      effort: z.string().min(1).regex(/^[^\s#]+$/u, "Invalid effort.").optional(),
+    })
   ),
 })
 export type MappingDraft = z.infer<typeof mappingSchema>

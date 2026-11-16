@@ -55,6 +55,7 @@ pub struct AgentDefinition {
     pub mcps: Vec<String>,
     pub tools: Vec<String>,
     pub model: Option<AgentModel>,
+    pub effort: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -113,6 +114,12 @@ struct AgentWire {
     tools: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     model: Option<AgentModel>,
+    #[serde(
+        default,
+        deserialize_with = "present_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    effort: Option<String>,
 }
 
 fn instruction_source(
@@ -157,6 +164,14 @@ impl From<TaskDefinition> for TaskWire {
 impl TryFrom<AgentWire> for AgentDefinition {
     type Error = String;
     fn try_from(raw: AgentWire) -> Result<Self, Self::Error> {
+        if let Some(effort) = &raw.effort {
+            if raw.model.is_none() {
+                return Err("effort requires model".into());
+            }
+            if !crate::model_mappings::valid_effort(effort) {
+                return Err("invalid effort".into());
+            }
+        }
         Ok(Self {
             instructions: instruction_source(raw.instructions, &raw.instructions_file)?,
             instructions_file: raw.instructions_file,
@@ -164,6 +179,7 @@ impl TryFrom<AgentWire> for AgentDefinition {
             mcps: raw.mcps,
             tools: raw.tools,
             model: raw.model,
+            effort: raw.effort,
         })
     }
 }
@@ -180,6 +196,7 @@ impl From<AgentDefinition> for AgentWire {
             mcps: agent.mcps,
             tools: agent.tools,
             model: agent.model,
+            effort: agent.effort,
         }
     }
 }

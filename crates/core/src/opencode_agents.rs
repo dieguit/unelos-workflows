@@ -12,7 +12,7 @@ pub enum Version {
 pub fn check_agents(root: &Utf8Path, agents: &[AgentExport]) -> Result<(), InstallError> {
     for agent in agents {
         if let Some(model) = &agent.model {
-            crate::harness::opencode::resolve_agent_model(model)?;
+            crate::harness::opencode::resolve_agent_model(model, agent.effort.as_deref())?;
         }
         crate::check_install_path(
             root,
@@ -44,7 +44,9 @@ pub fn render_agents(
         if let Some(model) = agent
             .model
             .as_ref()
-            .map(crate::harness::opencode::resolve_agent_model)
+            .map(|model| {
+                crate::harness::opencode::resolve_agent_model(model, agent.effort.as_deref())
+            })
             .transpose()?
         {
             match version {

@@ -12,6 +12,7 @@ fn create_update_models_and_validation() {
         mcps: vec!["github".into()],
         tools: vec!["read".into()],
         model: Some(AgentModel::Alias("smart".into())),
+        effort: None,
     };
     let mut agent = save_agent(root, None, agent).unwrap();
     assert_eq!(agent.instructions, "first");
@@ -32,6 +33,54 @@ fn create_update_models_and_validation() {
     let mut invalid = get_agent(root, "test").unwrap();
     invalid.id = "../escape".into();
     assert!(save_agent(root, None, invalid).is_err());
+}
+
+#[test]
+fn direct_default_effort_normalized() {
+    let temp = assert_fs::TempDir::new().unwrap();
+    let root = Utf8Path::from_path(temp.path()).unwrap();
+    let agent = AgentDocument {
+        id: "test".into(),
+        instructions: "x".into(),
+        skills: vec![],
+        mcps: vec![],
+        tools: vec![],
+        model: Some(AgentModel::Harness {
+            harness: "claude".into(),
+            model: "sonnet".into(),
+        }),
+        effort: Some("default".into()),
+    };
+    let mut agent = save_agent(root, None, agent).unwrap();
+    assert_eq!(agent.effort, None);
+    agent.model = Some(AgentModel::Alias("smart".into()));
+    agent.effort = Some("default".into());
+    let agent = save_agent(root, Some("test"), agent).unwrap();
+    assert_eq!(agent.effort.as_deref(), Some("default"));
+}
+
+#[test]
+fn legacy_inline_opencode_variant_split() {
+    let temp = assert_fs::TempDir::new().unwrap();
+    let root = Utf8Path::from_path(temp.path()).unwrap();
+    let source = root.join(".unelos/agents/test/agent.yaml");
+    std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+    let yaml = "instructions: x\nmodel: {harness: opencode, model: \"p/m#high\"}\n";
+    std::fs::write(&source, yaml).unwrap();
+    let agent = get_agent(root, "test").unwrap();
+    assert_eq!(
+        agent.model,
+        Some(AgentModel::Harness {
+            harness: "opencode".into(),
+            model: "p/m".into()
+        })
+    );
+    assert_eq!(agent.effort.as_deref(), Some("high"));
+    assert_eq!(std::fs::read_to_string(&source).unwrap(), yaml);
+    save_agent(root, Some("test"), agent).unwrap();
+    let migrated = std::fs::read_to_string(&source).unwrap();
+    assert!(!migrated.contains('#'));
+    assert!(migrated.contains("effort: high"));
 }
 
 #[test]

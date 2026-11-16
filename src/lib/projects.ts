@@ -1,6 +1,7 @@
 import { redirect } from "@tanstack/react-router"
 import { toast } from "sonner"
 import { trackedInvoke } from "./tauri"
+import type { ModelInfo, ModelMappings } from "./model-mappings"
 
 export type RecentProject = {
   path: string
@@ -64,13 +65,14 @@ export type AgentDocument = {
   mcps: string[]
   tools: string[]
   model: AgentModel | null
+  effort: string | null
 }
 export type AgentModelOptions = {
-  aliases: string[]
+  mappings: ModelMappings
   harnesses: {
     id: string
     name: string
-    models: string[]
+    models: ModelInfo[]
     error: string | null
   }[]
 }

@@ -46,7 +46,7 @@ export function ModelPicker({
 }) {
   const [open, setOpen] = useState(false)
   const listRef = useRef<HTMLDivElement>(null)
-  const list = models?.models
+  const list = models?.models?.map((model) => model.id)
   // Keep the saved model selectable even if the harness no longer lists it.
   const options =
     list && value && !list.includes(value) ? [value, ...list] : list

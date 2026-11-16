@@ -154,6 +154,7 @@ fn claude_agent_model_mapping_and_mcp_list() {
         id: "test".into(),
         instructions: "Do work".into(),
         model: Some(AgentModel::Alias("smart".into())),
+        effort: None,
         tools: vec![],
         mcps: vec!["local".into(), "remote".into()],
         mcp_servers: [
@@ -221,7 +222,12 @@ fn claude_agent_model_mapping_and_mcp_list() {
     }
     assert_eq!(
         claude::Claude.list_models().unwrap(),
-        ["opus", "sonnet", "haiku"]
+        ["fable", "opus", "sonnet", "haiku"].map(|id| ModelInfo {
+            id: id.into(),
+            efforts: ["low", "medium", "high", "xhigh", "max"]
+                .map(str::to_owned)
+                .into(),
+        })
     );
 }
 
@@ -378,25 +384,209 @@ fn agent_models_resolve_global_aliases_for_opencode() {
     let _env = Env::set(&[("UNELOS_CONFIG_DIR", root.as_str())]);
     let alias = AgentModel::Alias("smart".into());
     assert_eq!(
-        resolve_agent_model(&alias).unwrap_err().code,
+        resolve_agent_model(&alias, None).unwrap_err().code,
         "unmapped_model_alias"
     );
     crate::save_model_mapping(
         Some("smart"),
         "smart",
-        [("opencode".into(), "provider/model".into())].into(),
+        [("opencode".into(), "provider/model#high".into())].into(),
     )
     .unwrap();
-    assert_eq!(resolve_agent_model(&alias).unwrap(), "provider/model");
     assert_eq!(
-        resolve_agent_model(&AgentModel::Harness {
-            harness: "claude".into(),
-            model: "x".into()
-        })
+        resolve_agent_model(&alias, None).unwrap(),
+        "provider/model#high"
+    );
+    assert_eq!(
+        resolve_agent_model(&alias, Some("default")).unwrap(),
+        "provider/model"
+    );
+    assert_eq!(
+        resolve_agent_model(
+            &AgentModel::Harness {
+                harness: "claude".into(),
+                model: "x".into()
+            },
+            None
+        )
         .unwrap_err()
         .code,
         "model_harness_mismatch"
     );
+}
+
+#[test]
+fn resolve_effort_matrix() {
+    use crate::{model_mappings::resolve_harness_model, AgentModel, MappedModel};
+    let _lock = ENV.lock().unwrap();
+    let temp = assert_fs::TempDir::new().unwrap();
+    let root = Utf8Path::from_path(temp.path()).unwrap();
+    let _env = Env::set(&[("UNELOS_CONFIG_DIR", root.as_str())]);
+    crate::save_model_mapping(
+        Some("smart"),
+        "smart",
+        [
+            ("opencode".into(), "p/m#high".into()),
+            ("claude".into(), "opus#max".into()),
+        ]
+        .into(),
+    )
+    .unwrap();
+    let alias = AgentModel::Alias("smart".into());
+    let direct = AgentModel::Harness {
+        harness: "claude".into(),
+        model: "sonnet".into(),
+    };
+    for (model, effort, harness, expected) in [
+        (&alias, None, "opencode", Some("p/m#high")),
+        (&alias, None, "claude", Some("opus#max")),
+        (&alias, Some("low"), "claude", Some("opus#low")),
+        (&alias, Some("default"), "opencode", Some("p/m")),
+        (&alias, Some("default"), "claude", Some("opus")),
+        (&direct, None, "claude", Some("sonnet")),
+        (&direct, Some("high"), "claude", Some("sonnet#high")),
+        (&direct, Some("default"), "claude", Some("sonnet")),
+        (&direct, Some("high"), "opencode", None),
+    ] {
+        assert_eq!(
+            resolve_harness_model(model, effort, harness).unwrap(),
+            expected.map(MappedModel::from)
+        );
+    }
+    for (harness, name) in [("opencode", "OpenCode"), ("claude", "Claude")] {
+        let err =
+            resolve_harness_model(&AgentModel::Alias("missing".into()), None, harness).unwrap_err();
+        assert_eq!(err.code, "unmapped_model_alias");
+        assert_eq!(
+            err.message,
+            format!("No {name} model mapped for alias 'missing'")
+        );
+    }
+}
+
+fn effort_agent(model: crate::AgentModel, effort: Option<&str>) -> crate::AgentExport {
+    crate::AgentExport {
+        id: "effort".into(),
+        instructions: "Work".into(),
+        model: Some(model),
+        effort: effort.map(str::to_owned),
+        tools: vec![],
+        mcps: vec![],
+        mcp_servers: Default::default(),
+        main: true,
+        subagent: true,
+    }
+}
+
+#[test]
+fn opencode_renders_effort_v1_v2() {
+    use crate::{
+        opencode_agents::{render_agents, Version},
+        AgentModel,
+    };
+    for (model, effort, expected) in [
+        ("p/m", Some("max"), "p/m#max"),
+        ("p/m", None, "p/m"),
+        ("p/m", Some("default"), "p/m"),
+        ("p/m#high", None, "p/m#high"),
+    ] {
+        let agent = effort_agent(
+            AgentModel::Harness {
+                harness: "opencode".into(),
+                model: model.into(),
+            },
+            effort,
+        );
+        for version in [Version::V1, Version::V2] {
+            let rendered = render_agents(version, std::slice::from_ref(&agent)).unwrap();
+            let front: serde_json::Value =
+                serde_yaml_ng::from_str(rendered[0].1.split("---").nth(1).unwrap()).unwrap();
+            let (base, variant) = expected
+                .split_once('#')
+                .map_or((expected, None), |(m, v)| (m, Some(v)));
+            assert_eq!(
+                front["model"],
+                if version == Version::V2 {
+                    expected
+                } else {
+                    base
+                }
+            );
+            assert_eq!(
+                front.get("variant").and_then(|v| v.as_str()),
+                if version == Version::V1 {
+                    variant
+                } else {
+                    None
+                }
+            );
+        }
+    }
+    for effort in ["max", "default"] {
+        let agent = effort_agent(
+            AgentModel::Harness {
+                harness: "opencode".into(),
+                model: "p/m#high".into(),
+            },
+            Some(effort),
+        );
+        assert_eq!(
+            render_agents(Version::V2, std::slice::from_ref(&agent))
+                .unwrap_err()
+                .code,
+            "invalid_model"
+        );
+        assert_eq!(
+            crate::opencode_agents::check_agents(Utf8Path::new("."), &[agent])
+                .unwrap_err()
+                .code,
+            "invalid_model"
+        );
+    }
+}
+
+#[test]
+fn claude_renders_effort() {
+    use crate::AgentModel;
+    let _lock = ENV.lock().unwrap();
+    let temp = assert_fs::TempDir::new().unwrap();
+    let root = Utf8Path::from_path(temp.path()).unwrap();
+    let _env = Env::set(&[("UNELOS_CONFIG_DIR", root.join("global").as_str())]);
+    crate::save_model_mapping(
+        Some("smart"),
+        "smart",
+        [("claude".into(), "opus#max".into())].into(),
+    )
+    .unwrap();
+    for (effort, expected) in [
+        (None, Some("max")),
+        (Some("default"), None),
+        (Some("low"), Some("low")),
+        (Some("medium"), Some("medium")),
+        (Some("high"), Some("high")),
+        (Some("xhigh"), Some("xhigh")),
+    ] {
+        let agent = effort_agent(AgentModel::Alias("smart".into()), effort);
+        claude::Claude
+            .build_project(root, &[("workflow".into(), vec![agent])].into(), true)
+            .unwrap();
+        let text = fs::read_to_string(root.join(".claude/agents/unelos-effort.md")).unwrap();
+        let front: serde_json::Value =
+            serde_yaml_ng::from_str(text.split("---").nth(1).unwrap()).unwrap();
+        assert_eq!(front["model"], "opus");
+        assert_eq!(front.get("effort").and_then(|v| v.as_str()), expected);
+    }
+    let path = root.join(".claude/agents/unelos-effort.md");
+    let before = fs::read(&path).unwrap();
+    let agent = effort_agent(AgentModel::Alias("smart".into()), Some("none"));
+    assert_eq!(
+        claude::Claude
+            .build_project(root, &[("workflow".into(), vec![agent])].into(), true)
+            .unwrap_err()
+            .code,
+        "invalid_effort"
+    );
+    assert_eq!(fs::read(path).unwrap(), before);
 }
 
 #[test]
@@ -424,6 +614,66 @@ fn model_mapping_lifecycle() {
     let saved = save_model_mapping(None, "smart", models.clone()).unwrap();
     assert_eq!(saved["smart"].len(), 1);
     assert_eq!(list_model_mappings().unwrap(), saved);
+    let json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(root.join("models.json")).unwrap()).unwrap();
+    assert!(json["smart"]["opencode"].get("effort").is_none());
+    for effort in ["a b", "x#y"] {
+        let err = save_model_mapping(
+            Some("smart"),
+            "smart",
+            BTreeMap::from([(
+                "opencode".into(),
+                crate::MappedModel {
+                    model: "p/m".into(),
+                    effort: Some(effort.into()),
+                },
+            )]),
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "invalid_effort");
+    }
+    assert_eq!(
+        save_model_mapping(
+            Some("smart"),
+            "smart",
+            BTreeMap::from([(
+                "opencode".into(),
+                crate::MappedModel {
+                    model: "p/m#high".into(),
+                    effort: None
+                }
+            )])
+        )
+        .unwrap_err()
+        .code,
+        "invalid_model"
+    );
+    let normalized = save_model_mapping(
+        Some("smart"),
+        "smart",
+        BTreeMap::from([(
+            "opencode".into(),
+            crate::MappedModel {
+                model: "p/m".into(),
+                effort: Some("".into()),
+            },
+        )]),
+    )
+    .unwrap();
+    assert_eq!(normalized["smart"]["opencode"].effort, None);
+    for claude in ["opus", "sonnet"] {
+        let updated = save_model_mapping(
+            Some("smart"),
+            "smart",
+            BTreeMap::from([
+                ("opencode".into(), crate::MappedModel::from("p/m#high")),
+                ("claude".into(), claude.into()),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(updated["smart"]["opencode"].effort.as_deref(), Some("high"));
+    }
+    save_model_mapping(Some("smart"), "smart", models.clone()).unwrap();
     assert!(save_model_mapping(None, "smart", models.clone()).is_err());
     assert!(save_model_mapping(Some("missing"), "new", models.clone()).is_err());
     for invalid in [
@@ -462,6 +712,33 @@ fn model_mapping_lifecycle() {
         fs::read_to_string(root.join("models.json")).unwrap(),
         "not json"
     );
+}
+
+#[test]
+fn legacy_model_mappings_load() {
+    let _lock = ENV.lock().unwrap();
+    let temp = assert_fs::TempDir::new().unwrap();
+    let root = Utf8Path::from_path(temp.path()).unwrap();
+    let _env = Env::set(&[("UNELOS_CONFIG_DIR", root.as_str())]);
+    let bytes = br#"{"smart":{"opencode":"p/m#high","claude":"opus"},"fast":{"claude":{"model":"haiku","effort":"low"}}}"#;
+    fs::write(root.join("models.json"), bytes).unwrap();
+    let mappings = crate::list_model_mappings().unwrap();
+    assert_eq!(
+        mappings["smart"]["opencode"],
+        crate::MappedModel {
+            model: "p/m".into(),
+            effort: Some("high".into())
+        }
+    );
+    assert_eq!(
+        mappings["smart"]["claude"],
+        crate::MappedModel {
+            model: "opus".into(),
+            effort: None
+        }
+    );
+    assert_eq!(mappings["fast"]["claude"].effort.as_deref(), Some("low"));
+    assert_eq!(fs::read(root.join("models.json")).unwrap(), bytes);
 }
 
 #[test]
@@ -604,11 +881,66 @@ fn path_detection_version_models_and_timeout() {
     fs::write(&bin, "#!/bin/sh\nif [ \"$1\" = models ]; then printf 'a/model\\nb/model\\n'; else echo 'opencode v2.3.4'; fi\n").unwrap();
     fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
     assert_eq!(list_harnesses()[0].version.as_deref(), Some("2.3.4"));
-    assert_eq!(harness_models("opencode").unwrap(), ["a/model", "b/model"]);
+    assert_eq!(
+        harness_models("opencode").unwrap(),
+        ["a/model", "b/model"].map(|id| ModelInfo {
+            id: id.into(),
+            efforts: vec![],
+        })
+    );
+    fs::write(&bin, format!("#!/bin/sh\nif [ \"$1\" = api ] && [ \"$2\" = model.list ]; then printf '%s' '{}'; else exit 1; fi\n", MODEL_LIST)).unwrap();
+    assert_eq!(harness_models("opencode").unwrap(), expected_model_list());
     fs::write(&bin, "#!/bin/sh\nwhile :; do :; done\n").unwrap();
     let start = Instant::now();
     assert_eq!(opencode::OpenCode.version(&bin), None);
     assert!(start.elapsed() < Duration::from_secs(4));
+}
+
+const MODEL_LIST: &str = r#"{"location":"x","data":[{"providerID":"openai","id":"gpt","variants":[{"id":"none"},{"id":"high"}]},{"providerID":"anthropic","id":"opus","variants":[]}]}"#;
+
+fn expected_model_list() -> Vec<ModelInfo> {
+    vec![
+        ModelInfo {
+            id: "anthropic/opus".into(),
+            efforts: vec![],
+        },
+        ModelInfo {
+            id: "openai/gpt".into(),
+            efforts: vec!["none".into(), "high".into()],
+        },
+    ]
+}
+
+#[test]
+fn parse_opencode_model_list_reads_variants() {
+    assert_eq!(
+        opencode::parse_opencode_model_list(MODEL_LIST),
+        Some(expected_model_list())
+    );
+    for invalid in [
+        "not json",
+        "{}",
+        r#"{"data":[{"providerID":"p","id":"m"}]}"#,
+        r#"{"data":[{"providerID":"p","id":"m","variants":[{}]}]}"#,
+    ] {
+        assert_eq!(opencode::parse_opencode_model_list(invalid), None);
+    }
+    assert_eq!(
+        opencode::parse_opencode_model_list(r#"{"data":[]}"#),
+        Some(vec![])
+    );
+}
+
+#[test]
+fn claude_models_have_static_efforts() {
+    let models = harness_models("claude").unwrap();
+    assert_eq!(
+        models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+        ["fable", "opus", "sonnet", "haiku"]
+    );
+    for model in models {
+        assert_eq!(model.efforts, ["low", "medium", "high", "xhigh", "max"]);
+    }
 }
 
 #[test]

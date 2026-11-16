@@ -1,6 +1,6 @@
 import { BusyContent } from "@/components/busy-content"
 import { useDelayedFlag } from "@/hooks/use-delayed-flag"
-import { useCallback, type ReactNode } from "react"
+import { useCallback, useEffect, type ReactNode } from "react"
 import { McpPicker } from "./mcp-picker"
 import { Link } from "@tanstack/react-router"
 import { PanelRightCloseIcon, PencilIcon, XIcon } from "lucide-react"
@@ -14,13 +14,16 @@ import {
   FieldTitle,
 } from "@/components/ui/field"
 import { listAllSkills } from "@/hooks/skill-fetchers"
-import { listGlobalMcps, listMcps, type AgentDocument, type Reference } from "@/lib/projects"
+import { agentModelOptions, listGlobalMcps, listMcps, type AgentDocument, type Reference } from "@/lib/projects"
 import { UsedByRow } from "@/components/used-by"
 import type { AgentForm } from "../-hooks/use-agent-form"
 import { useLazy } from "@/hooks/use-lazy"
 import { AgentModelPicker } from "./model-picker"
 import { SkillPicker } from "@/components/skill-picker"
 import { SkillLink } from "@/components/skill-link"
+import { EffortPicker } from "@/components/effort-picker"
+import { effortChoices } from "@/lib/effort-options"
+import { aliasEfforts, directEfforts, inheritedLabel } from "../-lib/agent-effort"
 
 export function AgentInspector({
   root,
@@ -63,6 +66,15 @@ export function AgentInspector({
     return [...project, ...global.map((m) => ({ ...m, name: `global/${m.name}` }))]
   }, [root])
   const mcps = useLazy(fetchMcps)
+  const options = useLazy(agentModelOptions)
+  const { load } = options
+  useEffect(() => load(), [load])
+  const offeredEfforts = (model: AgentDocument["model"]) => {
+    if (!options.data || !model) return undefined
+    return typeof model === "string"
+      ? aliasEfforts(options.data, model)
+      : directEfforts(options.data, model.harness, model.model)
+  }
   return (
     <aside inert={saving}
       aria-label={originalId ? `Agent ${originalId}` : "New Agent"}
@@ -235,11 +247,46 @@ export function AgentInspector({
                     <Field onBlur={field.handleBlur} className="grid grid-cols-[76px_minmax(0,1fr)] items-center gap-x-2 [&>label]:text-foreground-dim">
                       <FieldLabel htmlFor="agent-model">Model</FieldLabel>
                       <AgentModelPicker
+                        options={options}
                         value={field.state.value}
-                        onChange={field.handleChange}
+                        onChange={(model) => {
+                          const current = field.state.value
+                          if (JSON.stringify(current) !== JSON.stringify(model)) {
+                            const offered = offeredEfforts(model)
+                            const effort = form.getFieldValue("effort")
+                            if (!model || (effort !== null && offered !== undefined &&
+                              !(typeof model === "string" && effort === "default") &&
+                              !offered.includes(effort))) form.setFieldValue("effort", null)
+                          }
+                          field.handleChange(model)
+                        }}
                       />
                     </Field>
                   )}
+                </form.Field>
+                <form.Field name="effort">
+                  {(field) => {
+                    const model = draft.model
+                    if (!model) return null
+                    const alias = typeof model === "string"
+                    const value = field.state.value ?? undefined
+                    return (
+                      <Field onBlur={field.handleBlur} className="grid grid-cols-[76px_minmax(0,1fr)] items-center gap-x-2 [&>label]:text-foreground-dim">
+                        <FieldLabel htmlFor="agent-effort">Effort</FieldLabel>
+                        <EffortPicker
+                          id="agent-effort"
+                          label="Agent effort"
+                          value={value}
+                          leading={alias ? [
+                            { value: undefined, label: options.data ? inheritedLabel(options.data, model) : "Mapping default" },
+                            { value: "default", label: "Default" },
+                          ] : [{ value: undefined, label: "Default" }]}
+                          choices={effortChoices(offeredEfforts(model), value === "default" ? undefined : value)}
+                          onChange={(effort) => field.handleChange(effort ?? null)}
+                        />
+                      </Field>
+                    )
+                  }}
                 </form.Field>
                 <form.Field name="mcps" mode="array">
                   {(field) => (

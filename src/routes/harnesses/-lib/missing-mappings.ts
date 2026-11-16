@@ -11,7 +11,7 @@ export function missingAliases(
   agents: AgentSummary[] | null
 ): MissingAlias[] {
   return Object.keys(mappings)
-    .filter((alias) => !mappings[alias][harnessId])
+    .filter((alias) => !mappings[alias][harnessId]?.model)
     .map((alias) => ({ alias, agents: usedBy(agents, alias) ?? [] }))
     .sort(
       (a, b) =>

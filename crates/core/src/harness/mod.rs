@@ -16,7 +16,12 @@ use std::{
 };
 
 pub type Result<T> = std::result::Result<T, InstallError>;
-pub type Model = String;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelInfo {
+    pub id: String,
+    pub efforts: Vec<String>,
+}
 pub const INTEGRATION_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub struct Ctx {
     pub binary: Utf8PathBuf,
@@ -55,7 +60,7 @@ pub trait HarnessAdapter {
     fn uninstall(&self, _cx: &Ctx) -> Result<()> {
         Err(error("harness_not_installable", self.id()))
     }
-    fn list_models(&self) -> Result<Vec<Model>> {
+    fn list_models(&self) -> Result<Vec<ModelInfo>> {
         Err(error("harness_models_unavailable", self.id()))
     }
 }
@@ -291,7 +296,7 @@ pub fn uninstall_harness(id: &str) -> Result<Vec<HarnessStatus>> {
     adapter(id)?.uninstall(&context()?)?;
     Ok(list_harnesses())
 }
-pub fn harness_models(id: &str) -> Result<Vec<Model>> {
+pub fn harness_models(id: &str) -> Result<Vec<ModelInfo>> {
     adapter(id)?.list_models()
 }
 pub fn provision_cli(src: &Utf8Path) -> Result<Utf8PathBuf> {

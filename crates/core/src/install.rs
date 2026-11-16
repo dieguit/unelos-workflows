@@ -13,6 +13,7 @@ pub struct AgentExport {
     pub id: String,
     pub instructions: String,
     pub model: Option<crate::AgentModel>,
+    pub effort: Option<String>,
     pub tools: Vec<String>,
     pub mcps: Vec<String>,
     #[serde(skip)]
@@ -119,6 +120,7 @@ fn export(project: &LoadedProject) -> Result<Vec<AgentExport>, InstallError> {
                 id,
                 instructions: agent.instructions.clone(),
                 model: agent.model.clone(),
+                effort: agent.effort.clone(),
                 tools: agent.tools.clone(),
                 mcps: agent.mcps.clone(),
                 mcp_servers,

@@ -10,6 +10,7 @@ export const agentSchema = z.object({
   skills: z.array(z.string()),
   mcps: z.array(z.string()),
   tools: z.array(z.string()),
+  effort: z.string().nullable(),
   model: z
     .union([z.string(), z.object({ harness: z.string(), model: z.string() })])
     .nullable(),

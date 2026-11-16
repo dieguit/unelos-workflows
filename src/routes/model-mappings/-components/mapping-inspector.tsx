@@ -18,6 +18,8 @@ import {
 } from "@/components/ui/field"
 import type { MappingForm } from "../-hooks/use-mapping-form"
 import { ModelPicker } from "@/components/model-picker"
+import { EffortPicker } from "@/components/effort-picker"
+import { effortChoices, effortsFor } from "@/lib/effort-options"
 
 export function MappingInspector({
   harnesses,
@@ -203,11 +205,17 @@ export function MappingInspector({
                           <ModelPicker
                             id={`model-${h.id}`}
                             label={h.name}
-                            value={field.state.value}
+                            value={field.state.value?.model || undefined}
                             models={harnessModels[h.id]}
                             onOpen={() => onLoadModels(h.id)}
                             onChange={(model) => {
-                              field.handleChange(model)
+                              if (model === field.state.value?.model) return
+                              const offered = effortsFor(harnessModels[h.id]?.models, model)
+                              const effort = field.state.value?.effort
+                              field.handleChange({
+                                model,
+                                effort: offered === undefined || (effort !== undefined && offered.includes(effort)) ? effort : undefined,
+                              })
                               field.handleBlur()
                             }}
                             invalid={
@@ -221,6 +229,24 @@ export function MappingInspector({
                                 : undefined
                             }
                           />
+                          <EffortPicker
+                            id={`effort-${h.id}`}
+                            label={`${h.name} effort`}
+                            value={field.state.value?.effort}
+                            leading={[{ value: undefined, label: "Default" }]}
+                            choices={effortChoices(
+                              effortsFor(harnessModels[h.id]?.models, field.state.value?.model),
+                              field.state.value?.effort
+                            )}
+                            disabled={!field.state.value?.model || (
+                              effortsFor(harnessModels[h.id]?.models, field.state.value?.model)?.length === 0
+                              && !field.state.value?.effort
+                            )}
+                            onChange={(effort) => {
+                              field.handleChange({ model: field.state.value.model, effort })
+                              field.handleBlur()
+                            }}
+                          />
                           {(field.state.meta.isBlurred ||
                             form.state.submissionAttempts > 0) &&
                           !field.state.meta.isValid ? (
@@ -229,7 +255,7 @@ export function MappingInspector({
                               errors={field.state.meta.errors}
                             />
                           ) : null}
-                          {!field.state.value ? (
+                          {!field.state.value?.model ? (
                             <p className="flex gap-1.5 text-xs text-warning">
                               <TriangleAlertIcon
                                 aria-hidden="true"

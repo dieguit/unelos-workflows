@@ -183,6 +183,7 @@ fn resolves_only_selected_skills_and_does_not_load_unused_agents_skills() {
             mcps: vec![],
             tools: vec![],
             model: None,
+            effort: None,
         },
     );
     let value = serde_json::to_value(inspect_task(&project, "implement").unwrap()).unwrap();
