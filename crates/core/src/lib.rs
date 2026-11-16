@@ -23,6 +23,8 @@ mod agent_document;
 mod harness_build;
 mod mcp_document;
 mod mcp_install;
+mod uninstall;
+pub use uninstall::{uninstall_project, ProjectUninstall};
 pub mod opencode_agents;
 pub use agent_document::{
     agent_model_options, get_agent, save_agent, AgentDocument, AgentModelOptions,
