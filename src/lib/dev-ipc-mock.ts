@@ -1,6 +1,6 @@
 import { mockIPC } from "@tauri-apps/api/mocks"
 import type { Harness } from "./harnesses"
-import type { ModelMappings } from "./model-mappings"
+import type { MappedModel, ModelMappings } from "./model-mappings"
 import type { ProjectReferences, Reference, McpDocument, TaskDocument, AgentDocument, AgentSummary, ProjectState, SkillDocument, SkillSummary, WorkflowDocument, WorkflowDraft, WorkflowStep, WorkflowIssue, WorkflowSummary } from "./projects"
 
 const home = "/home/dieguit"
@@ -168,9 +168,9 @@ const harnesses: Harness[] = [
 ]
 
 const modelMappings: ModelMappings = {
-  smart: { opencode: "anthropic/claude-sonnet-4-5" },
+  smart: { opencode: { model: "anthropic/claude-sonnet-4-5", effort: "high" }, claude: { model: "opus", effort: "max" } },
   balanced: {},
-  fast: { opencode: "openai/gpt-5-mini" },
+  fast: { opencode: { model: "openai/gpt-5-mini" } },
 }
 const harnessModels = {
   anthropic: ["claude-opus-4-1", "claude-opus-4", "claude-sonnet-4-5", "claude-sonnet-4", "claude-3-7-sonnet", "claude-3-5-haiku"],
@@ -181,6 +181,16 @@ const harnessModels = {
   mistral: ["mistral-large-latest", "codestral-latest", "devstral-small-latest"],
   groq: ["llama-3.3-70b-versatile", "qwen/qwen3-32b", "openai/gpt-oss-120b"],
 }
+const claudeModels = ["opus", "sonnet", "haiku"].map((id) => ({
+  id, efforts: ["low", "medium", "high", "xhigh", "max"],
+}))
+const opencodeModels = Object.entries(harnessModels).flatMap(([provider, models]) =>
+  models.map((model) => ({
+    id: `${provider}/${model}`,
+    efforts: provider === "openai" ? ["none", "low", "medium", "high", "xhigh", "max"]
+      : provider === "anthropic" ? ["low", "medium", "high", "xhigh", "max"] : [],
+  }))
+).sort((a, b) => a.id.localeCompare(b.id))
 
 // Mock modes: import-clean | import-mcp (default) | import-conflicts | import-many | import-source-error | import-commit-fail | import-commit-conflicts
 const importMode = mode?.startsWith("import-") ? mode.slice(7) : "mcp"
@@ -421,10 +431,13 @@ export function installDevIpcMock() {
       case "list_model_mappings":
         return structuredClone(modelMappings)
       case "save_model_mapping": {
-        const { original, alias, models } = args as { original: string | null; alias: string; models: Record<string, string> }
+        const { original, alias, models } = args as { original: string | null; alias: string; models: Record<string, MappedModel> }
         if (!/^[a-z0-9]+([-_.][a-z0-9]+)*$/.test(alias)) throw "Alias must be lowercase letters and digits separated by -, _ or ."
-        const filtered = Object.fromEntries(Object.entries(models).filter(([, model]) => model !== ""))
-        if (Object.values(filtered).some((model) => /\p{White_Space}/u.test(model))) throw "Model must not contain whitespace"
+        const filtered = Object.fromEntries(Object.entries(models)
+          .filter(([, entry]) => entry.model !== "")
+          .map(([id, entry]) => [id, { model: entry.model, ...(entry.effort ? { effort: entry.effort } : {}) }]))
+        if (Object.values(filtered).some((entry) => /[\s#]/u.test(entry.model))) throw "Model must not contain whitespace or #"
+        if (Object.values(filtered).some((entry) => entry.effort && /[\s#]/u.test(entry.effort))) throw "Invalid effort"
         if (original !== null && !Object.hasOwn(modelMappings, original)) throw "Original alias not found"
         if (original !== alias && Object.hasOwn(modelMappings, alias)) throw "Alias already exists"
         if (original !== null) delete modelMappings[original]
@@ -439,9 +452,9 @@ export function installDevIpcMock() {
       }
       case "harness_models":
         await new Promise((resolve) => setTimeout(resolve, 350))
-        if ((args as { id: string }).id === "claude") return ["opus", "sonnet", "haiku"]
+        if ((args as { id: string }).id === "claude") return structuredClone(claudeModels)
         if ((args as { id: string }).id !== "opencode") throw "Harness models unavailable"
-        return Object.entries(harnessModels).flatMap(([provider, models]) => models.map((model) => `${provider}/${model}`)).sort()
+        return structuredClone(opencodeModels)
       case "project_state":
         return structuredClone(state)
       case "pick_project":
@@ -532,11 +545,10 @@ export function installDevIpcMock() {
       }
       case "agent_model_options":
         return {
-          aliases: Object.keys(modelMappings),
+          mappings: structuredClone(modelMappings),
           harnesses: [
-            { id: "opencode", name: "OpenCode", models: Object.entries(harnessModels).flatMap(([provider, models]) => models.map((model) => `${provider}/${model}`)), error: null },
-            { id: "codex", name: "Codex", models: ["gpt-5", "gpt-5-mini"], error: null },
-            { id: "claude", name: "Claude Code", models: ["opus", "sonnet", "haiku"], error: null },
+            { id: "opencode", name: "OpenCode", models: structuredClone(opencodeModels), error: null },
+            { id: "claude", name: "Claude Code", models: structuredClone(claudeModels), error: null },
           ],
         }
       case "list_skills": {

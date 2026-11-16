@@ -15,16 +15,17 @@ import {
   ListRow,
   ListTable,
 } from "@/components/list-table"
-import { usedBy, usedByLabel, type ModelMappings } from "@/lib/model-mappings"
+import { usedBy, usedByLabel, type MappedModel, type ModelMappings } from "@/lib/model-mappings"
 import type { Harness } from "@/lib/harnesses"
 import type { AgentSummary } from "@/lib/projects"
 import { filterMappings } from "../-lib/model-mappings-list"
 
-function HarnessChip({ name, model }: { name: string; model?: string }) {
-  return model ? (
-    <Badge variant="outline" title={model} className="rounded-md">
+function HarnessChip({ name, model }: { name: string; model?: MappedModel }) {
+  return model?.model ? (
+    <Badge variant="outline" title={model.model} className="max-w-full rounded-md">
       <CheckIcon aria-hidden="true" className="text-success" />
       {name}
+      <span className="truncate font-mono">{model.model}{model.effort ? ` · ${model.effort}` : ""}</span>
     </Badge>
   ) : (
     <Badge

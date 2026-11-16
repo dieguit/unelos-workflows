@@ -44,7 +44,7 @@ export function AgentModelPicker({ value, onChange }: {
             {options.data ? <>
               <CommandEmpty>No models match.</CommandEmpty>
               <CommandGroup heading="Aliases">
-                {options.data.aliases.map((alias) => <CommandItem key={alias} value={`alias ${alias}`} data-checked={value === alias} onSelect={() => pick(alias)}>{alias}</CommandItem>)}
+                {Object.keys(options.data.mappings).map((alias) => <CommandItem key={alias} value={`alias ${alias}`} data-checked={value === alias} onSelect={() => pick(alias)}>{alias}</CommandItem>)}
               </CommandGroup>
               {options.data.harnesses.map((h) => h.error ? (
                 <div key={h.id} className="px-3 py-2 text-xs text-muted-foreground">
@@ -53,12 +53,12 @@ export function AgentModelPicker({ value, onChange }: {
                 </div>
               ) : (
                 <CommandGroup key={h.id} heading={h.name}>
-                  {h.models.map((model) => <CommandItem key={model} value={`${h.name} ${model}`} data-checked={typeof value === "object" && value?.harness === h.id && value.model === model} onSelect={() => pick({ harness: h.id, model })}>
+                  {h.models.map(({ id: model }) => <CommandItem key={model} value={`${h.name} ${model}`} data-checked={typeof value === "object" && value?.harness === h.id && value.model === model} onSelect={() => pick({ harness: h.id, model })}>
                     <span className="truncate font-mono text-xs">{model}</span>
                   </CommandItem>)}
                 </CommandGroup>
               ))}
-              {!options.data.aliases.length && !options.data.harnesses.some((h) => !h.error && h.models.length) ? <p className="p-3 text-sm text-muted-foreground">No configured models</p> : null}
+              {!Object.keys(options.data.mappings).length && !options.data.harnesses.some((h) => !h.error && h.models.length) ? <p className="p-3 text-sm text-muted-foreground">No configured models</p> : null}
             </> : <PickerStatus what="models" error={options.error} onRetry={options.load} />}
           </CommandList>
         </Command>

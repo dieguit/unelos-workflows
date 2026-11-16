@@ -97,7 +97,7 @@ function ModelMappingsHome() {
         const saved = await saveModelMapping(
           creating ? null : selected!,
           draft.alias,
-          draft.models
+          Object.fromEntries(Object.entries(draft.models).filter(([, entry]) => entry.model))
         )
         setMappings(saved)
         void rebuild()

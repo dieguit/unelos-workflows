@@ -14,7 +14,7 @@ export function filterMappings(mappings: ModelMappings, query: string, harnesses
   return Object.keys(mappings)
     .sort()
     .filter((alias) =>
-      [alias, ...harnesses.map((h) => mappings[alias][h.id] ?? "")].some(
+      [alias, ...harnesses.map((h) => mappings[alias][h.id]?.model ?? "")].some(
         (text) => text.toLowerCase().includes(needle)
       )
     )

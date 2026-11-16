@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from "react"
-import { listHarnessModels } from "@/lib/model-mappings"
+import { listHarnessModels, type ModelInfo } from "@/lib/model-mappings"
 
-export type HarnessModels = { models?: string[]; error?: string }
+export type HarnessModels = { models?: ModelInfo[]; error?: string }
 
 /** Lazily lists each harness's models once per page; `load` is a no-op while loading or once loaded, and retries after an error. */
 export function useHarnessModels() {

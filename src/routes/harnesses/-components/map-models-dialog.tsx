@@ -38,7 +38,7 @@ export function MapModelsDialog({
       // Re-read so models other harnesses got meanwhile are preserved.
       const current = await listModelMappings()
       for (const [alias, model] of Object.entries(values))
-        await saveModelMapping(alias, alias, { ...current[alias], [harness.id]: model })
+        await saveModelMapping(alias, alias, { ...current[alias], [harness.id]: { model } })
       onClose()
     } catch (e) {
       setError(String(e))
