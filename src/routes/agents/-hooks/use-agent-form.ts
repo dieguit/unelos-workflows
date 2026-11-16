@@ -9,6 +9,7 @@ export const emptyAgent: AgentDocument = {
   mcps: [],
   tools: [],
   model: null,
+  effort: null,
 }
 
 export function useAgentForm(

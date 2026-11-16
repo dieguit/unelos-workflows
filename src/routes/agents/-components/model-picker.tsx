@@ -1,20 +1,18 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { ChevronsUpDownIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { agentModelOptions, type AgentModel } from "@/lib/projects"
+import { type AgentModel, type AgentModelOptions } from "@/lib/projects"
 import { useLazy } from "@/hooks/use-lazy"
 import { PickerStatus } from "@/components/picker-status"
 
-export function AgentModelPicker({ value, onChange }: {
+export function AgentModelPicker({ value, onChange, options }: {
   value: AgentModel | null
   onChange: (value: AgentModel | null) => void
+  options: ReturnType<typeof useLazy<AgentModelOptions>>
 }) {
   const [open, setOpen] = useState(false)
-  const options = useLazy(agentModelOptions)
-  const { load } = options
-  useEffect(() => load(), [load])
   const pick = (model: AgentModel | null) => {
     onChange(model)
     setOpen(false)

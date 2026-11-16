@@ -122,7 +122,7 @@ function workflowIssues(root: string, id: string, settings: WorkflowDraft): Work
 const agentDocuments: Record<string, AgentDocument> = Object.fromEntries(
   agents.filter((a) => !a.problem).map((a) => [a.name, {
     id: a.name, instructions: a.name === "reviewer" ? "Inspect requirements and actual changes independently." : "Implement the requested changes.",
-    skills: [...a.skills], mcps: [...a.mcps], tools: a.name === "engineer" ? ["read-file", "run-command"] : [], model: a.model,
+    skills: [...a.skills], mcps: [...a.mcps], tools: a.name === "engineer" ? ["read-file", "run-command"] : [], model: a.model, effort: null,
   }])
 )
 

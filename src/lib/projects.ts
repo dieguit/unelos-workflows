@@ -65,6 +65,7 @@ export type AgentDocument = {
   mcps: string[]
   tools: string[]
   model: AgentModel | null
+  effort: string | null
 }
 export type AgentModelOptions = {
   mappings: ModelMappings
