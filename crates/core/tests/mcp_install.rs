@@ -10,6 +10,7 @@ fn agent(id: &str) -> AgentExport {
         id: "agent".into(),
         instructions: String::new(),
         model: None,
+        effort: None,
         tools: vec![],
         mcps: vec![id.into()],
         main: true,

@@ -154,6 +154,7 @@ fn claude_agent_model_mapping_and_mcp_list() {
         id: "test".into(),
         instructions: "Do work".into(),
         model: Some(AgentModel::Alias("smart".into())),
+        effort: None,
         tools: vec![],
         mcps: vec!["local".into(), "remote".into()],
         mcp_servers: [

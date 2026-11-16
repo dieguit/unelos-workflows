@@ -1085,6 +1085,7 @@ pub fn commit_import(
                 .clone(),
             instructions: agent.instructions.clone(),
             model: agent.model.clone(),
+            effort: agent.effort.clone(),
             tools: agent.tools.clone(),
             mcps,
             mcp_servers,

@@ -4,6 +4,42 @@ use unelos_core::{
 };
 
 #[test]
+fn agent_effort_round_trips() {
+    let agent = parse_agent_definition(
+        "agent.yaml",
+        "instructions: x\nmodel: smart\neffort: high\n",
+    )
+    .unwrap();
+    assert_eq!(agent.effort.as_deref(), Some("high"));
+    assert!(serde_yaml_ng::to_string(&agent)
+        .unwrap()
+        .contains("effort: high"));
+    let agent = parse_agent_definition("agent.yaml", "instructions: x\n").unwrap();
+    assert!(serde_json::to_value(agent).unwrap().get("effort").is_none());
+}
+
+#[test]
+fn effort_without_model_rejected() {
+    let error =
+        parse_agent_definition("agent.yaml", "instructions: x\neffort: high\n").unwrap_err();
+    assert!(error.to_string().contains("effort requires model"));
+}
+
+#[test]
+fn invalid_effort_rejected() {
+    for effort in ["\"a b\"", "\"x#y\"", "\"\"", "42", "true", "null", "[]"] {
+        assert!(
+            parse_agent_definition(
+                "agent.yaml",
+                &format!("instructions: x\nmodel: smart\neffort: {effort}\n")
+            )
+            .is_err(),
+            "{effort}"
+        );
+    }
+}
+
+#[test]
 fn workflow_description_is_optional_and_strict() {
     let yaml = "name: demo\nstart: end\nnodes: {end: {type: end}}\n";
     for value in ["42", "true", "[]", "{}"] {

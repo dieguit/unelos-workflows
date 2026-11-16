@@ -12,6 +12,7 @@ pub struct AgentDocument {
     pub mcps: Vec<String>,
     pub tools: Vec<String>,
     pub model: Option<AgentModel>,
+    pub effort: Option<String>,
 }
 
 fn paths(root: &Utf8Path, id: &str) -> Result<(Utf8PathBuf, Utf8PathBuf), String> {
@@ -59,7 +60,17 @@ fn load(
 
 pub fn get_agent(root: &Utf8Path, id: &str) -> Result<AgentDocument, String> {
     let (root, source) = paths(root, id)?;
-    let (agent, _) = load(&root, &source)?;
+    let (mut agent, _) = load(&root, &source)?;
+    if agent.effort.is_none() {
+        if let Some(AgentModel::Harness { harness, model }) = &mut agent.model {
+            if harness == "opencode" {
+                if let Some((base, effort)) = model.split_once('#') {
+                    agent.effort = Some(effort.into());
+                    *model = base.into();
+                }
+            }
+        }
+    }
     Ok(AgentDocument {
         id: id.into(),
         instructions: agent.instructions,
@@ -67,13 +78,14 @@ pub fn get_agent(root: &Utf8Path, id: &str) -> Result<AgentDocument, String> {
         mcps: agent.mcps,
         tools: agent.tools,
         model: agent.model,
+        effort: agent.effort,
     })
 }
 
 pub fn save_agent(
     root: &Utf8Path,
     original_id: Option<&str>,
-    agent: AgentDocument,
+    mut agent: AgentDocument,
 ) -> Result<AgentDocument, String> {
     let (authoring, source) = paths(root, &agent.id)?;
     let (instructions_file, dependencies) = if let Some(id) = original_id {
@@ -88,6 +100,11 @@ pub fn save_agent(
         }
         (None, BTreeMap::new())
     };
+    if matches!(agent.model, Some(AgentModel::Harness { .. }))
+        && agent.effort.as_deref() == Some("default")
+    {
+        agent.effort = None;
+    }
     let definition = AgentDefinition {
         instructions: agent.instructions.clone(),
         instructions_file,
@@ -95,6 +112,7 @@ pub fn save_agent(
         mcps: agent.mcps,
         tools: agent.tools,
         model: agent.model,
+        effort: agent.effort,
     };
     let yaml = serde_yaml_ng::to_string(&definition).map_err(|e| e.to_string())?;
     crate::parse_agent_definition(source.as_str(), &yaml).map_err(|e| e.to_string())?;
