@@ -21,6 +21,7 @@ pub enum NodeKind {
     Task,
     Parallel,
     HumanGate,
+    Workflow,
     End,
 }
 
@@ -45,6 +46,7 @@ pub fn build_graph(workflow: &WorkflowDefinition) -> WorkflowGraph {
             NodeDefinition::Task(task) => (NodeKind::Task, Some(&task.next)),
             NodeDefinition::Parallel(parallel) => (NodeKind::Parallel, Some(&parallel.next)),
             NodeDefinition::HumanGate(_) => (NodeKind::HumanGate, None),
+            NodeDefinition::Workflow(call) => (NodeKind::Workflow, Some(&call.next)),
             NodeDefinition::End => (NodeKind::End, None),
         };
         graph.nodes.push(GraphNode {

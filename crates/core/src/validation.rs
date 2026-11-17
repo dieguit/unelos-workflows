@@ -101,6 +101,12 @@ pub fn validate_project(
                 }
                 (&gate.inputs, &[][..])
             }
+            NodeDefinition::Workflow(_) => {
+                return Err(error(
+                    &field,
+                    "workflow steps must be expanded before validation".into(),
+                ))
+            }
             NodeDefinition::End => continue,
         };
         for (kind, names) in [("inputs", &inputs[..]), ("outputs", outputs)] {

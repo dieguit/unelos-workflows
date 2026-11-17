@@ -100,6 +100,11 @@ pub(super) fn prepare_work(
                 confirmed_execution_id: None,
             })
         }
+        NodeDefinition::Workflow(_) => {
+            return Err(RuntimeError::InvalidState(
+                "workflow steps must be expanded before execution".into(),
+            ))
+        }
         NodeDefinition::End => CurrentWork::Finished {
             node_id: node_id.into(),
         },

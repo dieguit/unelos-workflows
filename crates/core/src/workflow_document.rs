@@ -293,6 +293,7 @@ fn document(root: &Utf8Path, id: &str, text: &str) -> Result<WorkflowDocument, S
                     step.inputs = gate.inputs.clone();
                     "human-gate"
                 }
+                crate::NodeDefinition::Workflow(_) => "workflow",
                 crate::NodeDefinition::End => "end",
             }
             .into();

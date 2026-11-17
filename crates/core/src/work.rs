@@ -409,6 +409,11 @@ pub fn inspect_node(
                 rejection_reason_required: true,
             }))
         }
+        NodeDefinition::Workflow(_) => Err(diagnostic(
+            project,
+            format!("nodes.{node_id}"),
+            "workflow steps must be expanded before inspection",
+        )),
         NodeDefinition::End => Ok(NodeInspection::End(EndInspection {
             kind: "end",
             node_id: node_id.into(),

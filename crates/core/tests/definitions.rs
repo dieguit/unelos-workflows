@@ -4,6 +4,63 @@ use unelos_core::{
 };
 
 #[test]
+fn parses_workflow_step_and_workflow_inputs() {
+    let workflow = parse_workflow_definition("parent.yaml", "name: parent\nstart: frontend\ninputs: [brief.md]\nnodes:\n  frontend: {type: workflow, workflow: react-component, inputs: {brief.md: plan.md}, outputs: {report.md: frontend-report.md}, next: {done: review, abandoned: plan}}\n").unwrap();
+    let value = serde_json::to_value(&workflow.nodes["frontend"]).unwrap();
+    assert_eq!(workflow.inputs, ["brief.md"]);
+    let NodeDefinition::Workflow(call) = &workflow.nodes["frontend"] else {
+        panic!("workflow step expected")
+    };
+    assert_eq!(
+        call.inputs.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["brief.md"]
+    );
+    let Transition::Outcomes(routes) = &call.next else {
+        panic!("outcome routes expected")
+    };
+    assert_eq!(
+        routes.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["done", "abandoned"]
+    );
+    assert_eq!(value["kind"], "workflow");
+    assert_eq!(value["workflow"], "react-component");
+    assert_eq!(value["inputs"]["brief.md"], "plan.md");
+    assert_eq!(value["outputs"]["report.md"], "frontend-report.md");
+    assert_eq!(value["next"]["done"], "review");
+    assert_eq!(value["next"]["abandoned"], "plan");
+}
+
+#[test]
+fn workflow_step_rejects_task_fields() {
+    for field in [
+        "agent: x",
+        "execution: main",
+        "task: x",
+        "taskDefinition: {instructions: x}",
+    ] {
+        let yaml = format!("name: parent\nstart: call\nnodes:\n  call: {{type: workflow, workflow: child, next: done, {field}}}\n");
+        let error = parse_workflow_definition("parent.yaml", &yaml)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(field.split(':').next().unwrap()), "{error}");
+    }
+}
+
+#[test]
+fn workflow_step_single_next_and_empty_maps() {
+    let workflow = parse_workflow_definition(
+        "parent.yaml",
+        "name: parent\nstart: call\nnodes:\n  call: {type: workflow, workflow: c, next: done}\n",
+    )
+    .unwrap();
+    let value = serde_json::to_value(&workflow.nodes["call"]).unwrap();
+    assert!(workflow.inputs.is_empty());
+    assert_eq!(value["inputs"], serde_json::json!({}));
+    assert_eq!(value["outputs"], serde_json::json!({}));
+    assert_eq!(value["next"], "done");
+}
+
+#[test]
 fn agent_effort_round_trips() {
     let agent = parse_agent_definition(
         "agent.yaml",

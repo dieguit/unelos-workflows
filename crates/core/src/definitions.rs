@@ -398,6 +398,8 @@ pub struct WorkflowDefinition {
     pub description: Option<String>,
     #[serde(deserialize_with = "strict_string")]
     pub start: String,
+    #[serde(default, deserialize_with = "strict_strings")]
+    pub inputs: Vec<String>,
     #[serde(deserialize_with = "strict_map")]
     pub nodes: IndexMap<String, NodeDefinition>,
 }
@@ -609,6 +611,7 @@ pub enum NodeDefinition {
     Task(TaskNode),
     Parallel(ParallelNode),
     HumanGate(HumanGateNode),
+    Workflow(WorkflowNode),
     End,
 }
 
@@ -650,6 +653,9 @@ impl<'de> Deserialize<'de> for NodeDefinition {
             "human-gate" => HumanGateNode::deserialize(value)
                 .map(Self::HumanGate)
                 .map_err(D::Error::custom),
+            "workflow" => WorkflowNode::deserialize(value)
+                .map(Self::Workflow)
+                .map_err(D::Error::custom),
             "end" => {
                 let Value::Mapping(fields) = value else {
                     unreachable!()
@@ -663,8 +669,40 @@ impl<'de> Deserialize<'de> for NodeDefinition {
             }
             other => Err(D::Error::unknown_variant(
                 other,
-                &["task", "parallel", "human-gate", "end"],
+                &["task", "parallel", "human-gate", "workflow", "end"],
             )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(from = "WorkflowNodeWire")]
+pub struct WorkflowNode {
+    pub workflow: String,
+    pub inputs: IndexMap<String, String>,
+    pub outputs: IndexMap<String, String>,
+    pub next: Transition,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkflowNodeWire {
+    #[serde(deserialize_with = "strict_string")]
+    workflow: String,
+    #[serde(default, deserialize_with = "strict_string_map")]
+    inputs: IndexMap<String, String>,
+    #[serde(default, deserialize_with = "strict_string_map")]
+    outputs: IndexMap<String, String>,
+    next: Transition,
+}
+
+impl From<WorkflowNodeWire> for WorkflowNode {
+    fn from(raw: WorkflowNodeWire) -> Self {
+        Self {
+            workflow: raw.workflow,
+            inputs: raw.inputs,
+            outputs: raw.outputs,
+            next: raw.next,
         }
     }
 }
