@@ -33,6 +33,137 @@ nodes:
 ";
 
 #[test]
+fn declared_inputs_need_no_producer() {
+    let (_temp, root) = project(&[("child", CHILD)]);
+    let mut p = load_project(&root, "child").unwrap();
+    p.definitions.agents.insert(
+        "".into(),
+        serde_json::from_value(serde_json::json!({"instructions": "test"})).unwrap(),
+    );
+    assert!(unelos_core::validate_project(&p).is_ok());
+}
+
+#[test]
+fn declared_inputs_are_validated_even_when_unused() {
+    for (input, cause) in [
+        ("design.md", "also produced"),
+        ("../bad", "invalid artifact"),
+    ] {
+        let child = CHILD.replace("inputs: [brief.md]", &format!("inputs: [{input}]"));
+        let (_temp, root) = project(&[("child", &child)]);
+        let mut p = load_project(&root, "child").unwrap();
+        p.definitions.agents.insert(
+            "".into(),
+            serde_json::from_value(serde_json::json!({"instructions": "test"})).unwrap(),
+        );
+        let e = unelos_core::validate_project(&p).unwrap_err();
+        assert_eq!(e.field, "inputs");
+        assert!(e.cause.contains(cause), "{e}");
+    }
+}
+
+#[test]
+fn child_errors_name_child_file() {
+    let (_temp, root) = project(&[("parent", PARENT), ("child", CHILD)]);
+    let e = match load_project(&root, "parent") {
+        Err(ProjectLoadError::Validation(e)) => e,
+        Ok(p) => unelos_core::validate_project(&p).unwrap_err(),
+        Err(e) => panic!("{e}"),
+    };
+    assert!(e.path.ends_with("child.yaml"), "{e}");
+    assert_eq!(e.field, "nodes.design.agent");
+}
+
+#[test]
+fn child_contract_cannot_hide_invalid_declaration() {
+    let child = CHILD.replace("inputs: [brief.md]", "inputs: [design.md]");
+    let parent = PARENT.replace("brief.md: plan.md", "design.md: plan.md");
+    let (_temp, root) = project(&[("parent", &parent), ("child", &child)]);
+    let mut p = load_project(&root, "parent").unwrap();
+    p.definitions.agents.insert(
+        "".into(),
+        serde_json::from_value(serde_json::json!({"instructions": "test"})).unwrap(),
+    );
+    let e = unelos_core::validate_project(&p).unwrap_err();
+    assert_eq!(e.field, "inputs");
+    assert!(e.path.ends_with("child.yaml"));
+    assert!(e.cause.contains("also produced"), "{e}");
+}
+
+#[test]
+fn nested_child_semantic_errors_keep_innermost_source() {
+    let mid = "name: mid\nstart: inner\nnodes:\n  inner: {type: workflow, workflow: child, inputs: {brief.md: plan.md}, next: {done: end, abandoned: end}}\n  end: {type: end}\ninputs: [plan.md]";
+    let parent = PARENT
+        .replace("workflow: child", "workflow: mid")
+        .replace("brief.md: plan.md", "plan.md: plan.md")
+        .replace("outputs: {report.md: frontend-report.md}, ", "")
+        .replace("{done: review, abandoned: plan}", "review");
+    for (child, expected) in [
+        (CHILD.to_owned(), "nodes.design.agent"),
+        (CHILD.replace("start: design", "start: absent"), "start"),
+        (
+            CHILD.replace("outputs: [design.md]", "outputs: [../bad]"),
+            "nodes.design.outputs",
+        ),
+    ] {
+        let (_temp, root) = project(&[("parent", &parent), ("mid", mid), ("child", &child)]);
+        let mut p = load_project(&root, "parent").unwrap();
+        if expected != "nodes.design.agent" {
+            p.definitions.agents.insert(
+                "".into(),
+                serde_json::from_value(serde_json::json!({"instructions": "test"})).unwrap(),
+            );
+        }
+        let e = unelos_core::validate_project(&p).unwrap_err();
+        assert!(e.path.ends_with("child.yaml"), "{e}");
+        assert_eq!(e.field, expected);
+    }
+}
+
+#[test]
+fn export_includes_child_agents() {
+    let child = CHILD.replace("taskDefinition:", "agent: child-agent, taskDefinition:");
+    let parent = PARENT.replace("taskDefinition:", "agent: parent-agent, taskDefinition:");
+    let (_temp, root) = project(&[("parent", &parent), ("child", &child)]);
+    for id in ["child-agent", "parent-agent"] {
+        fs::create_dir_all(root.join(format!(".unelos/agents/{id}"))).unwrap();
+        fs::write(
+            root.join(format!(".unelos/agents/{id}/agent.yaml")),
+            "instructions: test",
+        )
+        .unwrap();
+    }
+    let agents = unelos_core::export_workflow_agents(&root, "parent").unwrap();
+    assert!(agents.iter().any(|a| a.id == "child-agent"));
+}
+
+#[test]
+fn graph_uses_authoring_workflow() {
+    let (_temp, root) = project(&[("parent", PARENT), ("child", CHILD)]);
+    let p = load_project(&root, "parent").unwrap();
+    let graph = unelos_core::build_graph(&p.authoring_workflow);
+    let node = graph.nodes.iter().find(|n| n.id == "frontend").unwrap();
+    assert_eq!(node.kind, unelos_core::NodeKind::Workflow);
+    assert_eq!(serde_json::to_value(node).unwrap()["workflow"], "child");
+    assert!(graph
+        .edges
+        .iter()
+        .any(|e| e.from == "frontend" && e.outcome.as_deref() == Some("done")));
+}
+
+#[test]
+fn summaries_list_calls() {
+    let (_temp, root) = project(&[("parent", PARENT), ("child", CHILD)]);
+    let summaries = unelos_core::workflow_summaries(&root).unwrap();
+    let parent = summaries.iter().find(|s| s.name == "parent").unwrap();
+    assert_eq!(parent.steps, Some(3));
+    assert_eq!(
+        serde_json::to_value(parent).unwrap()["calls"],
+        serde_json::json!(["child"])
+    );
+}
+
+#[test]
 fn expands_child_nodes_edges_and_artifacts() {
     let (_temp, root) = project(&[("parent", PARENT), ("child", CHILD)]);
     let p = load_project(&root, "parent").unwrap();

@@ -14,6 +14,7 @@ export type Reference = { kind: "workflow" | "agent" | "task"; id: string; name:
 export type ProjectReferences = { agents: Record<string, Reference[]>; tasks: Record<string, Reference[]>; skills: Record<string, Reference[]>; mcps: Record<string, Reference[]> }
 export const getProjectReferences = (root: string) => trackedInvoke<ProjectReferences>("project_references", { root })
 export type WorkflowSummary = {
+  calls: string[]
   name: string
   file: string
   description: string | null

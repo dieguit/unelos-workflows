@@ -134,6 +134,11 @@ pub struct LoadedProject {
     pub workflow: WorkflowDefinition,
     pub authoring_workflow: WorkflowDefinition,
     pub node_sources: BTreeMap<String, crate::NodeSource>,
+    pub(crate) child_workflows: Vec<(
+        Utf8PathBuf,
+        WorkflowDefinition,
+        BTreeMap<String, crate::NodeSource>,
+    )>,
 }
 
 impl LoadedProject {
@@ -220,6 +225,7 @@ pub(crate) fn list_workflow_descriptions(
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowSummary {
+    pub calls: Vec<String>,
     pub name: String,
     pub file: String,
     pub description: Option<String>,
@@ -238,13 +244,24 @@ pub fn workflow_summaries(
             let file = format!("{name}.yaml");
             match load_project(&root, &name) {
                 Ok(project) => WorkflowSummary {
+                    calls: project
+                        .authoring_workflow
+                        .nodes
+                        .values()
+                        .filter_map(|node| match node {
+                            NodeDefinition::Workflow(call) => Some(call.workflow.clone()),
+                            _ => None,
+                        })
+                        .collect::<BTreeSet<_>>()
+                        .into_iter()
+                        .collect(),
                     problem: crate::validate_project(&project)
                         .err()
                         .map(|error| format!("{}: {}", error.field, error.cause)),
                     description: project.workflow.description.clone(),
                     steps: Some(
                         project
-                            .workflow
+                            .authoring_workflow
                             .nodes
                             .values()
                             .filter(|node| !matches!(node, NodeDefinition::End))
@@ -254,6 +271,7 @@ pub fn workflow_summaries(
                     file,
                 },
                 Err(error) => WorkflowSummary {
+                    calls: Vec::new(),
                     problem: Some(error.to_string()),
                     description: None,
                     steps: None,
@@ -794,6 +812,7 @@ fn load_authoring_candidate(
     })?;
     workflow = expanded.workflow;
     let node_sources = expanded.node_sources;
+    let child_workflows = expanded.children;
     for (id, node) in &mut workflow.nodes {
         let selections: Vec<_> = match node {
             NodeDefinition::Task(task) => vec![(
@@ -877,6 +896,7 @@ fn load_authoring_candidate(
         workflow,
         authoring_workflow,
         node_sources,
+        child_workflows,
     })
 }
 

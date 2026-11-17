@@ -18,6 +18,41 @@ fn fixture() -> std::path::PathBuf {
 }
 
 #[test]
+fn inspect_shows_authored_workflow_call_and_child_id() {
+    let temp = assert_fs::TempDir::new().unwrap();
+    let root = temp.path();
+    fs::create_dir_all(root.join(".unelos/workflows")).unwrap();
+    fs::create_dir_all(root.join(".unelos/agents/worker")).unwrap();
+    fs::write(root.join(".unelos/project.yaml"), "{}").unwrap();
+    fs::write(
+        root.join(".unelos/agents/worker/agent.yaml"),
+        "instructions: test",
+    )
+    .unwrap();
+    fs::write(root.join(".unelos/workflows/parent.yaml"), "name: parent\nstart: call\nnodes:\n  call: {type: workflow, workflow: child, next: end}\n  end: {type: end}").unwrap();
+    fs::write(root.join(".unelos/workflows/child.yaml"), "name: child\nstart: task\nnodes:\n  task: {taskDefinition: {instructions: test}, agent: worker, next: done}\n  done: {type: end}").unwrap();
+    let output = command()
+        .arg("--project")
+        .arg(root)
+        .args(["inspect", "parent", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stderr.is_empty());
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["start"], "call");
+    assert_eq!(value["nodes"].as_array().unwrap().len(), 2);
+    let call = value["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["id"] == "call")
+        .unwrap();
+    assert_eq!(call["workflow"], "child");
+    assert_eq!(call["kind"], "workflow");
+}
+
+#[test]
 fn inspect_normalizes_the_existing_fixture() {
     let output = command()
         .arg("--project")

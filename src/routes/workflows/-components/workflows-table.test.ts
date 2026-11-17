@@ -9,6 +9,7 @@ test("workflow rows expose a separate actions control", async () => {
         workflows: [
           {
             name: "Example",
+            calls: [],
             file: "example.yaml",
             description: null,
             steps: 1,
@@ -32,6 +33,7 @@ test("unreadable workflow shows a warning by its name and — for unknown cells"
         workflows: [
           {
             name: "bad",
+            calls: [],
             file: "bad.yaml",
             description: null,
             steps: null,

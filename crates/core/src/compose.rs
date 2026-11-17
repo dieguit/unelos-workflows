@@ -16,6 +16,11 @@ pub struct NodeSource {
 pub(crate) struct Expanded {
     pub workflow: WorkflowDefinition,
     pub node_sources: BTreeMap<String, NodeSource>,
+    pub children: Vec<(
+        Utf8PathBuf,
+        WorkflowDefinition,
+        BTreeMap<String, NodeSource>,
+    )>,
 }
 
 pub fn artifact_file_name<'a>(node_id: &str, name: &'a str) -> &'a str {
@@ -111,6 +116,7 @@ fn expand_inner(
     let mut nodes = IndexMap::new();
     let mut node_sources = BTreeMap::new();
     let mut entries = BTreeMap::new();
+    let mut children = Vec::new();
     for (id, node) in &root.nodes {
         if id.contains('/') {
             return Err(error(
@@ -152,6 +158,12 @@ fn expand_inner(
         stack.push(call.workflow.clone());
         let expanded = expand_inner(&path, &child, load_child, stack)?;
         stack.pop();
+        children.extend(expanded.children);
+        children.push((
+            path.clone(),
+            expanded.workflow.clone(),
+            expanded.node_sources.clone(),
+        ));
         let child = expanded.workflow;
         if matches!(child.nodes.get(&child.start), Some(NodeDefinition::End)) {
             return Err(error(source, id, "workflow", "child start is an end node"));
@@ -299,5 +311,6 @@ fn expand_inner(
     Ok(Expanded {
         workflow,
         node_sources,
+        children,
     })
 }

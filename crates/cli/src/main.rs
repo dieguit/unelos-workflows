@@ -458,9 +458,9 @@ fn run(cli: &Cli) -> Result<(), Error> {
             let result = if let Some(node) = node {
                 serde_json::to_value(inspect_node(&project, node)?)?
             } else {
-                let graph = build_graph(&project.workflow);
+                let graph = build_graph(&project.authoring_workflow);
                 let nodes = project
-                    .workflow
+                    .authoring_workflow
                     .nodes
                     .iter()
                     .map(|(id, node)| {

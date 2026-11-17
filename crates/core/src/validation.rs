@@ -18,6 +18,30 @@ pub struct ProjectValidationError {
 pub fn validate_project(
     project: &LoadedProject,
 ) -> Result<BTreeMap<String, String>, ProjectValidationError> {
+    for (path, workflow, sources) in &project.child_workflows {
+        let mut child = project.clone();
+        child.workflow_source = path.clone();
+        child.workflow = workflow.clone();
+        child.node_sources = sources.clone();
+        child.child_workflows.clear();
+        validate_project(&child)?;
+    }
+    validate_workflow(project).map_err(|mut error| {
+        for (id, source) in &project.node_sources {
+            let prefix = format!("nodes.{id}");
+            if error.field == prefix || error.field.starts_with(&format!("{prefix}.")) {
+                error.path = source.path.clone();
+                error.field = format!("nodes.{}{}", source.node_id, &error.field[prefix.len()..]);
+                break;
+            }
+        }
+        error
+    })
+}
+
+fn validate_workflow(
+    project: &LoadedProject,
+) -> Result<BTreeMap<String, String>, ProjectValidationError> {
     let error = |field: &str, cause: String| ProjectValidationError {
         path: project.workflow_source.clone(),
         field: field.into(),
@@ -30,6 +54,9 @@ pub fn validate_project(
         ));
     }
     let mut producers = BTreeMap::new();
+    for name in &project.workflow.inputs {
+        validate_artifact(project, "inputs", name)?;
+    }
     let mut consumers = Vec::new();
     for (id, node) in &project.workflow.nodes {
         let field = format!("nodes.{id}");
@@ -115,6 +142,12 @@ pub fn validate_project(
             }
         }
         for name in outputs {
+            if project.workflow.inputs.contains(name) {
+                return Err(error(
+                    "inputs",
+                    format!("declared input {name:?} is also produced by {id:?}"),
+                ));
+            }
             if let Some(previous) = producers.insert(name.clone(), id.clone()) {
                 if previous != *id {
                     return Err(error(
@@ -132,7 +165,7 @@ pub fn validate_project(
     // checks whether an input's producer has actually completed on the path taken.
     for (field, inputs) in consumers {
         for name in inputs {
-            if !producers.contains_key(name) {
+            if !producers.contains_key(name) && !project.workflow.inputs.contains(name) {
                 return Err(error(
                     &format!("{field}.inputs"),
                     format!("no producer for {name:?}"),

@@ -24,10 +24,10 @@ const workflows: WorkflowSummary[] =
   mode === "empty"
     ? []
     : [
-        { name: "Implement feature", file: "implement-feature.yaml", description: "Plan, approve, implement and review a feature with a correction loop.", steps: 5, problem: null },
-        { name: "Investigate bug", file: "investigate-bug.yaml", description: "Reproduce the issue, locate the root cause and propose a fix with evidence.", steps: 4, problem: null },
-        { name: "Review change", file: "review-change.yaml", description: "Independent review of a diff with a findings report and human sign-off.", steps: 3, problem: "nodes.review.agent: Agent reference missing" },
-        { name: "Refactor module", file: "refactor-module.yaml", description: "Map affected code, refactor in parallel slices and verify behavior is unchanged.", steps: 6, problem: null },
+        { calls: [], name: "Implement feature", file: "implement-feature.yaml", description: "Plan, approve, implement and review a feature with a correction loop.", steps: 5, problem: null },
+        { calls: [], name: "Investigate bug", file: "investigate-bug.yaml", description: "Reproduce the issue, locate the root cause and propose a fix with evidence.", steps: 4, problem: null },
+        { calls: [], name: "Review change", file: "review-change.yaml", description: "Independent review of a diff with a findings report and human sign-off.", steps: 3, problem: "nodes.review.agent: Agent reference missing" },
+        { calls: [], name: "Refactor module", file: "refactor-module.yaml", description: "Map affected code, refactor in parallel slices and verify behavior is unchanged.", steps: 6, problem: null },
       ]
 
 const agents: AgentSummary[] = [
@@ -503,7 +503,7 @@ export function installDevIpcMock() {
           ],
           issues: [{ message: "Pick an agent", step: "new-task" }],
         }
-        workflows.push({ summary: { name: id, file: `${id}.yaml`, description: null, steps: 2, problem: null }, document })
+        workflows.push({ summary: { calls: [], name: id, file: `${id}.yaml`, description: null, steps: 2, problem: null }, document })
         return id
       }
       case "validate_workflow": {
@@ -686,7 +686,7 @@ export function installDevIpcMock() {
         const key = `workflow:${plan.workflow.id}`
         const name = renames[key] ?? plan.conflicts.find((c) => c.key === key)?.suggested ?? plan.workflow.id
         workflowsFor(root).push({
-          summary: { name, file: `${name}.yaml`, description: plan.workflow.description ?? null, steps: 2, problem: null },
+          summary: { calls: [], name, file: `${name}.yaml`, description: plan.workflow.description ?? null, steps: 2, problem: null },
           document: {
             id: name, name, description: plan.workflow.description ?? null, start: "end",
             steps: [{ id: "end", originalId: "end", label: "end", kind: "end", title: null, agent: null, execution: null, task: null, routes: [], workers: [], inputs: [], outputs: [] }],

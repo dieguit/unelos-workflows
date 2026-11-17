@@ -13,6 +13,8 @@ pub struct WorkflowGraph {
 pub struct GraphNode {
     pub id: String,
     pub kind: NodeKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workflow: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -52,6 +54,10 @@ pub fn build_graph(workflow: &WorkflowDefinition) -> WorkflowGraph {
         graph.nodes.push(GraphNode {
             id: id.clone(),
             kind,
+            workflow: match node {
+                NodeDefinition::Workflow(call) => Some(call.workflow.clone()),
+                _ => None,
+            },
         });
         let mut push = |to: &String, outcome: Option<&String>| {
             graph.edges.push(GraphEdge {

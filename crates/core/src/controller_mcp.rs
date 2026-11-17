@@ -209,9 +209,9 @@ impl SessionService {
                     )
                     .map_err(io_error)?
                 } else {
-                    let graph = crate::build_graph(&project.workflow);
+                    let graph = crate::build_graph(&project.authoring_workflow);
                     let nodes = project
-                        .workflow
+                        .authoring_workflow
                         .nodes
                         .iter()
                         .map(|(id, node)| {
