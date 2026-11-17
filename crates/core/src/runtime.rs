@@ -265,7 +265,7 @@ fn prepare_start_state(
     naming_pending: bool,
 ) -> Result<RunState, RuntimeError> {
     let node_id = &project.workflow.start;
-    check_component(node_id, "Node")?;
+    check_node_id(node_id, "Node")?;
     let state = RunState {
         started_at: None,
         updated_at: None,
@@ -548,6 +548,7 @@ fn task_input(
 }
 fn allocate_outputs(
     dir: &Utf8Path,
+    node_id: &str,
     names: &[String],
 ) -> Result<Vec<ArtifactReference>, RuntimeError> {
     names
@@ -558,7 +559,7 @@ fn allocate_outputs(
             }
             Ok(ArtifactReference {
                 name: name.clone(),
-                path: dir.join(name),
+                path: dir.join(crate::compose::artifact_file_name(node_id, name)),
             })
         })
         .collect::<Result<Vec<_>, RuntimeError>>()
@@ -567,6 +568,17 @@ fn allocate_outputs(
             Ok(outputs)
         })
 }
+pub(crate) fn check_node_id(id: &str, source: &str) -> Result<(), RuntimeError> {
+    id.split('/')
+        .try_for_each(|part| check_component(part, source))
+}
+
+pub(crate) fn node_dir(run_dir: &Utf8Path, node_id: &str) -> Utf8PathBuf {
+    node_id
+        .split('/')
+        .fold(run_dir.to_owned(), |dir, part| dir.join(part))
+}
+
 fn check_component(component: &str, source: &str) -> Result<(), RuntimeError> {
     let upper = component
         .split('.')
@@ -635,6 +647,14 @@ fn output_directories(base: &Utf8Path, outputs: &[ArtifactReference]) -> Vec<Utf
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn node_ids_reject_unsafe_segments() {
+        for id in ["a/..", "a//b", "/a", "a/", "a/CON", "a/b\\c"] {
+            assert!(super::check_node_id(id, "Node").is_err(), "{id}");
+        }
+        assert!(super::check_node_id("a/b", "Node").is_ok());
+    }
+
     use super::*;
 
     fn state() -> RunState {

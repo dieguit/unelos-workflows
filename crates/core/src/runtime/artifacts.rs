@@ -16,7 +16,7 @@ pub(super) fn prepare_work(
     let node = project.workflow.nodes.get(node_id).ok_or_else(|| {
         RuntimeError::InvalidState(format!("Workflow Node {node_id:?} is missing"))
     })?;
-    super::check_component(node_id, "Node")?;
+    super::check_node_id(node_id, "Node")?;
     let run_dir = project
         .project_root
         .join(".unelos/runs")
@@ -26,7 +26,11 @@ pub(super) fn prepare_work(
     candidate.current = match node {
         NodeDefinition::Task(task) => {
             let inputs = bind_inputs(state, &producers, node_id, &task.inputs)?;
-            let outputs = super::allocate_outputs(&run_dir.join(node_id), &task.outputs)?;
+            let outputs = super::allocate_outputs(
+                &super::node_dir(&run_dir, node_id),
+                node_id,
+                &task.outputs,
+            )?;
             let execution_id = candidate.allocate_execution_id(false)?;
             CurrentWork::Task(ExecutionRecord {
                 node_id: node_id.into(),
@@ -43,8 +47,8 @@ pub(super) fn prepare_work(
         }
         NodeDefinition::Parallel(parallel) => {
             let inputs = bind_inputs(state, &producers, node_id, &parallel.inputs)?;
-            let node_dir = run_dir.join(node_id);
-            let outputs = super::allocate_outputs(&node_dir, &parallel.outputs)?;
+            let node_dir = super::node_dir(&run_dir, node_id);
+            let outputs = super::allocate_outputs(&node_dir, node_id, &parallel.outputs)?;
             let mut paths = outputs.clone();
             let mut counts = BTreeMap::new();
             for worker in &parallel.tasks {
@@ -211,7 +215,7 @@ pub(super) fn prepare_work_directories(
         ),
         CurrentWork::HumanGate(_) | CurrentWork::Finished { .. } => return Ok(()),
     };
-    let node_dir = run_dir.join(node);
+    let node_dir = super::node_dir(run_dir, node);
     for dir in output_directories(&node_dir, &outputs) {
         let relative = dir.strip_prefix(run_dir).map_err(|_| {
             RuntimeError::InvalidState(format!("artifact directory escapes run: {dir}"))

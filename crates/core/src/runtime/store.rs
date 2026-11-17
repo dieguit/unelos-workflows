@@ -431,7 +431,16 @@ pub(super) fn validate_artifacts(
             )));
         }
         let mut path = run_path.to_owned();
-        for (index, component) in components.into_iter().enumerate() {
+        if let Some(node) = expected_node {
+            let node_path = super::node_dir(run_path, node);
+            if reference.path.strip_prefix(&node_path).is_err() || reference.path == node_path {
+                return Err(RuntimeError::InvalidState(format!(
+                    "artifact path is outside its expected Node directory: {}",
+                    reference.path
+                )));
+            }
+        }
+        for component in components {
             let camino::Utf8Component::Normal(part) = component else {
                 return Err(RuntimeError::InvalidState(format!(
                     "artifact path has a non-normal component: {}",
@@ -441,12 +450,6 @@ pub(super) fn validate_artifacts(
             super::check_component(part, "persisted artifact")?;
             path.push(part);
             reject_symlink(&path)?;
-            if index == 0 && expected_node.is_some_and(|node| part != node) {
-                return Err(RuntimeError::InvalidState(format!(
-                    "artifact path is outside its expected Node directory: {}",
-                    reference.path
-                )));
-            }
         }
         Ok(())
     }
@@ -457,7 +460,7 @@ pub(super) fn validate_artifacts(
         run_path: &Utf8Path,
     ) -> Result<(), RuntimeError> {
         if let Some(feedback) = feedback {
-            super::check_component(&feedback.source_node_id, "feedback Node")?;
+            super::check_node_id(&feedback.source_node_id, "feedback Node")?;
             let source_gate = state.history.iter().find_map(|entry| match &entry.work {
                 CurrentWork::HumanGate(record)
                     if record.node_id == feedback.source_node_id
@@ -493,11 +496,11 @@ pub(super) fn validate_artifacts(
             | super::CurrentWork::Parallel(record)
             | super::CurrentWork::HumanGate(record) => record,
             super::CurrentWork::Finished { node_id } => {
-                super::check_component(node_id, "Node")?;
+                super::check_node_id(node_id, "Node")?;
                 return Ok(());
             }
         };
-        super::check_component(&record.node_id, "Node")?;
+        super::check_node_id(&record.node_id, "Node")?;
         for artifact in &record.inputs {
             binding(artifact, run_path, None)?;
         }
