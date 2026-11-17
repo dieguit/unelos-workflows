@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useStore } from "@tanstack/react-form"
 import { FileInputIcon, FileOutputIcon, PlusIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -16,10 +17,16 @@ import type { WorkflowForm } from "../../-hooks/use-workflow-form"
 import { humanize, producers } from "@/lib/step-edit"
 import { ErrorText, InlineAdd, inlineAddClass, RemoveButton, rowFrame, Section } from "@/components/step-panel/panel-ui"
 
+export function inputSources(steps: WorkflowStep[], index: number, declared: string[]) {
+  const sources = new Map<string, string | null>(declared.map((name) => [name, null]))
+  for (const { artifact, step } of producers(steps, index)) sources.set(artifact, step)
+  return sources
+}
+
 export function InputsSection({ form, index, steps }: { form: WorkflowForm; index: number; steps: WorkflowStep[] }) {
   const [open, setOpen] = useState(false)
-  const upstream = producers(steps, index)
-  const producerOf = new Map(upstream.map((p) => [p.artifact, p.step]))
+  const declared = useStore(form.store, (s) => s.values.inputs)
+  const producerOf = inputSources(steps, index, declared)
   return (
     <form.Field name={`steps[${index}].inputs`} mode="array">
       {(field) => {
@@ -48,16 +55,16 @@ export function InputsSection({ form, index, steps }: { form: WorkflowForm; inde
               </PopoverTrigger>
               <PopoverContent align="start" className="w-80 p-0">
                 <Command>
-                  <CommandInput placeholder="Search upstream outputs…" />
+                  <CommandInput placeholder="Search available inputs…" />
                   <CommandList>
                     <CommandEmpty>
-                      {options.length ? "No outputs match." : "No upstream outputs left to bind."}
+                      {options.length ? "No inputs match." : "No available inputs left to bind."}
                     </CommandEmpty>
                     <CommandGroup>
                       {options.map(([artifact, step]) => (
                         <CommandItem
                           key={artifact}
-                          value={`${artifact} ${step}`}
+                          value={`${artifact} ${step ?? "workflow input"}`}
                           onSelect={() => {
                             field.pushValue(artifact)
                             setOpen(false)
@@ -65,7 +72,7 @@ export function InputsSection({ form, index, steps }: { form: WorkflowForm; inde
                         >
                           <FileInputIcon aria-hidden="true" className="text-muted-foreground" />
                           <span className="truncate font-mono text-xs">{artifact}</span>
-                          <span className="ml-auto shrink-0 text-xs text-muted-foreground">from {humanize(step)}</span>
+                          <span className="ml-auto shrink-0 text-xs text-muted-foreground">{step ? `from ${humanize(step)}` : "Workflow input"}</span>
                         </CommandItem>
                       ))}
                     </CommandGroup>
