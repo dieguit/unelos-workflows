@@ -22,7 +22,7 @@ export function FlowArrow() {
   )
 }
 
-type AddKind = "task" | "human-gate"
+type AddKind = "task" | "human-gate" | "workflow"
 
 /** "Add step" pill; the type picker opens beside it so the transition stays visible. */
 function AddStep({ onAdd }: { onAdd?: (kind: AddKind) => void }) {
@@ -58,7 +58,7 @@ function AddStep({ onAdd }: { onAdd?: (kind: AddKind) => void }) {
         finalFocus={() => !picked.current}
         className="w-auto min-w-44"
       >
-        {(["task", "human-gate", "parallel"] as const).map((kind) => {
+        {(["task", "human-gate", "workflow", "parallel"] as const).map((kind) => {
           const Icon = stepIcons[kind]
           const soon = kind === "parallel"
           return (

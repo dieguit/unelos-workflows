@@ -50,6 +50,8 @@ import { FlowToolbar } from "@/components/flow/flow-toolbar"
 import { StepPicker } from "./step-picker"
 import { StepPanel } from "./step-panel"
 import { ParallelPanel, WorkerPanel } from "./step-panel/parallel-panel"
+import { WorkflowCallPanel } from "./step-panel/workflow-call-panel"
+import { WorkflowInputsSection } from "./step-panel/artifact-sections"
 
 export function WorkflowEditor({
   root,
@@ -196,7 +198,7 @@ function WorkflowEditorForm({
     select(selected)
   }
   const editInstructions = () => setInstructions(selectedTask?.instructions ?? "")
-  const addStep = (index: number, kind: "task" | "human-gate") => {
+  const addStep = (index: number, kind: "task" | "human-gate" | "workflow") => {
     const result = insertStep(form.state.values.steps, index, kind)
     form.setFieldValue("steps", result.steps)
     select(result.index)
@@ -533,6 +535,20 @@ function WorkflowEditorForm({
                 onClose={closeStep}
               />
             )
+          ) : step && selected !== null && step.kind === "workflow" ? (
+            <WorkflowCallPanel
+              key={selection}
+              root={root}
+              current={saved.id}
+              form={form}
+              index={selected}
+              showErrors={validationAttempt > 0}
+              disabled={visualSaving}
+              nameDraft={nameDrafts[step.id]}
+              onNameDraft={onNameDraft}
+              onRemove={removeSelectedStep}
+              onClose={closeStep}
+            />
           ) : step && selected !== null ? (
             <StepPanel
               key={selection}
@@ -577,6 +593,7 @@ function WorkflowEditorForm({
                 className="min-w-0 disabled:opacity-60"
               >
                 <FieldGroup className="gap-4">
+                  <WorkflowInputsSection form={form} />
                   <form.Field name="name">
                     {(field) => (
                       <Field

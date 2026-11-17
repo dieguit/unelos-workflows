@@ -135,3 +135,30 @@ export function OutputsSection({ form, index }: { form: WorkflowForm; index: num
     </form.Field>
   )
 }
+
+export function WorkflowInputsSection({ form }: { form: WorkflowForm }) {
+  const [draft, setDraft] = useState<string | null>(null)
+  return <form.Field name="inputs" mode="array">
+    {(field) => {
+      const name = draft?.trim() ?? ""
+      const duplicate = field.state.value.includes(name)
+      const commit = () => {
+        if (name && !duplicate) field.pushValue(name)
+        if (!duplicate) setDraft(null)
+      }
+      return <Section label="Workflow inputs">
+        {field.state.value.map((input, i) => <div key={input} className={rowFrame}>
+          <span className="min-w-0 flex-1 truncate font-mono text-xs">{input}</span>
+          <RemoveButton label={`Remove workflow input ${input}`} onClick={() => field.removeValue(i)} />
+        </div>)}
+        {draft === null ? <InlineAdd label="Add workflow input" onClick={() => setDraft("")} /> : <>
+          <Input autoFocus aria-label="New workflow input" placeholder="brief.md" value={draft} aria-invalid={duplicate} onChange={(e) => setDraft(e.target.value)} onBlur={() => duplicate ? setDraft(null) : commit()} onKeyDown={(e) => {
+            if (e.key === "Enter") { e.preventDefault(); commit() }
+            if (e.key === "Escape") { e.preventDefault(); setDraft(null) }
+          }} />
+          {duplicate && <ErrorText errors={[{ message: `“${name}” is already an input.` }]} />}
+        </>}
+      </Section>
+    }}
+  </form.Field>
+}
