@@ -273,6 +273,13 @@ fn references(root: &Utf8Path, kind: &str, id: &str, removed: &Utf8Path) -> Resu
                         .map_err(|e| e.to_string())?;
                     for node in workflow.nodes.values() {
                         let workers: Vec<_> = match node {
+                            NodeDefinition::Workflow(call)
+                                if kind == "workflows" && call.workflow == id =>
+                            {
+                                return Err(format!(
+                                    "Cannot remove Workflow {id:?}: referenced by {source}"
+                                ));
+                            }
                             NodeDefinition::Task(task) => vec![(&task.agent, &task.task)],
                             NodeDefinition::Parallel(parallel) => parallel
                                 .tasks

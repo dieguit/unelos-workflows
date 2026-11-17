@@ -285,6 +285,14 @@ fn expand_inner(
                 continue;
             }
             rewrite(&mut node, &target, &artifact);
+            let inputs = match &mut node {
+                NodeDefinition::Task(n) => &mut n.inputs,
+                NodeDefinition::Parallel(n) => &mut n.inputs,
+                NodeDefinition::HumanGate(n) => &mut n.inputs,
+                _ => unreachable!(),
+            };
+            let mut seen = BTreeSet::new();
+            inputs.retain(|name| seen.insert(name.clone()));
             let scoped = format!("{id}/{n}");
             let outputs = artifacts(&node).1;
             let mut files = BTreeSet::new();

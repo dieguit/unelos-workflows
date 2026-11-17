@@ -228,6 +228,51 @@ fn embedded_input_still_binds() {
 }
 
 #[test]
+fn many_to_one_inputs_bind_once_for_every_consumer() {
+    for consumer in [
+        "agent: worker\n    execution: main\n    taskDefinition: {instructions: Consume}\n    next: done",
+        "type: human-gate\n    next: {approved: done, rejected: done}",
+        "type: parallel\n    tasks:\n      - agent: worker\n        taskDefinition: {instructions: Consume}\n    next: done",
+    ] {
+        let (_temp, root) = fixture();
+        std::fs::write(
+            root.join(".unelos/workflows/child.yaml"),
+            format!("name: child\nstart: consume\ninputs: [a.md, b.md, c.md]\nnodes:\n  consume:\n    inputs: [a.md, c.md, b.md]\n    {consumer}\n  done: {{type: end}}\n"),
+        ).unwrap();
+        std::fs::write(
+            root.join(".unelos/workflows/parent.yaml"),
+            "name: parent\nstart: produce\nnodes:\n  produce:\n    agent: worker\n    execution: main\n    taskDefinition: {instructions: Produce}\n    outputs: [x.md, y.md]\n    next: call\n  call:\n    type: workflow\n    workflow: child\n    inputs: {a.md: x.md, b.md: x.md, c.md: y.md}\n    next: done\n  done: {type: end}\n",
+        ).unwrap();
+        let producer = execution_start(&root, "parent", None).unwrap();
+        let consumer = act(&root, &producer, ExecutionOperation::Complete, None);
+        let value = packet(&consumer);
+        let inputs = value.get("inputs").or_else(|| value.get("artifacts")).unwrap();
+        assert_eq!(inputs.as_array().unwrap().len(), 2);
+        assert_eq!(inputs[0]["name"], "x.md");
+        assert_eq!(inputs[1]["name"], "y.md");
+        assert_eq!(inputs[0]["path"], root.join(".unelos/runs/r-000001/produce/x.md").as_str());
+        if let Some(workers) = value["workers"].as_array() {
+            assert_eq!(workers[0]["inputs"], *inputs);
+        }
+        execution_next(&root, "r-000001").unwrap();
+    }
+}
+
+#[test]
+fn referenced_child_cannot_be_removed_during_parent_run() {
+    let (_temp, root) = fixture();
+    execution_start(&root, "fullstack", None).unwrap();
+    let error = remove_workflow(&root, "react-component").unwrap_err();
+    assert!(
+        error.contains("Cannot remove Workflow \"react-component\": referenced by"),
+        "{error}"
+    );
+    assert!(error.contains("fullstack.yaml"), "{error}");
+    assert!(root.join(".unelos/workflows/react-component.yaml").exists());
+    execution_next(&root, "r-000001").unwrap();
+}
+
+#[test]
 fn missing_input_reaches_parallel_workers() {
     let (_temp, root) = fixture();
     std::fs::write(
