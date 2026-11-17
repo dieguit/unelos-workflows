@@ -59,6 +59,7 @@ pub struct TaskRuntimeInput {
     pub node_id: String,
     pub request: String,
     pub inputs: Vec<ArtifactReference>,
+    pub missing_inputs: Vec<String>,
     pub outputs: Vec<ArtifactReference>,
     pub feedback: Option<TransitionFeedback>,
 }
@@ -72,6 +73,8 @@ pub struct TaskPacket {
     pub task_id: String,
     pub request: String,
     pub inputs: Vec<ArtifactReference>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub missing_inputs: Vec<String>,
     pub outputs: Vec<ArtifactReference>,
     pub feedback: Option<TransitionFeedback>,
 }
@@ -202,6 +205,7 @@ pub fn build_task_packet(
         task_id: input.task_id,
         request: input.request,
         inputs,
+        missing_inputs: input.missing_inputs,
         outputs,
         feedback: input.feedback,
     })
@@ -240,10 +244,16 @@ pub(crate) fn ordered_bindings(
     }
     declared
         .into_iter()
-        .map(|name| {
-            by_name
-                .remove(&name)
-                .ok_or_else(|| binding_error(project, node_id, side, &name, "missing binding"))
+        .filter_map(|name| match by_name.remove(&name) {
+            Some(binding) => Some(Ok(binding)),
+            None if side == "inputs" && project.workflow.inputs.contains(&name) => None,
+            None => Some(Err(binding_error(
+                project,
+                node_id,
+                side,
+                &name,
+                "missing binding",
+            ))),
         })
         .collect()
 }

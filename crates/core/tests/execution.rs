@@ -129,6 +129,7 @@ fn every_state_delivers_only_its_policy_block() {
         (Some(packet(&delegated_root, true)), "delegated"),
         (
             Some(WorkPacket::Parallel(ParallelPacket {
+                missing_inputs: vec![],
                 kind: "parallel",
                 run_id: "run".into(),
                 task_id: "task".into(),
@@ -144,6 +145,7 @@ fn every_state_delivers_only_its_policy_block() {
         ),
         (
             Some(WorkPacket::HumanGate(GatePacket {
+                missing_inputs: vec![],
                 kind: "human-gate",
                 run_id: "run".into(),
                 activation_id: "gate".into(),
@@ -492,6 +494,7 @@ fn packet(root: &Utf8Path, delegated: bool) -> WorkPacket {
         &project,
         WorkRuntimeInput::Task {
             input: TaskRuntimeInput {
+                missing_inputs: vec![],
                 run_id: state.run_id.clone(),
                 task_id: record.execution_id.clone(),
                 node_id: record.node_id.clone(),

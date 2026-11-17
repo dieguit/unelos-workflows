@@ -57,6 +57,8 @@ pub struct WorkerPacket {
     pub parent_task_id: String,
     pub request: String,
     pub inputs: Vec<ArtifactReference>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub missing_inputs: Vec<String>,
     pub outputs: Vec<ArtifactReference>,
     pub feedback: Option<TransitionFeedback>,
 }
@@ -70,6 +72,8 @@ pub struct ParallelPacket {
     pub node_id: String,
     pub request: String,
     pub inputs: Vec<ArtifactReference>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub missing_inputs: Vec<String>,
     pub outputs: Vec<ArtifactReference>,
     pub feedback: Option<TransitionFeedback>,
     pub workers: Vec<WorkerPacket>,
@@ -84,6 +88,8 @@ pub struct GatePacket {
     pub activation_id: String,
     pub node_id: String,
     pub artifacts: Vec<ArtifactReference>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub missing_inputs: Vec<String>,
     pub ledger_path: Utf8PathBuf,
 }
 
@@ -208,6 +214,7 @@ pub fn build_work_packet(
                     parent_task_id: input.task_id.clone(),
                     request: input.request.clone(),
                     inputs: inputs.clone(),
+                    missing_inputs: input.missing_inputs.clone(),
                     outputs: vec![report],
                     feedback: input.feedback.clone(),
                 });
@@ -219,6 +226,7 @@ pub fn build_work_packet(
                 node_id: input.node_id,
                 request: input.request,
                 inputs,
+                missing_inputs: input.missing_inputs,
                 outputs,
                 feedback: input.feedback,
                 workers,
@@ -247,12 +255,14 @@ pub fn build_work_packet(
             };
             let artifacts =
                 ordered_bindings(project, &node_id, "inputs", inspection.inputs, artifacts)?;
+            let missing_inputs = crate::runtime::missing_inputs(project, &node_id, &artifacts);
             Ok(WorkPacket::HumanGate(GatePacket {
                 kind: "human-gate",
                 run_id,
                 activation_id,
                 node_id,
                 artifacts,
+                missing_inputs,
                 ledger_path,
             }))
         }

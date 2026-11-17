@@ -155,3 +155,112 @@ fn child_edit_mid_run_is_incompatible_error() {
         "{error}"
     );
 }
+
+#[test]
+fn standalone_child_marks_missing_input() {
+    let (_temp, root) = fixture();
+    let path = root.join(".unelos/workflows/react-component.yaml");
+    let text = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("execution: main", "execution: subagent");
+    std::fs::write(path, text).unwrap();
+    let work = execution_start(&root, "react-component", None).unwrap();
+    assert_eq!(
+        packet(&work)["missingInputs"],
+        serde_json::json!(["brief.md"])
+    );
+    assert_eq!(packet(&work)["inputs"], serde_json::json!([]));
+    let prompt = work.worker_prompt.as_ref().unwrap();
+    assert!(prompt.contains("Missing inputs (ask the coordinator for this content)"));
+    assert!(prompt.contains("- brief.md"));
+    assert!(!root.join(".unelos/runs/r-000001/design/brief.md").exists());
+    let resumed = execution_next(&root, "r-000001").unwrap();
+    assert_eq!(
+        packet(&resumed)["missingInputs"],
+        serde_json::json!(["brief.md"])
+    );
+}
+
+#[test]
+fn missing_input_reaches_gate_packet() {
+    let (_temp, root) = fixture();
+    let path = root.join(".unelos/workflows/react-component.yaml");
+    let text = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("inputs: [design.md]", "inputs: [design.md, brief.md]");
+    std::fs::write(path, text).unwrap();
+    let work = execution_start(&root, "react-component", None).unwrap();
+    let gate = act(&root, &work, ExecutionOperation::Complete, None);
+    assert_eq!(
+        packet(&gate)["missingInputs"],
+        serde_json::json!(["brief.md"])
+    );
+    assert_eq!(packet(&gate)["artifacts"].as_array().unwrap().len(), 1);
+    execution_next(&root, "r-000001").unwrap();
+    act(&root, &gate, ExecutionOperation::Approve, None);
+}
+
+#[test]
+fn parent_declared_input_propagates_into_child() {
+    let (_temp, root) = fixture();
+    let path = root.join(".unelos/workflows/fullstack.yaml");
+    let text = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("start: plan", "start: frontend\ninputs: [brief.md]")
+        .replace("brief.md: plan.md", "brief.md: brief.md");
+    std::fs::write(path, text).unwrap();
+    let work = execution_start(&root, "fullstack", None).unwrap();
+    assert_eq!(packet(&work)["nodeId"], "frontend/design");
+    assert_eq!(
+        packet(&work)["missingInputs"],
+        serde_json::json!(["brief.md"])
+    );
+    assert_eq!(packet(&work)["inputs"], serde_json::json!([]));
+}
+
+#[test]
+fn embedded_input_still_binds() {
+    let (_temp, root) = fixture();
+    let plan = execution_start(&root, "fullstack", None).unwrap();
+    let design = act(&root, &plan, ExecutionOperation::Complete, None);
+    assert!(packet(&design).get("missingInputs").is_none());
+    assert_eq!(packet(&design)["inputs"][0]["name"], "plan.md");
+}
+
+#[test]
+fn missing_input_reaches_parallel_workers() {
+    let (_temp, root) = fixture();
+    std::fs::write(
+        root.join(".unelos/workflows/parallel.yaml"),
+        r#"
+name: parallel
+start: research
+inputs: [brief.md]
+nodes:
+  research:
+    type: parallel
+    inputs: [brief.md]
+    outputs: [report.md]
+    tasks:
+      - agent: worker
+        taskDefinition: {instructions: Research}
+    next: done
+  done: {type: end}
+"#,
+    )
+    .unwrap();
+    let work = execution_start(&root, "parallel", None).unwrap();
+    assert_eq!(
+        packet(&work)["missingInputs"],
+        serde_json::json!(["brief.md"])
+    );
+    assert_eq!(
+        packet(&work)["workers"][0]["missingInputs"],
+        serde_json::json!(["brief.md"])
+    );
+    assert_eq!(packet(&work)["workers"][0]["inputs"], serde_json::json!([]));
+    assert!(work.worker_prompts[0]
+        .prompt
+        .contains("Missing inputs (ask the coordinator for this content)\n- brief.md"));
+    execution_next(&root, "r-000001").unwrap();
+}

@@ -243,6 +243,7 @@ pub fn render_execution_package(
                 None,
                 &task.packet.request,
                 &task.packet.inputs,
+                &task.packet.missing_inputs,
                 &task.packet.outputs,
                 task.packet.feedback.as_ref(),
                 brief,
@@ -266,6 +267,7 @@ pub fn render_execution_package(
                         Some(&w.key),
                         &w.request,
                         &w.inputs,
+                        &w.missing_inputs,
                         &w.outputs,
                         w.feedback.as_ref(),
                         brief,
@@ -328,6 +330,7 @@ fn render_prompt(
     worker_key: Option<&str>,
     request: &str,
     inputs: &[crate::ArtifactReference],
+    missing_inputs: &[String],
     outputs: &[crate::ArtifactReference],
     feedback: Option<&crate::TransitionFeedback>,
     brief: Option<&str>,
@@ -380,6 +383,14 @@ fn render_prompt(
         &inputs
             .iter()
             .map(|a| format!("- {} → {}", a.name, a.path))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+    section(
+        "Missing inputs (ask the coordinator for this content)",
+        &missing_inputs
+            .iter()
+            .map(|name| format!("- {name}"))
             .collect::<Vec<_>>()
             .join("\n"),
     );

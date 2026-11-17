@@ -206,6 +206,7 @@ fn runtime_input() -> (TempDir, unelos_core::LoadedProject, WorkRuntimeInput) {
     };
     let input = WorkRuntimeInput::Parallel {
         input: TaskRuntimeInput {
+            missing_inputs: vec![],
             run_id: "change-button-color".into(),
             task_id: "execution-2".into(),
             node_id: "parallel-research".into(),
@@ -520,6 +521,7 @@ fn composes_task_gate_and_finished_variants_with_controller_contracts() {
         &project,
         WorkRuntimeInput::Task {
             input: TaskRuntimeInput {
+                missing_inputs: vec![],
                 run_id: parent.run_id,
                 task_id: "task-plan".into(),
                 node_id: "plan".into(),
@@ -674,6 +676,7 @@ fn runtime_variants_reject_wrong_or_unknown_nodes_and_gate_binding_errors() {
             &project,
             WorkRuntimeInput::Task {
                 input: TaskRuntimeInput {
+                    missing_inputs: vec![],
                     run_id: "r".into(),
                     task_id: "t".into(),
                     node_id: "parallel-research".into(),
@@ -688,6 +691,7 @@ fn runtime_variants_reject_wrong_or_unknown_nodes_and_gate_binding_errors() {
         Err(ContextError::Diagnostic { .. })
     ));
     let mut unknown_task = TaskRuntimeInput {
+        missing_inputs: vec![],
         run_id: "r".into(),
         task_id: "t".into(),
         node_id: "unknown".into(),

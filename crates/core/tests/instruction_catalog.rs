@@ -35,6 +35,7 @@ fn catalog_sources_are_delivered_with_runtime_paths_kept_separate() {
         &project,
         WorkRuntimeInput::Task {
             input: TaskRuntimeInput {
+                missing_inputs: vec![],
                 run_id: state.run_id.clone(),
                 task_id: record.execution_id.clone(),
                 node_id: record.node_id.clone(),

@@ -431,11 +431,12 @@ fn packet_for_snapshot(
         .join("ledger.md");
     let input = match (&state.current, node) {
         (CurrentWork::Task(_), NodeDefinition::Task(task)) => {
-            if !same_input_names(&task.inputs, &record.inputs) {
+            if !same_input_names(&task.inputs, &record.inputs, &project.workflow.inputs) {
                 return Err(mismatch(&record.node_id, "task input declarations changed"));
             }
             WorkRuntimeInput::Task {
                 input: task_input(
+                    project,
                     state,
                     &record.node_id,
                     &record.execution_id,
@@ -447,7 +448,7 @@ fn packet_for_snapshot(
             }
         }
         (CurrentWork::Parallel(_), NodeDefinition::Parallel(parallel)) => {
-            if !same_input_names(&parallel.inputs, &record.inputs) {
+            if !same_input_names(&parallel.inputs, &record.inputs, &project.workflow.inputs) {
                 return Err(mismatch(
                     &record.node_id,
                     "parallel input declarations changed",
@@ -471,6 +472,7 @@ fn packet_for_snapshot(
             }
             WorkRuntimeInput::Parallel {
                 input: task_input(
+                    project,
                     state,
                     &record.node_id,
                     &record.execution_id,
@@ -483,7 +485,7 @@ fn packet_for_snapshot(
             }
         }
         (CurrentWork::HumanGate(_), NodeDefinition::HumanGate(gate)) => {
-            if !same_input_names(&gate.inputs, &record.inputs) {
+            if !same_input_names(&gate.inputs, &record.inputs, &project.workflow.inputs) {
                 return Err(mismatch(&record.node_id, "gate input declarations changed"));
             }
             WorkRuntimeInput::HumanGate {
@@ -521,14 +523,35 @@ fn mismatch(node: &str, cause: &str) -> RuntimeError {
         "saved work for Node {node:?} is incompatible with live Workflow: {cause}"
     ))
 }
-fn same_input_names(names: &[String], bindings: &[ArtifactReference]) -> bool {
-    names.len() == bindings.len()
-        && names
-            .iter()
-            .zip(bindings)
-            .all(|(name, binding)| name == &binding.name)
+fn same_input_names(names: &[String], bindings: &[ArtifactReference], declared: &[String]) -> bool {
+    names
+        .iter()
+        .filter(|name| {
+            !declared.contains(name) || bindings.iter().any(|binding| &binding.name == *name)
+        })
+        .map(String::as_str)
+        .eq(bindings.iter().map(|binding| binding.name.as_str()))
+}
+
+pub(crate) fn missing_inputs(
+    project: &LoadedProject,
+    node_id: &str,
+    bindings: &[ArtifactReference],
+) -> Vec<String> {
+    let names = match project.workflow.nodes.get(node_id) {
+        Some(NodeDefinition::Task(node)) => &node.inputs,
+        Some(NodeDefinition::Parallel(node)) => &node.inputs,
+        Some(NodeDefinition::HumanGate(node)) => &node.inputs,
+        _ => return vec![],
+    };
+    names
+        .iter()
+        .filter(|name| !bindings.iter().any(|binding| &binding.name == *name))
+        .cloned()
+        .collect()
 }
 fn task_input(
+    project: &LoadedProject,
     state: &RunState,
     node: &str,
     task_id: &str,
@@ -541,6 +564,7 @@ fn task_input(
         task_id: task_id.into(),
         node_id: node.into(),
         request: state.request.clone(),
+        missing_inputs: missing_inputs(project, node, &inputs),
         inputs,
         outputs,
         feedback,
