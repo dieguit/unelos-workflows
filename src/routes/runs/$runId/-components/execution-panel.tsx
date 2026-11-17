@@ -5,6 +5,7 @@ import { StepIconBox } from "@/components/flow/step-card"
 import { PanelHeader } from "@/components/step-panel/panel-chrome"
 import { rowFrame, Section } from "@/components/step-panel/panel-ui"
 import { humanize } from "@/lib/step-edit"
+import type { WorkflowStep } from "@/lib/projects"
 import type { Execution } from "../../-lib/run-graph"
 import type { ArtifactReference } from "../../-lib/runs-api"
 
@@ -110,6 +111,9 @@ function ExecutionView({
           {record.executionId}
         </span>
       </header>
+      {record.nodeId.includes("/") && (
+        <p className="font-mono text-xs text-muted-foreground">{record.nodeId}</p>
+      )}
       {reason && (
         <p className="text-sm [overflow-wrap:anywhere] text-foreground-dim">
           {reason}
@@ -178,7 +182,7 @@ export function ExecutionPanel({
   existingArtifactPaths,
 }: {
   nodeId: string
-  kind: "task" | "parallel" | "human-gate" | "end"
+  kind: WorkflowStep["kind"]
   executions: Execution[]
   open?: string
   onOpen: (artifact: ArtifactReference) => void

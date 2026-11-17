@@ -3,10 +3,11 @@ import { insertStep, removeStep } from "@/lib/step-edit"
 import { expect, test } from "vitest"
 
 import { workflowSettingsSchema } from "@/routes/workflows/-lib/workflow-settings-schema"
+import { toDraft } from "../-hooks/use-workflow-form"
 
 test("workflow settings validate renamed IDs without rejecting unchanged legacy names", () => {
   const schema = workflowSettingsSchema("legacy name")
-  const draft = { name: "legacy name", description: null, start: "plan", steps: [] }
+  const draft = { name: "legacy name", description: null, start: "plan", inputs: [], steps: [] }
   for (const name of ["legacy name", "Workflow_2", "a".repeat(128)])
     expect(schema.safeParse({ ...draft, name }).success, name).toBeTruthy()
   for (const name of ["", "new name", "a/b", "a.b", "é", "a".repeat(129)])
@@ -30,7 +31,7 @@ const flow = [
 
 test("removal exposes missing start and route destinations for repair", () => {
   const removed = removeStep(flow, "implement", "implement")
-  const result = workflowSettingsSchema("x").safeParse({ name: "x", description: null, ...removed })
+  const result = workflowSettingsSchema("x").safeParse({ name: "x", description: null, inputs: [], ...removed })
   expect(result.success).toBe(false)
   const paths = result.error!.issues.map((issue) => issue.path.join("."))
   expect(paths.includes("start")).toBeTruthy()
@@ -41,7 +42,7 @@ test("removal exposes missing start and route destinations for repair", () => {
 test("schema flags new task fields by path", () => {
   const { steps } = insertStep(flow, 1, "task")
   steps[2].routes = [{ outcome: "ok", target: "" }, { outcome: "ok", target: "done" }]
-  const result = workflowSettingsSchema("x").safeParse({ name: "x", description: null, start: "plan", steps })
+  const result = workflowSettingsSchema("x").safeParse({ name: "x", description: null, start: "plan", inputs: [], steps })
   expect(result.success).toBe(false)
   expect(result.error!.issues.map((i) => [i.path.join("."), i.message])).toEqual([
       ["steps.2.agent", "Choose an agent."],
@@ -49,5 +50,16 @@ test("schema flags new task fields by path", () => {
       ["steps.2.routes.0.target", "Choose a destination for ok."],
       ["steps.2.routes.1.outcome", "Outcome names must be unique."],
     ])
-  expect(workflowSettingsSchema("x").safeParse({ name: "x", description: null, start: "plan", steps: flow }).success).toBe(true)
+  expect(workflowSettingsSchema("x").safeParse({ name: "x", description: null, start: "plan", inputs: [], steps: flow }).success).toBe(true)
+})
+
+test("draft conversion and schema preserve workflow contracts", () => {
+  const draft = {
+    name: "x", description: null, start: "frontend", inputs: ["brief.md"],
+    steps: [step("frontend", "workflow", [[null, "done"]], {
+      call: { workflow: "child", inputs: { "brief.md": "brief.md" }, outputs: {} },
+    }), step("done", "end")],
+  }
+  expect(toDraft(draft)).toEqual(draft)
+  expect(workflowSettingsSchema("x").parse(draft)).toEqual(draft)
 })

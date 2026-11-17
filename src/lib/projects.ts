@@ -21,7 +21,8 @@ export type WorkflowSummary = {
   steps: number | null
   problem: string | null
 }
-export type WorkflowSettings = { name: string; description: string | null; start: string }
+export type WorkflowSettings = { name: string; description: string | null; start: string; inputs: string[] }
+export type StepCall = { workflow: string; inputs: Record<string, string>; outputs: Record<string, string> }
 export type WorkflowRoute = { outcome: string | null; target: string }
 export type WorkflowWorker = { task: StepTask; agent: string }
 export type StepTask = { source: "inline" | "named"; id: string | null; description: string | null; instructions: string; skills: string[]; outcomes: string[] }
@@ -31,7 +32,8 @@ export type WorkflowStep = {
   originalId: string | null
   task: StepTask | null
   label: string
-  kind: "task" | "parallel" | "human-gate" | "end"
+  kind: "task" | "parallel" | "human-gate" | "workflow" | "end"
+  call?: StepCall | null
   title: string | null
   agent: string | null
   execution: "main" | "subagent" | null

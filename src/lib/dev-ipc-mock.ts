@@ -97,7 +97,7 @@ function workflowsFor(root: string) {
         for (const step of steps) if (step.task) step.task.outcomes = step.routes.flatMap((route) => route.outcome ? [route.outcome] : [])
        return {
         summary: { ...summary, name: mode === "switch" ? `${root.split("/").pop()}: ${summary.name}` : summary.name, file: `${id}.yaml` },
-        document: { id, name: id, description: summary.description, start: steps[0]?.id ?? "", steps, issues: summary.problem ? [{ message: summary.problem, step: "review" }] : steps.length ? [] : [{ message: "Mock fixture has no step definitions", step: null }] },
+        document: { id, name: id, description: summary.description, start: steps[0]?.id ?? "", inputs: [], steps, issues: summary.problem ? [{ message: summary.problem, step: "review" }] : steps.length ? [] : [{ message: "Mock fixture has no step definitions", step: null }] },
       }
     }))
   }
@@ -496,7 +496,7 @@ export function installDevIpcMock() {
         let id = "new-workflow"
         for (let n = 2; workflows.some((w) => w.document.id === id); n++) id = `new-workflow-${n}`
         const document: WorkflowDocument = {
-          id, name: id, description: null, start: "new-task",
+          id, name: id, description: null, start: "new-task", inputs: [],
           steps: [
             { id: "new-task", originalId: "new-task", label: "new-task", kind: "task", title: "new-task", agent: "", execution: "main", task: { source: "inline", id: null, description: null, instructions: "Change me!", skills: [], outcomes: [] }, routes: [{ outcome: null, target: "end" }], workers: [], inputs: [], outputs: [] },
             { id: "end", originalId: "end", label: "end", kind: "end", title: null, agent: null, execution: null, task: null, routes: [], workers: [], inputs: [], outputs: [] },
@@ -688,7 +688,7 @@ export function installDevIpcMock() {
         workflowsFor(root).push({
           summary: { calls: [], name, file: `${name}.yaml`, description: plan.workflow.description ?? null, steps: 2, problem: null },
           document: {
-            id: name, name, description: plan.workflow.description ?? null, start: "end",
+            id: name, name, description: plan.workflow.description ?? null, start: "end", inputs: [],
             steps: [{ id: "end", originalId: "end", label: "end", kind: "end", title: null, agent: null, execution: null, task: null, routes: [], workers: [], inputs: [], outputs: [] }],
             issues: [],
           },

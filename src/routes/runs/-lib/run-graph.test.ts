@@ -35,3 +35,33 @@ test("waiting gate and finished end node", () => {
 test("reports nodes missing from the workflow", () => {
   expect(missingNodes(run, ["build"])).toEqual(["review"])
 })
+
+const childRun: RunState = {
+  ...run,
+  history: [
+    { work: { kind: "task", ...rec("frontend/design", "e1") }, outcome: "done", reason: null },
+    { work: { kind: "human-gate", ...rec("frontend/approve", "e2") }, outcome: "approved", reason: "looks good" },
+  ],
+  current: { kind: "task", ...rec("frontend/nested/build", "e3") },
+}
+
+test("folds child executions onto the workflow step", () => {
+  const executions = executionsByNode(childRun).get("frontend")
+  expect(executions?.map((e) => [e.n, e.record.nodeId, e.active])).toEqual([
+    [1, "frontend/design", false],
+    [2, "frontend/approve", false],
+    [3, "frontend/nested/build", true],
+  ])
+  expect(executions?.[1]).toMatchObject({ outcome: "approved", reason: "looks good" })
+  expect(nodeStatus(childRun, ["plan", "frontend", "review"]).get("frontend")).toEqual({ state: "current", visits: 3 })
+})
+
+test("waiting gate inside child marks box waiting", () => {
+  const waiting: RunState = { ...childRun, current: { kind: "human-gate", ...rec("frontend/approve", "e3") } }
+  expect(nodeStatus(waiting, ["frontend"]).get("frontend")).toEqual({ state: "waiting", visits: 3 })
+})
+
+test("missingNodes ignores folded ids", () => {
+  expect(missingNodes(childRun, ["plan", "frontend"])).toEqual([])
+  expect(missingNodes(childRun, ["plan"])).toEqual(["frontend"])
+})

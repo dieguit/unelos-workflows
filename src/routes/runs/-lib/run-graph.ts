@@ -1,6 +1,8 @@
 import type { StepStatus } from "@/components/flow/step-card"
 import type { ExecutionRecord, RunState } from "./runs-api"
 
+export const stepOf = (nodeId: string) => nodeId.split("/")[0]
+
 export type Execution = {
   /** 1-based visit number of this node. */
   n: number
@@ -15,6 +17,7 @@ export type Execution = {
 export function executionsByNode(run: RunState) {
   const map = new Map<string, Execution[]>()
   const add = (nodeId: string, record: ExecutionRecord, rest: Pick<Execution, "outcome" | "reason" | "active">) => {
+    nodeId = stepOf(nodeId)
     const list = map.get(nodeId) ?? []
     list.push({ n: list.length + 1, record, ...rest })
     map.set(nodeId, list)
@@ -29,15 +32,19 @@ export function executionsByNode(run: RunState) {
 /** Status for every step in `stepIds`; untouched ones are idle. */
 export function nodeStatus(run: RunState, stepIds: Iterable<string>) {
   const visits = new Map<string, number>()
-  for (const { work } of run.history) visits.set(work.nodeId, (visits.get(work.nodeId) ?? 0) + 1)
+  for (const { work } of run.history) {
+    const id = stepOf(work.nodeId)
+    visits.set(id, (visits.get(id) ?? 0) + 1)
+  }
   const status = new Map<string, StepStatus>()
   for (const id of stepIds) status.set(id, { state: visits.has(id) ? "done" : "idle", visits: visits.get(id) ?? 0 })
   const { current } = run
-  if (current.kind === "finished") status.set(current.nodeId, { state: "done", visits: (visits.get(current.nodeId) ?? 0) + 1 })
+  const id = stepOf(current.nodeId)
+  if (current.kind === "finished") status.set(id, { state: "done", visits: (visits.get(id) ?? 0) + 1 })
   else
-    status.set(current.nodeId, {
+    status.set(id, {
       state: current.kind === "human-gate" ? "waiting" : "current",
-      visits: (visits.get(current.nodeId) ?? 0) + 1,
+      visits: (visits.get(id) ?? 0) + 1,
     })
   return status
 }
@@ -45,5 +52,5 @@ export function nodeStatus(run: RunState, stepIds: Iterable<string>) {
 /** Node ids the run touched that the live workflow no longer has. */
 export function missingNodes(run: RunState, stepIds: Iterable<string>) {
   const known = new Set(stepIds)
-  return [...new Set([...run.history.map((h) => h.work.nodeId), run.current.nodeId])].filter((id) => !known.has(id))
+  return [...new Set([...run.history.map((h) => h.work.nodeId), run.current.nodeId].map(stepOf))].filter((id) => !known.has(id))
 }

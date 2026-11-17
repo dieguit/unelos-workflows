@@ -7,7 +7,7 @@ const route = z.object({ outcome: z.string().nullable(), target: z.string() })
 const step = z
   .object({
     id: z.string(),
-    kind: z.enum(["task", "parallel", "human-gate", "end"]),
+    kind: z.enum(["task", "parallel", "human-gate", "workflow", "end"]),
     agent: z.string().nullable(),
     execution: z.enum(["main", "subagent"]).nullable(),
     routes: z.array(route),
@@ -74,6 +74,7 @@ export const workflowSettingsSchema = (originalName: string) =>
         ),
       description: z.string().nullable(),
       start: z.string().min(1, "Choose a start step."),
+      inputs: z.array(z.string()),
       steps: z.array(step),
     })
     .superRefine((w, ctx) => {

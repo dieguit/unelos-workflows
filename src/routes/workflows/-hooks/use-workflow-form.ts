@@ -6,6 +6,7 @@ export const toDraft = (doc: WorkflowDraft): WorkflowDraft => ({
   name: doc.name,
   description: doc.description,
   start: doc.start,
+  inputs: doc.inputs,
   steps: doc.steps,
 })
 
