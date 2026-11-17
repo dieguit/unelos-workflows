@@ -27,13 +27,18 @@ pub fn validate_project(
         validate_project(&child)?;
     }
     validate_workflow(project).map_err(|mut error| {
-        for (id, source) in &project.node_sources {
+        let source = project
+            .node_sources
+            .iter()
+            .filter(|(id, _)| {
+                let prefix = format!("nodes.{id}");
+                error.field == prefix || error.field.starts_with(&format!("{prefix}."))
+            })
+            .max_by_key(|(id, _)| id.len());
+        if let Some((id, source)) = source {
             let prefix = format!("nodes.{id}");
-            if error.field == prefix || error.field.starts_with(&format!("{prefix}.")) {
-                error.path = source.path.clone();
-                error.field = format!("nodes.{}{}", source.node_id, &error.field[prefix.len()..]);
-                break;
-            }
+            error.path = source.path.clone();
+            error.field = format!("nodes.{}{}", source.node_id, &error.field[prefix.len()..]);
         }
         error
     })

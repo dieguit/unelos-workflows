@@ -33,6 +33,35 @@ nodes:
 ";
 
 #[test]
+fn dotted_node_prefix_collision_reports_child_output_source() {
+    let parent = "name: parent
+start: a
+nodes:
+  a: {taskDefinition: {instructions: test}, agent: worker, outputs: [x.md], next: a.b}
+  a.b: {type: workflow, workflow: child, outputs: {report.md: x.md}, next: end}
+  end: {type: end}
+";
+    let child = "name: child
+start: task
+nodes:
+  task: {taskDefinition: {instructions: test}, agent: worker, outputs: [report.md], next: done}
+  done: {type: end}
+";
+    let (_temp, root) = project(&[("parent", parent), ("child", child)]);
+    fs::create_dir_all(root.join(".unelos/agents/worker")).unwrap();
+    fs::write(
+        root.join(".unelos/agents/worker/agent.yaml"),
+        "instructions: test",
+    )
+    .unwrap();
+    let p = load_project(&root, "parent").unwrap();
+    let e = unelos_core::validate_project(&p).unwrap_err();
+    assert!(e.cause.contains("conflicting producers"), "{e}");
+    assert!(e.path.ends_with("child.yaml"), "{e}");
+    assert_eq!(e.field, "nodes.task.outputs");
+}
+
+#[test]
 fn declared_inputs_need_no_producer() {
     let (_temp, root) = project(&[("child", CHILD)]);
     let mut p = load_project(&root, "child").unwrap();
