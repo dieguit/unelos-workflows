@@ -132,6 +132,8 @@ pub struct LoadedProject {
     pub instruction_dependencies: BTreeMap<Utf8PathBuf, BTreeSet<Utf8PathBuf>>,
     pub definitions: ProjectDefinitions,
     pub workflow: WorkflowDefinition,
+    pub authoring_workflow: WorkflowDefinition,
+    pub node_sources: BTreeMap<String, crate::NodeSource>,
 }
 
 impl LoadedProject {
@@ -761,6 +763,37 @@ fn load_authoring_candidate(
             declared: workflow.name,
         });
     }
+    let authoring_workflow = workflow.clone();
+    let expanded = crate::compose::expand(&workflow_source, &workflow, &mut |id| {
+        if id.is_empty()
+            || matches!(id, "." | "..")
+            || id.contains(['/', '\\'])
+            || Utf8Path::new(id).is_absolute()
+        {
+            return Err(diagnostic(
+                &workflow_source,
+                "workflow",
+                "invalid workflow ID",
+            ));
+        }
+        let path = bounded_path(
+            &authoring_root,
+            &Utf8PathBuf::from(format!("workflows/{id}.yaml")),
+            &workflow_source,
+            "workflow",
+        )?;
+        let child = parse_workflow_definition(path.as_str(), &read(&path)?)?;
+        if child.name != id {
+            return Err(ProjectLoadError::NameMismatch {
+                path,
+                requested: id.to_owned(),
+                declared: child.name,
+            });
+        }
+        Ok((path, child))
+    })?;
+    workflow = expanded.workflow;
+    let node_sources = expanded.node_sources;
     for (id, node) in &mut workflow.nodes {
         let selections: Vec<_> = match node {
             NodeDefinition::Task(task) => vec![(
@@ -823,7 +856,7 @@ fn load_authoring_candidate(
             if let TaskSelection::Inline(task) = selection {
                 resolve_instructions(
                     &authoring_root,
-                    &workflow_source,
+                    &node_sources[id].path,
                     &field,
                     &task.instructions_file,
                     &mut task.instructions,
@@ -842,6 +875,8 @@ fn load_authoring_candidate(
         instruction_dependencies,
         definitions,
         workflow,
+        authoring_workflow,
+        node_sources,
     })
 }
 

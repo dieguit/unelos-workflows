@@ -502,8 +502,22 @@ fn rejects_existing_run_path_and_unsafe_runtime_components_without_publication()
         ),
     ] {
         let (_temp, root) = project_copy();
-        fs::write(root.join(".unelos/workflows/implement-feature.yaml"), workflow).unwrap();
+        // Authored slash IDs are rejected at load time; inject one after loading to test runtime.
+        fs::write(
+            root.join(".unelos/workflows/implement-feature.yaml"),
+            if expected == "unsafe-node" {
+                workflow.replace("../escape", "unsafe")
+            } else {
+                workflow.to_owned()
+            },
+        )
+        .unwrap();
         let mut project = load_project(&root, "implement-feature").unwrap();
+        if expected == "unsafe-node" {
+            let node = project.workflow.nodes.swap_remove("unsafe").unwrap();
+            project.workflow.nodes.insert("../escape".into(), node);
+            project.workflow.start = "../escape".into();
+        }
         if expected == "unsafe-agent" {
             // Exercise runtime's guard independently of folder-ID validation.
             project.definitions.agents.insert("../escape".into(), project.definitions.agents["planner"].clone());

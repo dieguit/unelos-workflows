@@ -51,7 +51,9 @@ pub use harness::{
     harness_models, install_harness, list_harnesses, provision_cli, uninstall_harness,
     HarnessStatus, ModelInfo,
 };
+pub mod compose;
 mod definitions;
+pub use compose::{artifact_file_name, NodeSource};
 mod execution;
 mod graph;
 mod import;
