@@ -37,6 +37,16 @@ pub struct WorkflowSettings {
     pub name: String,
     pub description: Option<String>,
     pub start: String,
+    #[serde(default)]
+    pub inputs: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StepCall {
+    pub workflow: String,
+    pub inputs: indexmap::IndexMap<String, String>,
+    pub outputs: indexmap::IndexMap<String, String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -66,6 +76,8 @@ pub struct WorkflowStep {
     pub original_id: Option<String>,
     #[serde(default)]
     pub task: Option<StepTask>,
+    #[serde(default)]
+    pub call: Option<StepCall>,
     #[serde(default)]
     pub label: String,
     pub kind: String,
@@ -242,7 +254,7 @@ fn document(root: &Utf8Path, id: &str, text: &str) -> Result<WorkflowDocument, S
         .nodes
         .iter()
         .map(|(id, node)| {
-            let node = project
+            let resolved = project
                 .as_ref()
                 .and_then(|p| p.workflow.nodes.get(id))
                 .unwrap_or(node);
@@ -250,6 +262,7 @@ fn document(root: &Utf8Path, id: &str, text: &str) -> Result<WorkflowDocument, S
                 id: id.clone(),
                 original_id: Some(id.clone()),
                 task: None,
+                call: None,
                 label: id.clone(),
                 kind: String::new(),
                 title: None,
@@ -262,8 +275,12 @@ fn document(root: &Utf8Path, id: &str, text: &str) -> Result<WorkflowDocument, S
             };
             step.kind = match node {
                 crate::NodeDefinition::Task(task) => {
+                    let selection = match resolved {
+                        crate::NodeDefinition::Task(resolved) => &resolved.task,
+                        _ => &task.task,
+                    };
                     step.task = Some(step_task(
-                        &task.task,
+                        selection,
                         project.as_ref().map(|p| &p.definitions),
                     ));
                     step.title = Some(title(&task.task));
@@ -278,8 +295,17 @@ fn document(root: &Utf8Path, id: &str, text: &str) -> Result<WorkflowDocument, S
                     step.workers = parallel
                         .tasks
                         .iter()
-                        .map(|worker| WorkflowWorker {
-                            task: step_task(&worker.task, project.as_ref().map(|p| &p.definitions)),
+                        .enumerate()
+                        .map(|(index, worker)| WorkflowWorker {
+                            task: step_task(
+                                match resolved {
+                                    crate::NodeDefinition::Parallel(resolved) => {
+                                        &resolved.tasks[index].task
+                                    }
+                                    _ => &worker.task,
+                                },
+                                project.as_ref().map(|p| &p.definitions),
+                            ),
                             agent: worker.agent.clone(),
                         })
                         .collect();
@@ -293,7 +319,17 @@ fn document(root: &Utf8Path, id: &str, text: &str) -> Result<WorkflowDocument, S
                     step.inputs = gate.inputs.clone();
                     "human-gate"
                 }
-                crate::NodeDefinition::Workflow(_) => "workflow",
+                crate::NodeDefinition::Workflow(call) => {
+                    step.routes = routes(&call.next);
+                    step.inputs = call.inputs.values().cloned().collect();
+                    step.outputs = call.outputs.values().cloned().collect();
+                    step.call = Some(StepCall {
+                        workflow: call.workflow.clone(),
+                        inputs: call.inputs.clone(),
+                        outputs: call.outputs.clone(),
+                    });
+                    "workflow"
+                }
                 crate::NodeDefinition::End => "end",
             }
             .into();
@@ -306,6 +342,7 @@ fn document(root: &Utf8Path, id: &str, text: &str) -> Result<WorkflowDocument, S
             name: workflow.name,
             description: workflow.description,
             start: workflow.start,
+            inputs: workflow.inputs,
         },
         steps,
         issues: issues(root, id, Some(text)),
@@ -404,6 +441,19 @@ fn candidate(
                 .collect();
             node.insert("tasks".into(), Value::Sequence(tasks));
         }
+        if step.kind == "workflow" {
+            let call = step.call.as_ref().ok_or("Workflow step requires a call")?;
+            node.clear();
+            node.insert("type".into(), Value::String("workflow".into()));
+            node.insert("workflow".into(), Value::String(call.workflow.clone()));
+            for (key, map) in [("inputs", &call.inputs), ("outputs", &call.outputs)] {
+                set_optional(
+                    &mut node,
+                    key,
+                    (!map.is_empty()).then(|| serde_yaml_ng::to_value(map).unwrap()),
+                );
+            }
+        }
         if step.kind != "end" {
             let next = if step.routes.is_empty() {
                 None
@@ -430,6 +480,7 @@ fn candidate(
         nodes.insert(Value::String(step.id.clone()), Value::Mapping(node));
     }
     fields.insert("nodes".into(), Value::Mapping(nodes));
+    set_list(fields, "inputs", &settings.inputs);
     fields.insert(
         Value::String("name".into()),
         Value::String(settings.name.clone()),

@@ -10,8 +10,9 @@ pub use authoring_actions::{
 };
 mod workflow_document;
 pub use workflow_document::{
-    create_workflow, get_workflow, save_workflow, validate_workflow, StepTask, WorkflowDocument,
-    WorkflowDraft, WorkflowIssue, WorkflowRoute, WorkflowSettings, WorkflowStep, WorkflowWorker,
+    create_workflow, get_workflow, save_workflow, validate_workflow, StepCall, StepTask,
+    WorkflowDocument, WorkflowDraft, WorkflowIssue, WorkflowRoute, WorkflowSettings, WorkflowStep,
+    WorkflowWorker,
 };
 mod task_document;
 pub use task_document::{
