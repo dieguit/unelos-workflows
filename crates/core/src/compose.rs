@@ -202,6 +202,20 @@ fn expand_inner(
             }
             _ => {}
         }
+        let targets: Vec<_> = match &call.next {
+            Transition::Single(target) => vec![target],
+            Transition::Outcomes(routes) => routes.values().collect(),
+        };
+        for target in targets {
+            if !root.nodes.contains_key(target) {
+                return Err(error(
+                    source,
+                    id,
+                    "next",
+                    format!("unknown parent target {target:?}"),
+                ));
+            }
+        }
         let prefix = format!("{id}/");
         if root
             .inputs
@@ -219,6 +233,22 @@ fn expand_inner(
                 "outputs",
                 format!("parent artifact uses reserved scope {prefix}"),
             ));
+        }
+        let available: BTreeSet<_> = root
+            .inputs
+            .iter()
+            .cloned()
+            .chain(root.nodes.values().flat_map(|n| artifacts(n).1))
+            .collect();
+        for name in call.inputs.values() {
+            if !available.contains(name) {
+                return Err(error(
+                    source,
+                    id,
+                    "inputs",
+                    format!("no parent producer or declared input for {name:?}"),
+                ));
+            }
         }
         entries.insert(id.clone(), format!("{id}/{}", child.start));
         let target = |t: &str| {

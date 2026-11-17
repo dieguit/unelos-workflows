@@ -220,3 +220,57 @@ fn child_ids_use_same_rules_as_root_workflows() {
     assert!(load_project(&root, "child.v2").is_ok());
     assert!(load_project(&root, "parent").is_ok());
 }
+
+#[test]
+fn rejects_unbindable_mapping_for_unused_child_input() {
+    let parent = PARENT.replace("brief.md: plan.md", "brief.md: nonexistent.md");
+    let child = CHILD.replace("inputs: [brief.md], ", "");
+    let (_temp, root) = project(&[("parent", &parent), ("child", &child)]);
+    let ProjectLoadError::Validation(e) = load_project(&root, "parent").unwrap_err() else {
+        panic!("expected validation");
+    };
+    assert!(e.path.ends_with("parent.yaml"));
+    assert_eq!(e.field, "nodes.frontend.inputs");
+    assert!(e.cause.contains("nonexistent.md"), "{e}");
+}
+
+#[test]
+fn unused_child_input_accepts_parent_contract_and_sibling_outputs() {
+    let child = CHILD.replace("inputs: [brief.md], ", "");
+    for parent in [
+        PARENT.replace("start: plan", "inputs: [supplied.md]\nstart: plan")
+            .replace("brief.md: plan.md", "brief.md: supplied.md"),
+        PARENT.replace("brief.md: plan.md", "brief.md: sibling-report.md")
+            + "  sibling: {type: workflow, workflow: child, inputs: {brief.md: plan.md}, outputs: {report.md: sibling-report.md}, next: {done: end, abandoned: end}}\n",
+    ] {
+        let (_temp, root) = project(&[("parent", &parent), ("child", &child)]);
+        assert!(load_project(&root, "parent").is_ok());
+    }
+}
+
+#[test]
+fn rejects_unknown_parent_target_for_unused_child_end() {
+    let parent = PARENT.replace("abandoned: plan", "abandoned: nonexistent");
+    let child = CHILD.replace("give_up: abandoned", "give_up: done");
+    let (_temp, root) = project(&[("parent", &parent), ("child", &child)]);
+    let ProjectLoadError::Validation(e) = load_project(&root, "parent").unwrap_err() else {
+        panic!("expected validation");
+    };
+    assert!(e.path.ends_with("parent.yaml"));
+    assert_eq!(e.field, "nodes.frontend.next");
+    assert!(e.cause.contains("nonexistent"), "{e}");
+}
+
+#[test]
+fn rejects_unknown_parent_target_for_single_next() {
+    let parent = PARENT.replace("{done: review, abandoned: plan}", "nonexistent");
+    let child = CHILD
+        .replace("give_up: abandoned", "give_up: done")
+        .replace("  abandoned: {type: end}\n", "");
+    let (_temp, root) = project(&[("parent", &parent), ("child", &child)]);
+    let ProjectLoadError::Validation(e) = load_project(&root, "parent").unwrap_err() else {
+        panic!("expected validation");
+    };
+    assert_eq!(e.field, "nodes.frontend.next");
+    assert!(e.cause.contains("nonexistent"), "{e}");
+}
