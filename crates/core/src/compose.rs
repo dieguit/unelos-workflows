@@ -98,10 +98,13 @@ fn rewrite(
     }
 }
 
+pub(crate) type ChildLoader<'a> =
+    dyn FnMut(&str) -> Result<(Utf8PathBuf, WorkflowDefinition), ProjectLoadError> + 'a;
+
 pub(crate) fn expand(
     source: &Utf8Path,
     root: &WorkflowDefinition,
-    load_child: &mut dyn FnMut(&str) -> Result<(Utf8PathBuf, WorkflowDefinition), ProjectLoadError>,
+    load_child: &mut ChildLoader<'_>,
 ) -> Result<Expanded, ProjectLoadError> {
     expand_inner(source, root, load_child, &mut vec![root.name.clone()])
 }
@@ -109,7 +112,7 @@ pub(crate) fn expand(
 fn expand_inner(
     source: &Utf8Path,
     root: &WorkflowDefinition,
-    load_child: &mut dyn FnMut(&str) -> Result<(Utf8PathBuf, WorkflowDefinition), ProjectLoadError>,
+    load_child: &mut ChildLoader<'_>,
     stack: &mut Vec<String>,
 ) -> Result<Expanded, ProjectLoadError> {
     let mut workflow = root.clone();
