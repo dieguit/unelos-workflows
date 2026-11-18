@@ -3,6 +3,8 @@ use camino::{Utf8Path, Utf8PathBuf};
 use std::fs;
 use unelos_core::{list_workflows, workflow_summaries};
 
+mod support;
+
 fn project_copy() -> (TempDir, Utf8PathBuf) {
     let temp = TempDir::new().unwrap();
     let root = Utf8Path::from_path(temp.path()).unwrap().to_owned();
@@ -34,6 +36,9 @@ fn summaries_sort_filenames_not_stems() {
 
 #[test]
 fn valid_rows_count_steps_without_end_and_sort_by_file() {
+    if !support::isolated_config() {
+        return;
+    }
     let (_temp, root) = project_copy();
     let rows = workflow_summaries(&root).unwrap();
     let files: Vec<_> = rows.iter().map(|r| r.file.as_str()).collect();
@@ -53,6 +58,9 @@ fn valid_rows_count_steps_without_end_and_sort_by_file() {
 
 #[test]
 fn invalid_workflow_becomes_problem_row_and_keeps_others() {
+    if !support::isolated_config() {
+        return;
+    }
     let (_temp, root) = project_copy();
     fs::write(root.join(".unelos/workflows/broken.yaml"), MISSING_AGENT).unwrap();
     let rows = workflow_summaries(&root).unwrap();
@@ -94,6 +102,9 @@ fn unparseable_workflow_becomes_problem_row() {
 
 #[test]
 fn missing_workflows_dir_is_empty() {
+    if !support::isolated_config() {
+        return;
+    }
     let (_temp, root) = project_copy();
     fs::remove_dir_all(root.join(".unelos/workflows")).unwrap();
     assert!(workflow_summaries(&root).unwrap().is_empty());

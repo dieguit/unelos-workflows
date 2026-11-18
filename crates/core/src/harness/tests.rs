@@ -21,6 +21,12 @@ fn bundled_globals_install_update_preserve_and_remove() {
     let source = root.join("source");
     fs::write(&source, "binary").unwrap();
     install_harness("opencode", &source).unwrap();
+    let opencode_agents = root.join("opencode").join("agents");
+    let author = opencode_agents.join("unelos-global-workflow-author.md");
+    let analyst = opencode_agents.join("unelos-global-workflow-analyst.md");
+    assert!(author.is_file());
+    assert!(analyst.is_file());
+    fs::write(&author, "user edits").unwrap();
     let initial: std::collections::BTreeMap<String, String> =
         serde_json::from_slice(&fs::read(config.join("bundled.json")).unwrap()).unwrap();
     assert_eq!(initial.len(), 21);
@@ -31,6 +37,16 @@ fn bundled_globals_install_update_preserve_and_remove() {
             .is_file());
     }
     uninstall_harness("opencode").unwrap();
+    assert!(!analyst.exists());
+    assert_eq!(fs::read_to_string(&author).unwrap(), "user edits");
+    install_harness("claude", &source).unwrap();
+    let claude_author = root
+        .join("claude")
+        .join("agents")
+        .join("unelos-global-workflow-author.md");
+    assert!(claude_author.is_file());
+    uninstall_harness("claude").unwrap();
+    assert!(!claude_author.exists());
     let unowned = config
         .join("agents")
         .join("workflow-author")
@@ -204,8 +220,8 @@ fn failed_workflow_export_preserves_existing_profiles() {
     assert!(!result.skipped.is_empty());
     assert!(result.removed.is_empty());
     assert_eq!(fs::read_to_string(profile).unwrap(), "keep");
-    assert!(result.written.contains(&valid));
-    assert_ne!(fs::read_to_string(valid).unwrap(), "outdated");
+    assert!(!result.written.contains(&valid));
+    assert_eq!(fs::read_to_string(valid).unwrap(), "outdated");
 }
 
 #[test]
@@ -272,6 +288,7 @@ fn claude_agent_model_mapping_and_mcp_list() {
             .build_project(
                 root,
                 &[("workflow".into(), vec![agent.clone()])].into(),
+                &[],
                 true,
             )
             .unwrap();
@@ -307,8 +324,17 @@ fn adapter_write_failure_restores_existing_files() {
     let temp = assert_fs::TempDir::new().unwrap();
     let root = Utf8Path::from_path(temp.path()).unwrap();
     fs::create_dir_all(root.join(".claude/agents")).unwrap();
-    fs::write(root.join(".claude/agents/unelos-a.md"), "original a").unwrap();
-    fs::write(root.join(".claude/agents/unelos-b.md"), "original b").unwrap();
+    crate::harness_build::write_agents(
+        root,
+        ".claude/agents",
+        vec![
+            (".claude/agents/unelos-a.md".into(), "original a".into()),
+            (".claude/agents/unelos-b.md".into(), "original b".into()),
+        ],
+        vec![],
+        true,
+    )
+    .unwrap();
     fs::write(root.join(".claude/agents/unelos-stale.md"), "stale").unwrap();
     fs::write(
         root.join(format!(
@@ -325,6 +351,7 @@ fn adapter_write_failure_restores_existing_files() {
             (".claude/agents/unelos-a.md".into(), "new a".into()),
             (".claude/agents/unelos-b.md".into(), "new b".into()),
         ],
+        vec![],
         true
     )
     .is_err());
@@ -371,6 +398,17 @@ fn builds_both_harnesses_and_unmapped_claude_keeps_files() {
     fs::write(&source, "binary").unwrap();
     install_harness("opencode", &source).unwrap();
     install_harness("claude", &source).unwrap();
+    let mut legacy_copies = Vec::new();
+    for harness in ["opencode", "claude"] {
+        let directory = root.join(format!(".{harness}")).join("agents");
+        fs::create_dir_all(&directory).unwrap();
+        let name = "unelos-global-workflow-author.md";
+        let source = root.join(harness).join("agents").join(name);
+        let copy = directory.join(name);
+        let text = fs::read_to_string(source).unwrap();
+        fs::write(&copy, text.replace("mode: all", "mode: subagent")).unwrap();
+        legacy_copies.push(copy);
+    }
     crate::save_model_mapping(
         Some("smart"),
         "smart",
@@ -387,6 +425,7 @@ fn builds_both_harnesses_and_unmapped_claude_keeps_files() {
     let built = crate::build_harness_config(root).unwrap();
     assert_eq!(built.harnesses, ["opencode", "claude"]);
     assert!(built.skipped.is_empty());
+    assert_eq!(built.removed, legacy_copies);
     let claude_agent = root.join(".claude/agents/unelos-simple-implementer.md");
     let before = fs::read(&claude_agent).unwrap();
     let stale = root.join(".claude/agents/unelos-stale.md");
@@ -398,7 +437,7 @@ fn builds_both_harnesses_and_unmapped_claude_keeps_files() {
     )
     .unwrap();
     let built = crate::build_harness_config(root).unwrap();
-    assert_eq!(built.harnesses, ["opencode"]);
+    assert_eq!(built.harnesses, ["opencode", "claude"]);
     assert_eq!(built.skipped.len(), 1);
     assert!(built.skipped[0].starts_with("claude: No Claude model mapped"));
     assert_eq!(fs::read(&claude_agent).unwrap(), before);
@@ -639,7 +678,7 @@ fn claude_renders_effort() {
     ] {
         let agent = effort_agent(AgentModel::Alias("smart".into()), effort);
         claude::Claude
-            .build_project(root, &[("workflow".into(), vec![agent])].into(), true)
+            .build_project(root, &[("workflow".into(), vec![agent])].into(), &[], true)
             .unwrap();
         let text = fs::read_to_string(root.join(".claude/agents/unelos-effort.md")).unwrap();
         let front: serde_json::Value =
@@ -652,7 +691,7 @@ fn claude_renders_effort() {
     let agent = effort_agent(AgentModel::Alias("smart".into()), Some("none"));
     assert_eq!(
         claude::Claude
-            .build_project(root, &[("workflow".into(), vec![agent])].into(), true)
+            .build_project(root, &[("workflow".into(), vec![agent])].into(), &[], true)
             .unwrap_err()
             .code,
         "invalid_effort"

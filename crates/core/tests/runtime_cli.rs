@@ -30,6 +30,9 @@ fn assert_progression_unchanged(root: &Utf8Path, name: &str, before: &(Vec<u8>, 
 
 #[test]
 fn discovery_does_not_allocate_a_run() {
+    if !support::isolated_config() {
+        return;
+    }
     let (_temp, root) = project_copy();
     let workflows = list_workflows(&root).unwrap();
     assert!(workflows.contains(&"implement-feature".to_owned()));
@@ -79,6 +82,9 @@ fn legacy_state_without_naming_metadata_is_already_named() {
 
 #[test]
 fn discovery_accepts_empty_workflows_and_ignores_non_yaml_files() {
+    if !support::isolated_config() {
+        return;
+    }
     let (_temp, root) = project_copy();
     fs::write(root.join(".unelos/workflows/readme.txt"), "not a Workflow").unwrap();
     assert_eq!(
@@ -90,6 +96,8 @@ fn discovery_accepts_empty_workflows_and_ignores_non_yaml_files() {
     }
     assert!(list_workflows(&root).unwrap().is_empty());
 }
+
+mod support;
 
 #[test]
 fn discovery_rejects_malformed_mismatched_and_invalid_workflows() {

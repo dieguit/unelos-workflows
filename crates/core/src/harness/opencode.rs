@@ -133,9 +133,11 @@ impl HarnessAdapter for OpenCode {
         &self,
         root: &Utf8Path,
         workflows: &std::collections::BTreeMap<String, Vec<crate::AgentExport>>,
+        legacy_globals: &[crate::AgentExport],
         prune: bool,
     ) -> Result<crate::HarnessBuild> {
-        let agents = crate::harness_build::merge_agents(workflows)?;
+        let mut agents = crate::harness_build::merge_agents(workflows)?;
+        agents.retain(|a| !a.id.starts_with("global/"));
         crate::opencode_agents::check_agents(root, &agents)?;
         let mut rendered =
             crate::opencode_agents::render_agents(crate::opencode_agents::Version::V2, &agents)?;
@@ -149,10 +151,27 @@ impl HarnessAdapter for OpenCode {
             ));
             rendered.push((path.strip_prefix(root).unwrap().to_owned(), text));
         }
+        let legacy = crate::opencode_agents::render_agents(
+            crate::opencode_agents::Version::V2,
+            legacy_globals,
+        )
+        .unwrap_or_default();
         let mut result =
-            crate::harness_build::write_agents(root, ".opencode/agents", rendered, prune)?;
+            crate::harness_build::write_agents(root, ".opencode/agents", rendered, legacy, prune)?;
         result.harnesses.push(self.id().into());
         Ok(result)
+    }
+    fn build_global_agents(
+        &self,
+        agents: &[crate::AgentExport],
+        prune: bool,
+    ) -> Result<crate::HarnessBuild> {
+        let root = self
+            .config_dir()
+            .ok_or_else(|| error("config_dir_missing", "Set OPENCODE_CONFIG_DIR or HOME"))?;
+        let rendered =
+            crate::opencode_agents::render_agents(crate::opencode_agents::Version::V2, agents)?;
+        crate::harness_build::write_global_agents(&root, self.id(), rendered, prune)
     }
     fn id(&self) -> &str {
         "opencode"

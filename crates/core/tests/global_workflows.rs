@@ -153,12 +153,38 @@ fn global_workflow_listing_runtime_composition_authoring_and_harness() {
     assert!(get_global_workflow("../escape").is_err());
     let cli = write(root, &["cli"], "test executable");
     install_harness("opencode", &cli).unwrap();
-    build_harness_config(root).unwrap();
-    assert!(root
-        .join(".opencode")
+    let user_agent = config
+        .join("opencode")
         .join("agents")
-        .join("unelos-global-shared.md")
-        .is_file());
+        .join("unelos-global-shared.md");
+    assert!(user_agent.is_file());
+    let project_agent = write(
+        root,
+        &[".opencode", "agents", "unelos-global-shared.md"],
+        &fs::read_to_string(&user_agent)
+            .unwrap()
+            .replace("mode: all", "mode: primary"),
+    );
+    let direct = write(
+        root,
+        &[".unelos", "workflows", "direct.yaml"],
+        &text.replacen("name: shared", "name: direct", 1),
+    );
+    let build = build_harness_config(root).unwrap();
+    assert!(build.skipped.is_empty(), "{:?}", build.skipped);
+    assert!(!project_agent.exists());
+    fs::write(
+        &direct,
+        text.replace("name: shared", "name: direct")
+            .replace("agent: global/shared", "agent: global/missing"),
+    )
+    .unwrap();
+    assert!(build_harness_config(root)
+        .unwrap()
+        .skipped
+        .iter()
+        .any(|skip| skip.starts_with("direct:") && skip.contains("global/missing")));
+    fs::remove_file(&direct).unwrap();
     write(
         root,
         &[".unelos", "agents", "global-shared", "agent.yaml"],
@@ -176,6 +202,38 @@ fn global_workflow_listing_runtime_composition_authoring_and_harness() {
     assert!(remove_global_agent("shared")
         .unwrap_err()
         .contains("referenced"));
+    remove_global_workflow("caller").unwrap();
+    remove_global_workflow("shared").unwrap();
+    fs::remove_file(root.join(".unelos").join("workflows").join("local.yaml")).unwrap();
+    fs::remove_file(
+        root.join(".unelos")
+            .join("workflows")
+            .join("collision.yaml"),
+    )
+    .unwrap();
+    fs::write(&direct, text.replacen("name: shared", "name: direct", 1)).unwrap();
+    assert!(build_harness_config(root).unwrap().skipped.is_empty());
+    let other = assert_fs::TempDir::new().unwrap();
+    build_harness_config(Utf8Path::from_path(other.path()).unwrap()).unwrap();
+    build_global_harness_agents().unwrap();
+    assert!(fs::read_to_string(&user_agent)
+        .unwrap()
+        .contains("mode: all"));
+    remove_global_agent("shared").unwrap();
+    let broken_agent = write(
+        &config,
+        &["agents", "broken", "agent.yaml"],
+        "instructions: [bad\n",
+    );
+    let result = build_global_harness_agents().unwrap();
+    assert!(result
+        .skipped
+        .iter()
+        .any(|skip| skip.starts_with("global/broken:")));
+    assert!(user_agent.exists());
+    fs::remove_dir_all(broken_agent.parent().unwrap()).unwrap();
+    build_global_harness_agents().unwrap();
+    assert!(!user_agent.exists());
 }
 
 #[test]

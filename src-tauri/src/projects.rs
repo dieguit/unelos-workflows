@@ -614,7 +614,7 @@ pub async fn save_global_mcp(
     mcp: unelos_core::McpDocument,
 ) -> Result<unelos_core::McpDocument, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        unelos_core::save_global_mcp(original_id.as_deref(), mcp)
+        refresh_after_global_edit(unelos_core::save_global_mcp(original_id.as_deref(), mcp))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -634,7 +634,7 @@ pub async fn remove_global_mcp(
             .as_deref()
             .map(|root| camino::Utf8Path::from_path(root).ok_or("Project path is not UTF-8"))
             .transpose()?;
-        unelos_core::remove_global_mcp(root, &id)
+        refresh_after_global_edit(unelos_core::remove_global_mcp(root, &id))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -753,15 +753,30 @@ pub async fn save_global_workflow(
     id: String,
     draft: unelos_core::WorkflowDraft,
 ) -> Result<unelos_core::WorkflowDocument, String> {
-    tauri::async_runtime::spawn_blocking(move || unelos_core::save_global_workflow(&id, &draft))
-        .await
-        .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        refresh_after_global_edit(unelos_core::save_global_workflow(&id, &draft))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn refresh_after_global_edit<T>(saved: Result<T, String>) -> Result<T, String> {
+    let saved = saved?;
+    match unelos_core::build_global_harness_agents() {
+        Ok(build) => {
+            for skipped in build.skipped {
+                eprintln!("Saved, but harness config build skipped: {skipped}");
+            }
+        }
+        Err(e) => eprintln!("Saved, but harness config build failed: {e}"),
+    }
+    Ok(saved)
 }
 
 #[tauri::command]
 pub async fn duplicate_global_workflow(id: String, new_id: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        unelos_core::duplicate_global_workflow(&id, &new_id)
+        refresh_after_global_edit(unelos_core::duplicate_global_workflow(&id, &new_id))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -769,9 +784,11 @@ pub async fn duplicate_global_workflow(id: String, new_id: String) -> Result<(),
 
 #[tauri::command]
 pub async fn remove_global_workflow(id: String) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || unelos_core::remove_global_workflow(&id))
-        .await
-        .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        refresh_after_global_edit(unelos_core::remove_global_workflow(&id))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -794,7 +811,10 @@ pub async fn save_global_agent(
     agent: unelos_core::AgentDocument,
 ) -> Result<unelos_core::AgentDocument, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        unelos_core::save_global_agent(original_id.as_deref(), agent)
+        refresh_after_global_edit(unelos_core::save_global_agent(
+            original_id.as_deref(),
+            agent,
+        ))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -809,9 +829,11 @@ pub async fn duplicate_global_agent(id: String, new_id: String) -> Result<(), St
 
 #[tauri::command]
 pub async fn remove_global_agent(id: String) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || unelos_core::remove_global_agent(&id))
-        .await
-        .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        refresh_after_global_edit(unelos_core::remove_global_agent(&id))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
@@ -1172,9 +1194,12 @@ pub async fn save_project_settings(
 #[tauri::command]
 pub async fn build_harness_config(
     app: AppHandle,
-    root: String,
+    root: Option<String>,
 ) -> Result<unelos_core::HarnessBuild, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        let Some(root) = root else {
+            return unelos_core::build_global_harness_agents().map_err(|e| e.to_string());
+        };
         let root = approved_root(&load_from(&store_file(&app)?), Path::new(&root))?;
         unelos_core::build_harness_config(
             camino::Utf8Path::from_path(&root).ok_or("Project path is not UTF-8")?,

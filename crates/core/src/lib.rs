@@ -34,8 +34,8 @@ pub use agent_document::{
     AgentModelOptions, HarnessModelOptions,
 };
 pub use harness_build::{
-    auto_build_harness, build_harness_config, get_project_settings, save_project_settings,
-    HarnessBuild,
+    auto_build_harness, build_global_harness_agents, build_harness_config, get_project_settings,
+    save_project_settings, HarnessBuild,
 };
 pub use mcp_document::{
     get_global_mcp, get_mcp, global_mcp_summaries, mcp_summaries, remove_global_mcp, remove_mcp,

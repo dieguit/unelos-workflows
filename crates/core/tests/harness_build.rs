@@ -92,7 +92,6 @@ fn rebuild_merges_prunes_preserves_and_replaces_mcp_ownership() {
             .written
             .iter()
             .filter(|p| p.extension() == Some("md"))
-            .filter(|p| !p.file_name().unwrap().starts_with("unelos-global-"))
             .count(),
         3
     );
@@ -132,14 +131,13 @@ fn rebuild_merges_prunes_preserves_and_replaces_mcp_ownership() {
     fs::write(&stale, "keep").unwrap();
     fs::write(&controller, "outdated").unwrap();
     let built = build_harness_config(root).unwrap();
-    assert_eq!(built.skipped.len(), 1);
+    assert_eq!(built.skipped.len(), 2);
     assert!(built.skipped[0].starts_with("broken: "));
-    assert!(built.written.contains(&controller));
+    assert!(built.skipped[1].starts_with("Modified or unowned agent: "));
+    assert!(!built.written.contains(&controller));
+    assert_eq!(fs::read_to_string(&controller).unwrap(), "outdated");
     assert!(built.removed.is_empty());
     assert_eq!(fs::read_to_string(&stale).unwrap(), "keep");
-    assert!(fs::read_to_string(&controller)
-        .unwrap()
-        .contains("mode: all"));
     fs::remove_file(stale).unwrap();
     fs::remove_file(root.join(".unelos/workflows/broken.yaml")).unwrap();
     fs::remove_file(&second).unwrap();

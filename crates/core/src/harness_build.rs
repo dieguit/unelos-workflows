@@ -1,5 +1,6 @@
 use crate::{AgentExport, InstallError, ProjectSettings};
 use camino::{Utf8Path, Utf8PathBuf};
+use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, fs};
 
 fn error(e: impl ToString) -> InstallError {
@@ -16,6 +17,119 @@ pub struct HarnessBuild {
     pub written: Vec<Utf8PathBuf>,
     pub removed: Vec<Utf8PathBuf>,
     pub skipped: Vec<String>,
+}
+
+impl HarnessBuild {
+    fn append(&mut self, build: Self) {
+        for id in build.harnesses {
+            if !self.harnesses.contains(&id) {
+                self.harnesses.push(id);
+            }
+        }
+        self.written.extend(build.written);
+        self.removed.extend(build.removed);
+        self.skipped.extend(build.skipped);
+    }
+}
+
+type Workflows = BTreeMap<String, Vec<AgentExport>>;
+
+fn global_agents(result: &mut HarnessBuild) -> Result<Vec<AgentExport>, InstallError> {
+    let mut agents = Vec::new();
+    for summary in crate::global_agent_summaries().map_err(error)? {
+        let id = format!("global/{}", summary.name);
+        let load = || {
+            let agent = crate::get_global_agent(&summary.name)?;
+            let mut mcp_servers = BTreeMap::new();
+            for reference in &agent.mcps {
+                let name = reference.strip_prefix("global/").ok_or_else(|| {
+                    format!("Global agent requires a global MCP reference: {reference:?}")
+                })?;
+                if name == "unelos" {
+                    return Err("MCP ID 'unelos' is reserved".into());
+                }
+                let document = crate::get_global_mcp(name)
+                    .map_err(|e| format!("Cannot resolve MCP {reference:?}: {e}"))?;
+                mcp_servers.insert(name.to_owned(), document.server);
+            }
+            Ok(AgentExport {
+                id: id.clone(),
+                instructions: agent.instructions,
+                model: agent.model,
+                effort: agent.effort,
+                tools: agent.tools,
+                mcps: agent.mcps,
+                mcp_servers,
+                main: true,
+                subagent: true,
+            })
+        };
+        match summary.problem.map_or_else(load, Err) {
+            Ok(agent) => agents.push(agent),
+            Err(problem) => result.skipped.push(format!("{id}: {problem}")),
+        }
+    }
+    Ok(agents)
+}
+
+fn global_workflows(result: &mut HarnessBuild) -> Result<Workflows, InstallError> {
+    let mut workflows = BTreeMap::new();
+    let root = crate::task_document::global_root().map_err(error)?;
+    for summary in crate::global_workflow_summaries().map_err(error)? {
+        let name = format!("global/{}", summary.name);
+        match summary.problem.map_or_else(
+            || crate::export_workflow_agents(&root, &name).map_err(|e| e.message),
+            Err,
+        ) {
+            Ok(agents) => {
+                workflows.insert(name, agents);
+            }
+            Err(problem) => result.skipped.push(format!("{}: {problem}", summary.name)),
+        }
+    }
+    Ok(workflows)
+}
+
+pub fn build_global_harness_agents() -> Result<HarnessBuild, InstallError> {
+    let installed = crate::harness::list_harnesses();
+    let mut result = HarnessBuild::default();
+    if installed.iter().any(|h| h.installed) {
+        let agents = global_agents(&mut result)?;
+        let prune = result.skipped.is_empty();
+        for adapter in crate::harness::registry() {
+            if installed
+                .iter()
+                .any(|h| h.installed && h.id == adapter.id())
+            {
+                refresh_globals(adapter.as_ref(), &agents, prune, &mut result);
+            }
+        }
+    }
+    Ok(result)
+}
+
+pub(crate) fn build_globals_for(
+    adapter: &dyn crate::harness::HarnessAdapter,
+) -> Result<HarnessBuild, InstallError> {
+    let mut result = HarnessBuild::default();
+    let agents = global_agents(&mut result)?;
+    let prune = result.skipped.is_empty();
+    refresh_globals(adapter, &agents, prune, &mut result);
+    Ok(result)
+}
+
+fn refresh_globals(
+    adapter: &dyn crate::harness::HarnessAdapter,
+    agents: &[AgentExport],
+    prune: bool,
+    result: &mut HarnessBuild,
+) {
+    match adapter.build_global_agents(agents, prune) {
+        Ok(build) => result.append(build),
+        Err(e) => result
+            .skipped
+            .push(format!("{} globals: {}", adapter.id(), e.message)),
+    }
 }
 
 pub fn get_project_settings(root: &Utf8Path) -> Result<ProjectSettings, InstallError> {
@@ -92,26 +206,32 @@ pub fn build_harness_config(root: &Utf8Path) -> Result<HarnessBuild, InstallErro
             Err(e) => result.skipped.push(format!("{id}: {}", e.message)),
         }
     }
-    for summary in crate::workflow_summaries(root)
-        .map_err(error)?
+    let prune = result.skipped.is_empty();
+    let mut global_result = HarnessBuild::default();
+    let global_agents = global_agents(&mut global_result)?;
+    let global_prune = global_result.skipped.is_empty();
+    let mut legacy = global_workflows(&mut result)?;
+    legacy.extend(workflows.clone());
+    let legacy_agents = merge_agents(&legacy)?;
+    let legacy_globals: Vec<_> = legacy_agents
         .into_iter()
-        .filter(|row| row.global)
+        .filter(|a| a.id.starts_with("global/"))
+        .collect();
+    let global_names: std::collections::BTreeSet<_> = global_agents
+        .iter()
+        .map(|agent| crate::install::native_agent_id(&agent.id))
+        .collect();
+    for agent in workflows
+        .values()
+        .flatten()
+        .filter(|a| !a.id.starts_with("global/"))
     {
-        if let Some(problem) = summary.problem {
-            result.skipped.push(format!("{}: {problem}", summary.name));
-            continue;
-        }
-        match crate::export_workflow_agents(root, &summary.name) {
-            Ok(agents) => {
-                workflows.insert(summary.name, agents);
-            }
-            Err(e) => result
-                .skipped
-                .push(format!("{}: {}", summary.name, e.message)),
+        let name = crate::install::native_agent_id(&agent.id);
+        if global_names.contains(&name) {
+            return Err(error(format!("Agent native name collision: {name:?}")));
         }
     }
-    merge_agents(&workflows)?;
-    let prune = result.skipped.is_empty();
+    result.append(global_result);
     for adapter in crate::harness::registry() {
         if !installed
             .iter()
@@ -119,13 +239,9 @@ pub fn build_harness_config(root: &Utf8Path) -> Result<HarnessBuild, InstallErro
         {
             continue;
         }
-        match adapter.build_project(root, &workflows, prune) {
-            Ok(build) => {
-                result.harnesses.extend(build.harnesses);
-                result.written.extend(build.written);
-                result.removed.extend(build.removed);
-                result.skipped.extend(build.skipped);
-            }
+        refresh_globals(adapter.as_ref(), &global_agents, global_prune, &mut result);
+        match adapter.build_project(root, &workflows, &legacy_globals, prune) {
+            Ok(build) => result.append(build),
             Err(e) => result
                 .skipped
                 .push(format!("{}: {}", adapter.id(), e.message)),
@@ -185,39 +301,146 @@ pub(crate) fn merge_agents(
     Ok(agents.into_values().collect())
 }
 
+pub(crate) fn write_global_agents(
+    root: &Utf8Path,
+    id: &str,
+    mut rendered: Vec<(Utf8PathBuf, String)>,
+    prune: bool,
+) -> Result<HarnessBuild, InstallError> {
+    for (path, _) in &mut rendered {
+        *path = Utf8Path::new("agents").join(path.file_name().unwrap());
+    }
+    let mut result = write_agents(root, "agents", rendered, Vec::new(), prune)?;
+    result.harnesses.push(id.into());
+    Ok(result)
+}
+
+fn read_agent_file(path: &Utf8Path) -> std::io::Result<Vec<u8>> {
+    if !fs::symlink_metadata(path)?.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Not a regular file: {path}"),
+        ));
+    }
+    fs::read(path)
+}
+
 pub(crate) fn write_agents(
     root: &Utf8Path,
     directory: &str,
-    rendered: Vec<(Utf8PathBuf, String)>,
+    mut rendered: Vec<(Utf8PathBuf, String)>,
+    legacy: Vec<(Utf8PathBuf, String)>,
     prune: bool,
 ) -> Result<HarnessBuild, InstallError> {
     let mut result = HarnessBuild::default();
     let directory = Utf8Path::new(directory);
     crate::check_install_path(root, directory)?;
+    let manifest = directory.join(".unelos-owned-agents.json");
+    crate::check_install_path(root, &manifest)?;
+    let manifest_bytes = match read_agent_file(&root.join(&manifest)) {
+        Ok(bytes) => Some(bytes),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(error(e)),
+    };
+    let mut owned: BTreeMap<String, String> = manifest_bytes
+        .as_deref()
+        .map(serde_json::from_slice)
+        .transpose()
+        .map_err(error)?
+        .unwrap_or_default();
+    let checksum = |bytes: &[u8]| format!("{:x}", Sha256::digest(bytes));
     for (path, _) in &rendered {
         crate::check_install_path(root, path)?;
     }
+    let desired: std::collections::BTreeSet<_> =
+        rendered.iter().map(|(path, _)| path.clone()).collect();
     let mut stale = Vec::new();
-    if prune && root.join(directory).exists() {
-        for entry in fs::read_dir(root.join(directory)).map_err(error)? {
-            let entry = entry.map_err(error)?;
-            let name = entry
-                .file_name()
-                .into_string()
-                .map_err(|_| error("Non UTF-8 agent path"))?;
-            if name.starts_with("unelos-") && name.ends_with(".md") {
-                let relative = directory.join(name);
-                crate::check_install_path(root, &relative)?;
-                if !rendered.iter().any(|(path, _)| path == &relative) {
-                    stale.push(relative);
+    let is_agent = |path: &Utf8Path| {
+        path.parent() == Some(directory)
+            && path.file_name().is_some_and(|name| {
+                name.starts_with(if directory == "agents" {
+                    "unelos-global-"
+                } else {
+                    "unelos-"
+                }) && name.ends_with(".md")
+            })
+    };
+    let mut writes = Vec::new();
+    for (path, text) in rendered.drain(..) {
+        if is_agent(&path) {
+            let name = path.file_name().unwrap();
+            match read_agent_file(&root.join(&path)) {
+                Ok(bytes) if bytes == text.as_bytes() => {
+                    // Equal content without an ownership record is still user-owned.
+                    continue;
                 }
+                Ok(bytes) if owned.get(name) != Some(&checksum(&bytes)) => {
+                    result
+                        .skipped
+                        .push(format!("Modified or unowned agent: {}", root.join(&path)));
+                    continue;
+                }
+                Ok(_) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(error(e)),
+            }
+            owned.insert(name.to_owned(), checksum(text.as_bytes()));
+        }
+        writes.push((path, text));
+    }
+    if prune {
+        for (name, hash) in owned.clone() {
+            let path = directory.join(&name);
+            if !is_agent(&path) || desired.contains(&path) {
+                continue;
+            }
+            crate::check_install_path(root, &path)?;
+            match read_agent_file(&root.join(&path)) {
+                Ok(bytes) if checksum(&bytes) == hash => {
+                    stale.push(path);
+                    owned.remove(&name);
+                }
+                Ok(_) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    owned.remove(&name);
+                }
+                Err(e) => return Err(error(e)),
             }
         }
     }
+    // shortcut: legacy builds left no receipt, so migrate only reproducible renderings.
+    for (path, text) in legacy {
+        if !stale.contains(&path)
+            && !desired.contains(&path)
+            && !path
+                .file_name()
+                .is_some_and(|name| owned.contains_key(name))
+        {
+            match read_agent_file(&root.join(&path)) {
+                Ok(old)
+                    if std::str::from_utf8(&old).is_ok_and(|old| {
+                        old.replace("\r\n", "\n") == text.replace("\r\n", "\n")
+                    }) =>
+                {
+                    stale.push(path)
+                }
+                Ok(_) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {}
+                Err(e) => return Err(error(e)),
+            }
+        }
+    }
+    if manifest_bytes.is_some() || !owned.is_empty() {
+        writes.push((
+            manifest.clone(),
+            serde_json::to_string_pretty(&owned).map_err(error)?,
+        ));
+    }
     stale.sort();
     let mut previous = BTreeMap::new();
-    for path in rendered.iter().map(|(path, _)| path).chain(stale.iter()) {
-        let bytes = match fs::read(root.join(path)) {
+    for path in writes.iter().map(|(path, _)| path).chain(stale.iter()) {
+        let bytes = match read_agent_file(&root.join(path)) {
             Ok(bytes) => Some(bytes),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
             Err(e) => return Err(error(e)),
@@ -225,7 +448,7 @@ pub(crate) fn write_agents(
         previous.insert(path.clone(), bytes);
     }
     let applied = (|| {
-        for (path, text) in &rendered {
+        for (path, text) in &writes {
             changed(root, path, text.as_bytes(), &mut result)?;
         }
         for path in &stale {
@@ -245,5 +468,6 @@ pub(crate) fn write_agents(
         }
         return Err(failure);
     }
+    result.written.retain(|path| path != &root.join(&manifest));
     Ok(result)
 }
