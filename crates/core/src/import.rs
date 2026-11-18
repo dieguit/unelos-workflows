@@ -1067,12 +1067,13 @@ pub fn commit_import(
     drop(cleanup);
     let (_, agents) = references(&prepared.project);
     let mut exports = Vec::new();
-    for (id, (main, subagent)) in agents {
+    for (id, subagent) in agents {
         let agent = &prepared.project.definitions.agents[&id];
         let mut mcp_servers = BTreeMap::new();
         let mcps: Vec<_> = agent
             .mcps
             .iter()
+            .filter(|_| subagent)
             .map(|mcp| {
                 prepared
                     .names
@@ -1106,7 +1107,6 @@ pub fn commit_import(
             tools: agent.tools.clone(),
             mcps,
             mcp_servers,
-            main,
             subagent,
         });
     }

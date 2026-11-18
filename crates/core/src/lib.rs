@@ -12,9 +12,9 @@ pub use authoring_actions::{
 mod workflow_document;
 pub use workflow_document::{
     create_global_workflow, create_workflow, get_global_workflow, get_workflow,
-    save_global_workflow, save_workflow, validate_global_workflow, validate_workflow, StepCall,
-    StepTask, WorkflowDocument, WorkflowDraft, WorkflowIssue, WorkflowRoute, WorkflowSettings,
-    WorkflowStep, WorkflowWorker,
+    save_global_workflow, save_workflow, validate_global_workflow, validate_workflow,
+    workflow_warnings, IssueSeverity, StepCall, StepTask, WorkflowDocument, WorkflowDraft,
+    WorkflowIssue, WorkflowRoute, WorkflowSettings, WorkflowStep, WorkflowWorker,
 };
 mod task_document;
 pub use task_document::{

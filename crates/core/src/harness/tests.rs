@@ -153,10 +153,13 @@ fn bundled_globals_install_update_preserve_and_remove() {
     let analyst = opencode_agents.join("unelos-global-workflow-analyst.md");
     assert!(author.is_file());
     assert!(analyst.is_file());
+    assert!(!opencode_agents
+        .join("unelos-global-workflow-lead.md")
+        .exists());
     fs::write(&author, "user edits").unwrap();
     let initial: std::collections::BTreeMap<String, String> =
         serde_json::from_slice(&fs::read(config.join("bundled.json")).unwrap()).unwrap();
-    assert_eq!(initial.len(), 21);
+    assert!(initial.contains_key("workflows/workflow-design.yaml"));
     for relative in initial.keys() {
         assert!(relative
             .split('/')
@@ -185,7 +188,7 @@ fn bundled_globals_install_update_preserve_and_remove() {
     let manifest_path = config.join("bundled.json");
     let mut manifest: std::collections::BTreeMap<String, String> =
         serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
-    assert_eq!(manifest.len(), 20);
+    assert_eq!(manifest.len() + 1, initial.len());
     for relative in manifest.keys() {
         let file = relative.split('/').fold(config.clone(), |p, s| p.join(s));
         assert!(file.is_file(), "{file}");
@@ -388,7 +391,6 @@ fn claude_agent_model_mapping_and_mcp_list() {
             ),
         ]
         .into(),
-        main: true,
         subagent: true,
     };
     let path = root.join(".claude/agents/unelos-test.md");
@@ -533,7 +535,7 @@ fn builds_both_harnesses_and_unmapped_claude_keeps_files() {
         let source = root.join(harness).join("agents").join(name);
         let copy = directory.join(name);
         let text = fs::read_to_string(source).unwrap();
-        fs::write(&copy, text.replace("mode: all", "mode: subagent")).unwrap();
+        fs::write(&copy, text).unwrap();
         legacy_copies.push(copy);
     }
     crate::save_model_mapping(
@@ -719,7 +721,6 @@ fn effort_agent(model: crate::AgentModel, effort: Option<&str>) -> crate::AgentE
         tools: vec![],
         mcps: vec![],
         mcp_servers: Default::default(),
-        main: true,
         subagent: true,
     }
 }

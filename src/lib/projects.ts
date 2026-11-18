@@ -43,7 +43,7 @@ export type WorkflowStep = {
   inputs: string[]
   outputs: string[]
 }
-export type WorkflowIssue = { message: string; step: string | null }
+export type WorkflowIssue = { message: string; step: string | null; severity?: "error" | "warning" }
 export type WorkflowDocument = WorkflowSettings & { id: string; steps: WorkflowStep[]; issues: WorkflowIssue[] }
 export const createWorkflow = (root: string) => trackedInvoke<string>("create_workflow", { root })
 export const getWorkflow = (root: string, id: string) =>

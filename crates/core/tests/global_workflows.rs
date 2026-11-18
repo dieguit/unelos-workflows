@@ -157,18 +157,23 @@ fn global_workflow_listing_runtime_composition_authoring_and_harness() {
         .join("opencode")
         .join("agents")
         .join("unelos-global-shared.md");
+    assert!(!user_agent.exists());
+    let direct_text = text.replacen("name: shared", "name: direct", 1).replace(
+        "agent: global/shared",
+        "agent: global/shared\n    execution: subagent",
+    );
+    let direct = write(root, &[".unelos", "workflows", "direct.yaml"], &direct_text);
+    build_harness_config(root).unwrap();
+    let other = assert_fs::TempDir::new().unwrap();
+    build_harness_config(Utf8Path::from_path(other.path()).unwrap()).unwrap();
+    build_global_harness_agents().unwrap();
     assert!(user_agent.is_file());
     let project_agent = write(
         root,
         &[".opencode", "agents", "unelos-global-shared.md"],
         &fs::read_to_string(&user_agent)
             .unwrap()
-            .replace("mode: all", "mode: primary"),
-    );
-    let direct = write(
-        root,
-        &[".unelos", "workflows", "direct.yaml"],
-        &text.replacen("name: shared", "name: direct", 1),
+            .replace("mode: subagent", "mode: primary"),
     );
     let build = build_harness_config(root).unwrap();
     assert!(build.skipped.is_empty(), "{:?}", build.skipped);
@@ -185,6 +190,9 @@ fn global_workflow_listing_runtime_composition_authoring_and_harness() {
         .iter()
         .any(|skip| skip.starts_with("direct:") && skip.contains("global/missing")));
     fs::remove_file(&direct).unwrap();
+    let built = build_harness_config(root).unwrap();
+    assert!(built.removed.contains(&user_agent));
+    assert!(!user_agent.exists());
     write(
         root,
         &[".unelos", "agents", "global-shared", "agent.yaml"],
@@ -211,14 +219,13 @@ fn global_workflow_listing_runtime_composition_authoring_and_harness() {
             .join("collision.yaml"),
     )
     .unwrap();
-    fs::write(&direct, text.replacen("name: shared", "name: direct", 1)).unwrap();
+    fs::write(&direct, &direct_text).unwrap();
     assert!(build_harness_config(root).unwrap().skipped.is_empty());
-    let other = assert_fs::TempDir::new().unwrap();
     build_harness_config(Utf8Path::from_path(other.path()).unwrap()).unwrap();
     build_global_harness_agents().unwrap();
     assert!(fs::read_to_string(&user_agent)
         .unwrap()
-        .contains("mode: all"));
+        .contains("mode: subagent"));
     remove_global_agent("shared").unwrap();
     let broken_agent = write(
         &config,

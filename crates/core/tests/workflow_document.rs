@@ -2,7 +2,8 @@ use assert_fs::{fixture::PathCopy, TempDir};
 use camino::{Utf8Path, Utf8PathBuf};
 use std::fs;
 use unelos_core::{
-    get_workflow, save_workflow, validate_workflow, WorkflowDocument, WorkflowDraft,
+    get_workflow, save_workflow, start_workflow, validate_workflow, Execution, IssueSeverity,
+    WorkflowDocument, WorkflowDraft,
 };
 
 fn fixture() -> (TempDir, Utf8PathBuf) {
@@ -38,7 +39,11 @@ fn creates_workflows_with_free_ids_and_requires_an_agent_before_save() {
         .find(|step| step.id == "new-task")
         .unwrap()
         .agent = Some("engineer".into());
-    assert!(save_workflow(&root, &id, &value).unwrap().issues.is_empty());
+    assert!(save_workflow(&root, &id, &value)
+        .unwrap()
+        .issues
+        .iter()
+        .all(|issue| issue.severity == IssueSeverity::Warning));
     assert_eq!(
         unelos_core::create_workflow(&root).unwrap(),
         "new-workflow-2"
@@ -463,6 +468,48 @@ fn draft(doc: WorkflowDocument) -> WorkflowDraft {
     }
 }
 
+#[test]
+fn main_agent_settings_warn_without_blocking_save_or_start() {
+    let (_temp, root) = fixture();
+    let id = "implement-feature";
+    let initial = get_workflow(&root, id).unwrap();
+    assert!(initial.issues.is_empty());
+    let step = initial
+        .steps
+        .iter()
+        .find(|step| step.kind == "task")
+        .unwrap();
+    let agent = root
+        .join(".unelos")
+        .join("agents")
+        .join(step.agent.as_ref().unwrap())
+        .join("agent.yaml");
+    let original = fs::read_to_string(&agent).unwrap();
+    let mut yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&original).unwrap();
+    yaml["model"] = "smart".into();
+    fs::write(agent, serde_yaml_ng::to_string(&yaml).unwrap()).unwrap();
+    let mut draft = draft(initial);
+    let first = draft
+        .steps
+        .iter_mut()
+        .find(|step| step.kind == "task")
+        .unwrap();
+    first.execution = Some(Execution::Main);
+    let step_id = first.id.clone();
+    let issues = validate_workflow(&root, id, &draft).unwrap();
+    assert!(issues
+        .iter()
+        .any(|issue| issue.severity == IssueSeverity::Warning
+            && issue.step.as_deref() == Some(&step_id)
+            && issue.message.contains("sets model")));
+    assert!(save_workflow(&root, id, &draft)
+        .unwrap()
+        .issues
+        .iter()
+        .any(|issue| issue.severity == IssueSeverity::Warning));
+    start_workflow(&root, id, Some("warning-run")).unwrap();
+}
+
 fn workflow_call_fixture() -> (TempDir, Utf8PathBuf) {
     let (temp, root) = fixture();
     fs::write(
@@ -522,7 +569,10 @@ fn workflow_step_round_trips() {
     json["steps"][0]["call"]["inputs"]["brief.md"] = "brief.md".into();
     let value: WorkflowDraft = serde_json::from_value(json).unwrap();
     let saved = save_workflow(&root, "composite", &value).unwrap();
-    assert!(saved.issues.is_empty());
+    assert!(saved
+        .issues
+        .iter()
+        .all(|issue| issue.severity == IssueSeverity::Warning));
     let text = fs::read_to_string(root.join(".unelos/workflows/composite.yaml")).unwrap();
     let parsed = unelos_core::parse_workflow_definition("composite", &text).unwrap();
     assert_eq!(parsed.inputs, ["brief.md"]);

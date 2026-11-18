@@ -134,6 +134,7 @@ fn listed(args: &[&str], id: &str) -> Result<bool> {
 fn render_agents(agents: &[crate::AgentExport]) -> Result<Vec<(Utf8PathBuf, String)>> {
     agents
         .iter()
+        .filter(|agent| agent.subagent)
         .map(|agent| {
             let mut front = json!({
                 "name": crate::install::native_agent_id(&agent.id),

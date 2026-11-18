@@ -12,6 +12,8 @@ macro_rules! files {
 
 files![
     "workflows/workflow-design.yaml",
+    "agents/workflow-architect/agent.yaml",
+    "agents/workflow-architect/instructions.md",
     "agents/workflow-author/agent.yaml",
     "agents/workflow-author/instructions.md",
     "agents/workflow-lead/agent.yaml",

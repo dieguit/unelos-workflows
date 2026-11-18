@@ -1,7 +1,10 @@
 use crate::{AgentExport, InstallError, ProjectSettings};
 use camino::{Utf8Path, Utf8PathBuf};
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, fs};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+};
 
 fn error(e: impl ToString) -> InstallError {
     InstallError {
@@ -34,14 +37,26 @@ impl HarnessBuild {
 
 type Workflows = BTreeMap<String, Vec<AgentExport>>;
 
-fn global_agents(result: &mut HarnessBuild) -> Result<Vec<AgentExport>, InstallError> {
+fn global_agents(
+    usages: &Workflows,
+    project_refs: &BTreeMap<Utf8PathBuf, BTreeSet<String>>,
+    result: &mut HarnessBuild,
+) -> Result<Vec<AgentExport>, InstallError> {
     let mut agents = Vec::new();
     for summary in crate::global_agent_summaries().map_err(error)? {
         let id = format!("global/{}", summary.name);
+        let mut usages = usages
+            .values()
+            .flatten()
+            .filter(|agent| agent.id == id)
+            .peekable();
         let load = || {
+            let subagent = usages.peek().is_none()
+                || usages.any(|agent| agent.subagent)
+                || project_refs.values().any(|refs| refs.contains(&id));
             let agent = crate::get_global_agent(&summary.name)?;
             let mut mcp_servers = BTreeMap::new();
-            for reference in &agent.mcps {
+            for reference in agent.mcps.iter().filter(|_| subagent) {
                 let name = reference.strip_prefix("global/").ok_or_else(|| {
                     format!("Global agent requires a global MCP reference: {reference:?}")
                 })?;
@@ -58,10 +73,9 @@ fn global_agents(result: &mut HarnessBuild) -> Result<Vec<AgentExport>, InstallE
                 model: agent.model,
                 effort: agent.effort,
                 tools: agent.tools,
-                mcps: agent.mcps,
+                mcps: if subagent { agent.mcps } else { Vec::new() },
                 mcp_servers,
-                main: true,
-                subagent: true,
+                subagent,
             })
         };
         match summary.problem.map_or_else(load, Err) {
@@ -70,6 +84,46 @@ fn global_agents(result: &mut HarnessBuild) -> Result<Vec<AgentExport>, InstallE
         }
     }
     Ok(agents)
+}
+
+fn project_global_refs(
+    update: Option<(&Utf8Path, &Workflows, bool)>,
+) -> Result<BTreeMap<Utf8PathBuf, BTreeSet<String>>, InstallError> {
+    let root = crate::task_document::global_root().map_err(error)?;
+    let relative = Utf8Path::new("global-agent-project-refs.json");
+    crate::check_install_path(&root, relative)?;
+    let path = root.join(relative);
+    let mut refs: BTreeMap<Utf8PathBuf, BTreeSet<String>> = match read_agent_file(&path) {
+        Ok(bytes) => serde_json::from_slice(&bytes).map_err(error)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
+        Err(e) => return Err(error(e)),
+    };
+    if let Some((project, workflows, complete)) = update {
+        let project = crate::project::absolute_root(project).map_err(error)?;
+        let mut current: BTreeSet<_> = workflows
+            .values()
+            .flatten()
+            .filter(|a| a.subagent && a.id.starts_with("global/"))
+            .map(|a| a.id.clone())
+            .collect();
+        if !complete {
+            current.extend(refs.get(&project).into_iter().flatten().cloned());
+        }
+        if refs.get(&project) != Some(&current)
+            && (!current.is_empty() || refs.contains_key(&project))
+        {
+            if current.is_empty() {
+                refs.remove(&project);
+            } else {
+                refs.insert(project, current);
+            }
+            crate::global_config::atomic_write(
+                &path,
+                &serde_json::to_vec_pretty(&refs).map_err(error)?,
+            )?;
+        }
+    }
+    Ok(refs)
 }
 
 fn global_workflows(result: &mut HarnessBuild) -> Result<Workflows, InstallError> {
@@ -94,7 +148,8 @@ pub fn build_global_harness_agents() -> Result<HarnessBuild, InstallError> {
     let installed = installed_harnesses();
     let mut result = HarnessBuild::default();
     if !installed.is_empty() {
-        let agents = global_agents(&mut result)?;
+        let workflows = global_workflows(&mut result)?;
+        let agents = global_agents(&workflows, &project_global_refs(None)?, &mut result)?;
         let prune = result.skipped.is_empty();
         for adapter in crate::harness::registry() {
             if installed.contains(adapter.id()) {
@@ -125,7 +180,8 @@ pub(crate) fn build_globals_for(
     adapter: &dyn crate::harness::HarnessAdapter,
 ) -> Result<HarnessBuild, InstallError> {
     let mut result = HarnessBuild::default();
-    let agents = global_agents(&mut result)?;
+    let workflows = global_workflows(&mut result)?;
+    let agents = global_agents(&workflows, &project_global_refs(None)?, &mut result)?;
     let prune = result.skipped.is_empty();
     refresh_globals(adapter, &agents, prune, &mut result);
     Ok(result)
@@ -221,14 +277,19 @@ pub fn build_harness_config(root: &Utf8Path) -> Result<HarnessBuild, InstallErro
     }
     let prune = result.skipped.is_empty();
     let mut global_result = HarnessBuild::default();
-    let global_agents = global_agents(&mut global_result)?;
+    let mut legacy = global_workflows(&mut global_result)?;
+    let refs = project_global_refs(Some((root, &workflows, prune)))?;
+    let global_agents = global_agents(&legacy, &refs, &mut global_result)?;
     let global_prune = global_result.skipped.is_empty();
-    let mut legacy = global_workflows(&mut result)?;
     legacy.extend(workflows.clone());
     let legacy_agents = merge_agents(&legacy)?;
     let legacy_globals: Vec<_> = legacy_agents
         .into_iter()
         .filter(|a| a.id.starts_with("global/"))
+        .map(|mut agent| {
+            agent.subagent = true;
+            agent
+        })
         .collect();
     let global_names: std::collections::BTreeSet<_> = global_agents
         .iter()
@@ -299,7 +360,6 @@ pub(crate) fn merge_agents(
         }
         if let Some(existing) = agents.get_mut(&agent.id) {
             existing.mcp_servers.extend(agent.mcp_servers.clone());
-            existing.main |= agent.main;
             existing.subagent |= agent.subagent;
             existing.mcps.extend(agent.mcps.clone());
             existing.mcps.sort();

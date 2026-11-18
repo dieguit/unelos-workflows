@@ -116,6 +116,28 @@ fn inspect_shipped_example_after_flat_install() {
 }
 
 #[test]
+fn inspect_reports_main_agent_settings_as_warnings() {
+    let temp = assert_fs::TempDir::new().unwrap();
+    copy_tree(&fixture(), temp.path());
+    let agent = temp
+        .path()
+        .join(".unelos")
+        .join("agents")
+        .join("planner")
+        .join("agent.yaml");
+    let original = fs::read_to_string(&agent).unwrap();
+    fs::write(&agent, format!("{original}\nmodel: smart\n")).unwrap();
+    let output = inspect(temp.path(), true);
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["issues"][0]["severity"], "warning");
+    assert!(json["issues"][0]["message"]
+        .as_str()
+        .unwrap()
+        .contains("sets model"));
+}
+
+#[test]
 fn inspect_emits_full_normalized_workflow_and_is_read_only() {
     let temp = assert_fs::TempDir::new().unwrap();
     let root = temp.path().join("project with spaces");

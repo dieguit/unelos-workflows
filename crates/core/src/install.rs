@@ -18,7 +18,6 @@ pub struct AgentExport {
     pub mcps: Vec<String>,
     #[serde(skip)]
     pub mcp_servers: BTreeMap<String, crate::McpServer>,
-    pub main: bool,
     pub subagent: bool,
 }
 
@@ -47,20 +46,14 @@ pub(crate) fn io_error(error: io::Error) -> InstallError {
 
 use crate::project::safe_id;
 
-pub(crate) fn references(
-    project: &LoadedProject,
-) -> (BTreeSet<String>, BTreeMap<String, (bool, bool)>) {
+pub(crate) fn references(project: &LoadedProject) -> (BTreeSet<String>, BTreeMap<String, bool>) {
     let mut tasks = BTreeSet::new();
     let mut agents = BTreeMap::new();
     let mut add = |task: &TaskSelection, agent: &str, execution: Execution| {
         if let TaskSelection::Named(id) = task {
             tasks.insert(id.clone());
         }
-        let modes = agents.entry(agent.to_owned()).or_insert((false, false));
-        match execution {
-            Execution::Main => modes.0 = true,
-            Execution::Subagent => modes.1 = true,
-        };
+        *agents.entry(agent.to_owned()).or_default() |= execution == Execution::Subagent;
     };
     for (id, node) in &project.workflow.nodes {
         if project
@@ -92,7 +85,7 @@ fn export(project: &LoadedProject) -> Result<Vec<AgentExport>, InstallError> {
     let mut scopes = BTreeMap::new();
     references
         .into_iter()
-        .map(|(id, (main, subagent))| {
+        .map(|(id, subagent)| {
             if !safe_id(id.strip_prefix("global/").unwrap_or(&id)) {
                 return Err(fail(
                     "unsupported_agent_id",
@@ -101,7 +94,7 @@ fn export(project: &LoadedProject) -> Result<Vec<AgentExport>, InstallError> {
             }
             let agent = &project.definitions.agents[&id];
             let mut mcp_servers = BTreeMap::new();
-            for mcp in &agent.mcps {
+            for mcp in agent.mcps.iter().filter(|_| subagent) {
                 let bare = mcp.strip_prefix("global/").unwrap_or(mcp);
                 if bare == "unelos" {
                     return Err(fail("reserved_mcp_id", "MCP ID 'unelos' is reserved"));
@@ -133,9 +126,12 @@ fn export(project: &LoadedProject) -> Result<Vec<AgentExport>, InstallError> {
                 model: agent.model.clone(),
                 effort: agent.effort.clone(),
                 tools: agent.tools.clone(),
-                mcps: agent.mcps.clone(),
+                mcps: if subagent {
+                    agent.mcps.clone()
+                } else {
+                    Vec::new()
+                },
                 mcp_servers,
-                main,
                 subagent,
             })
         })

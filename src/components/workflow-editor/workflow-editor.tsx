@@ -265,7 +265,7 @@ function WorkflowEditorForm({
       [
         ...(localResult.success
           ? []
-          : localResult.error.issues.map((issue) => ({
+          : localResult.error.issues.map((issue): WorkflowIssue => ({
               message: issue.message,
               step:
                 issue.path[0] === "steps"
@@ -274,7 +274,7 @@ function WorkflowEditorForm({
             }))),
         // Core issues for a draft that fails the form schema just restate those errors in YAML terms.
         ...(localResult.success ? (current?.issues ?? []) : []),
-        ...Object.entries(nameDrafts).map(([step, draft]) => ({ step, message: draft.error })),
+        ...Object.entries(nameDrafts).map(([step, draft]): WorkflowIssue => ({ step, message: draft.error })),
       ].map((issue) => [`${issue.step}:${issue.message}`, issue])
     ).values(),
   ].filter(
@@ -297,7 +297,8 @@ function WorkflowEditorForm({
     return () => clearTimeout(timer)
   }, [highlight])
   const valid =
-    localValid && Object.keys(nameDrafts).length === 0 && current && !current.error && current.issues.length === 0
+    localValid && Object.keys(nameDrafts).length === 0 && current && !current.error &&
+    !current.issues.some((issue) => issue.severity !== "warning")
   const askDiscard = discard.ask
   const projectChangeApproved = useRef(false)
   useEffect(
@@ -379,7 +380,9 @@ function WorkflowEditorForm({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="border-destructive/50 text-destructive hover:text-destructive"
+                  className={issues.every((issue) => issue.severity === "warning")
+                    ? "border-warning/50 text-warning hover:text-warning"
+                    : "border-destructive/50 text-destructive hover:text-destructive"}
                 />
               }
             >
@@ -394,9 +397,9 @@ function WorkflowEditorForm({
                   className="items-start"
                   onClick={() => issue.step && setHighlight(issue.step)}
                 >
-                  <CircleAlertIcon className="mt-0.5 text-destructive" />
+                  <CircleAlertIcon className={issue.severity === "warning" ? "mt-0.5 text-warning" : "mt-0.5 text-destructive"} />
                   <span className="min-w-0 flex-1">
-                    {issue.message}
+                    {issue.severity === "warning" && "Warning: "}{issue.message}
                     {issue.step && (
                       <span className="block font-mono text-xs text-muted-foreground">
                         {issue.step}

@@ -455,7 +455,7 @@ fn run(cli: &Cli) -> Result<(), Error> {
         Command::Inspect { workflow, node } => {
             let project = load_project(&cli.project, workflow)?;
             validate_project(&project)?;
-            let result = if let Some(node) = node {
+            let mut result = if let Some(node) = node {
                 serde_json::to_value(inspect_node(&project, node)?)?
             } else {
                 let graph = build_graph(&project.authoring_workflow);
@@ -479,6 +479,10 @@ fn run(cli: &Cli) -> Result<(), Error> {
                     "edges": graph.edges,
                 })
             };
+            let warnings = unelos_core::workflow_warnings(&project);
+            if !warnings.is_empty() {
+                result["issues"] = serde_json::to_value(warnings)?;
+            }
             let output = if cli.json {
                 serde_json::to_string(&result)?
             } else {

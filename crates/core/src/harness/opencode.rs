@@ -163,6 +163,17 @@ impl HarnessAdapter for OpenCode {
             legacy_globals,
         )
         .unwrap_or_default();
+        let legacy = legacy
+            .into_iter()
+            .flat_map(|(path, text)| {
+                ["subagent", "primary", "all"].map(|mode| {
+                    (
+                        path.clone(),
+                        text.replacen("mode: subagent\n", &format!("mode: {mode}\n"), 1),
+                    )
+                })
+            })
+            .collect();
         let mut result =
             crate::harness_build::write_agents(root, ".opencode/agents", rendered, legacy, prune)?;
         result.harnesses.push(self.id().into());

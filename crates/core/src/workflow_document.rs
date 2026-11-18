@@ -81,6 +81,36 @@ pub struct WorkflowWorker {
 pub struct WorkflowIssue {
     pub message: String,
     pub step: Option<String>,
+    pub severity: IssueSeverity,
+}
+
+#[derive(Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum IssueSeverity {
+    #[default]
+    Error,
+    Warning,
+}
+
+pub fn workflow_warnings(project: &crate::LoadedProject) -> Vec<WorkflowIssue> {
+    project.workflow.nodes.iter().filter_map(|(node, definition)| {
+        let crate::NodeDefinition::Task(step) = definition else { return None };
+        if step.execution != crate::Execution::Main {
+            return None;
+        }
+        let agent = project.definitions.agents.get(&step.agent)?;
+        let fields: Vec<_> = [
+            ("model", agent.model.is_some()),
+            ("effort", agent.effort.is_some()),
+            ("MCPs", !agent.mcps.is_empty()),
+            ("tools", !agent.tools.is_empty()),
+        ].into_iter().filter_map(|(field, set)| set.then_some(field)).collect();
+        (!fields.is_empty()).then(|| WorkflowIssue {
+            message: format!("Agent {:?} sets {}, which are ignored for main step {node:?}: main steps run in the orchestrator's session.", step.agent, fields.join("/")),
+            step: Some(node.clone()),
+            severity: IssueSeverity::Warning,
+        })
+    }).collect()
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -185,14 +215,13 @@ fn issues(root: &Utf8Path, id: &str, text: Option<&str>) -> Vec<WorkflowIssue> {
         .map_err(|e| e.to_string())
         .and_then(|project| {
             crate::validate_project(&project)
-                .map(|_| ())
+                .map(|_| workflow_warnings(&project))
                 .map_err(|e| e.to_string())
         });
     let workflow = text.and_then(|text| crate::parse_workflow_definition(id, text).ok());
-    result
-        .err()
-        .into_iter()
-        .map(|message| {
+    match result {
+        Ok(warnings) => warnings,
+        Err(message) => {
             let step = workflow.as_ref().and_then(|workflow| {
                 message.split(": ").find_map(|field| {
                     let field = field.strip_prefix("nodes.")?;
@@ -209,12 +238,13 @@ fn issues(root: &Utf8Path, id: &str, text: Option<&str>) -> Vec<WorkflowIssue> {
                         .cloned()
                 })
             });
-            WorkflowIssue {
+            vec![WorkflowIssue {
                 message: user_message(&message),
                 step,
-            }
-        })
-        .collect()
+                severity: IssueSeverity::Error,
+            }]
+        }
+    }
 }
 
 /// Drops the file path and YAML position from loader errors and capitalizes the rest.
@@ -639,6 +669,7 @@ fn step_rename_issue(root: &Utf8Path, id: &str, draft: &WorkflowDraft) -> Option
     result.err().map(|message| WorkflowIssue {
         message,
         step: Some(step.id.clone()),
+        severity: IssueSeverity::Error,
     })
 }
 
@@ -656,6 +687,7 @@ pub fn validate_workflow(
         return Ok(vec![WorkflowIssue {
             message,
             step: None,
+            severity: IssueSeverity::Error,
         }]);
     }
     let target = scoped_name(id, &settings.name);
@@ -715,10 +747,15 @@ pub fn save_workflow(
     }
     let target = rename_target(root, id, &settings.name)?;
     let document = document(root, &scoped_name(id, &settings.name), &text)?;
-    if !document.issues.is_empty() {
+    if document
+        .issues
+        .iter()
+        .any(|issue| issue.severity == IssueSeverity::Error)
+    {
         return Err(document
             .issues
             .iter()
+            .filter(|issue| issue.severity == IssueSeverity::Error)
             .map(|issue| issue.message.as_str())
             .collect::<Vec<_>>()
             .join("\n"));
