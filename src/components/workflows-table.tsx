@@ -30,23 +30,12 @@ export function ImportWorkflowButton({ onClick, label = "Import" }: { onClick?: 
   )
 }
 
-export function GlobalBadge() {
-  return (
-    <span className="shrink-0 rounded-sm bg-primary-muted px-1.5 py-0.5 text-xs font-medium text-primary">
-      Global
-    </span>
-  )
-}
-
 export function WorkflowsTable({
   workflows,
   onOpen,
   actions,
   highlight,
-  markGlobal = false,
 }: {
-  /** Mark rows that are global workflows (project list); off on the global page where all are. */
-  markGlobal?: boolean
   workflows: WorkflowSummary[]
   onOpen: (file: string) => void
   actions: (workflow: WorkflowSummary) => ReactNode
@@ -84,8 +73,7 @@ export function WorkflowsTable({
           >
             <ListCell>
               <ListPrimary
-                title={markGlobal && w.global ? w.name.replace(/^global\//, "") : w.name}
-                badge={markGlobal && w.global ? <GlobalBadge /> : undefined}
+                title={w.name}
                 subtitle={w.file}
                 problem={w.problem}
               />

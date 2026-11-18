@@ -110,18 +110,15 @@ export function ListPrimary({
   title,
   subtitle,
   problem,
-  badge,
 }: {
   title: string
   subtitle?: string
   problem?: string | null
-  badge?: ReactNode
 }) {
   return (
     <>
       <span className="flex min-w-0 items-center gap-1.5">
         <span className="truncate text-base font-medium">{title}</span>
-        {badge}
         {problem ? <Problem problem={problem} /> : null}
       </span>
       {subtitle ? (
