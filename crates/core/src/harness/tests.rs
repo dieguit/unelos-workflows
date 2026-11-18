@@ -2,6 +2,77 @@ use super::*;
 use std::sync::Mutex;
 static ENV: Mutex<()> = Mutex::new(());
 
+#[test]
+#[cfg(unix)]
+fn bundled_globals_install_update_preserve_and_remove() {
+    let _lock = ENV.lock().unwrap();
+    let temp = assert_fs::TempDir::new().unwrap();
+    let root = Utf8Path::from_path(temp.path()).unwrap();
+    let fake = fake_claude(root);
+    let config = root.join("unelos");
+    let _env = Env::set(&[
+        ("UNELOS_CONFIG_DIR", config.as_str()),
+        ("CLAUDE_CONFIG_DIR", root.join("claude").as_str()),
+        ("UNELOS_CLAUDE_BIN", fake.as_str()),
+        ("OPENCODE_CONFIG_DIR", root.join("opencode").as_str()),
+        ("HOME", root.as_str()),
+        ("PATH", root.join("empty").as_str()),
+    ]);
+    let source = root.join("source");
+    fs::write(&source, "binary").unwrap();
+    install_harness("opencode", &source).unwrap();
+    let initial: std::collections::BTreeMap<String, String> =
+        serde_json::from_slice(&fs::read(config.join("bundled.json")).unwrap()).unwrap();
+    assert_eq!(initial.len(), 21);
+    for relative in initial.keys() {
+        assert!(relative
+            .split('/')
+            .fold(config.clone(), |p, s| p.join(s))
+            .is_file());
+    }
+    uninstall_harness("opencode").unwrap();
+    let unowned = config
+        .join("agents")
+        .join("workflow-author")
+        .join("instructions.md");
+    fs::create_dir_all(unowned.parent().unwrap()).unwrap();
+    fs::write(&unowned, "pre-existing").unwrap();
+    install_harness("opencode", &source).unwrap();
+    assert_eq!(fs::read_to_string(&unowned).unwrap(), "pre-existing");
+    let manifest_path = config.join("bundled.json");
+    let mut manifest: std::collections::BTreeMap<String, String> =
+        serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+    assert_eq!(manifest.len(), 20);
+    for relative in manifest.keys() {
+        let file = relative.split('/').fold(config.clone(), |p, s| p.join(s));
+        assert!(file.is_file(), "{file}");
+    }
+    // Simulate the bytes and recorded hash from an older bundled release.
+    use sha2::{Digest, Sha256};
+    let workflow = config.join("workflows").join("workflow-design.yaml");
+    fs::write(&workflow, "older release").unwrap();
+    manifest.insert(
+        "workflows/workflow-design.yaml".into(),
+        format!("{:x}", Sha256::digest(b"older release")),
+    );
+    fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    install_harness("opencode", &source).unwrap();
+    assert_ne!(fs::read_to_string(&workflow).unwrap(), "older release");
+    assert_eq!(fs::read_to_string(&unowned).unwrap(), "pre-existing");
+    fs::write(&workflow, "user changes").unwrap();
+    install_harness("claude", &source).unwrap();
+    assert_eq!(fs::read_to_string(&workflow).unwrap(), "user changes");
+    uninstall_harness("opencode").unwrap();
+    assert!(manifest_path.exists());
+    let skill = config.join("skills").join("unelos-workflow-design");
+    assert!(skill.exists());
+    uninstall_harness("claude").unwrap();
+    assert!(!manifest_path.exists());
+    assert!(!skill.exists());
+    assert_eq!(fs::read_to_string(&workflow).unwrap(), "user changes");
+    assert_eq!(fs::read_to_string(&unowned).unwrap(), "pre-existing");
+}
+
 #[cfg(unix)]
 fn fake_claude(root: &Utf8Path) -> Utf8PathBuf {
     use std::os::unix::fs::PermissionsExt;

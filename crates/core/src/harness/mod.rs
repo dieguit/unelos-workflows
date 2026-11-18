@@ -1,3 +1,4 @@
+mod bundled;
 mod claude;
 pub(crate) mod jsonc;
 pub(crate) mod opencode;
@@ -290,10 +291,14 @@ pub fn install_harness(id: &str, cli_src: &Utf8Path) -> Result<Vec<HarnessStatus
     adapter.validate()?;
     let binary = provision_cli(cli_src)?;
     adapter.install(&Ctx { binary })?;
+    bundled::install()?;
     Ok(list_harnesses())
 }
 pub fn uninstall_harness(id: &str) -> Result<Vec<HarnessStatus>> {
     adapter(id)?.uninstall(&context()?)?;
+    if global_config::read_state()?.is_empty() {
+        bundled::uninstall()?;
+    }
     Ok(list_harnesses())
 }
 pub fn harness_models(id: &str) -> Result<Vec<ModelInfo>> {

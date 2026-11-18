@@ -1,0 +1,54 @@
+name: workflow-design
+description: Find how a project really works, propose Unelos workflows for it, write the approved definitions and validate every branch.
+start: gather
+nodes:
+  gather:
+    task: global/gather-workflow-evidence
+    agent: global/workflow-lead
+    execution: main
+    outputs: [brief.md]
+    next: mine
+  mine:
+    task: global/mine-workflow-evidence
+    agent: global/workflow-analyst
+    execution: subagent
+    inputs: [brief.md]
+    outputs: [findings.md]
+    next: propose
+  propose:
+    task: global/propose-workflows
+    agent: global/workflow-lead
+    execution: main
+    inputs: [brief.md, findings.md]
+    outputs: [proposal.md]
+    next: approve-proposal
+  approve-proposal:
+    type: human-gate
+    inputs: [findings.md, proposal.md]
+    next:
+      approved: write
+      rejected: propose
+  write:
+    task: global/write-workflow-definitions
+    agent: global/workflow-author
+    execution: subagent
+    inputs: [brief.md, proposal.md]
+    outputs: [written.md]
+    next: validate
+  validate:
+    task: global/validate-workflow-definitions
+    agent: global/workflow-validator
+    execution: subagent
+    inputs: [proposal.md, written.md]
+    outputs: [validation.md]
+    next:
+      pass: review
+      fail: write
+  review:
+    type: human-gate
+    inputs: [proposal.md, written.md, validation.md]
+    next:
+      approved: done
+      rejected: write
+  done:
+    type: end

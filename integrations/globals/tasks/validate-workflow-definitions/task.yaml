@@ -1,0 +1,22 @@
+description: Validate written workflow definitions by loading every step and walking every branch in a throwaway copy.
+skills:
+- global/unelos-workflow-design
+outcomes:
+- pass
+- fail
+instructions: |
+  For each workflow in proposal.md:
+
+  1. Run `unelos inspect <workflow>`; then `unelos inspect <workflow> --node
+     <id>` for every task node, and check agent, model, skills, MCPs, outcomes,
+     inputs and outputs against the proposal.
+  2. Walk paths with the skill's scripts/walk-workflow.py (it copies .unelos to
+     a temp directory; the real project is untouched): the happy path, every
+     loop back from a failing check, and every gate rejection. Every outcome of
+     every node must be taken at least once.
+
+  Write the bound validation.md: commands with exit status, each walked path
+  with its result, mismatches against the proposal, and outcomes never taken.
+
+  Choose pass only if everything loads, every walk succeeds, every outcome was
+  taken and nothing differs from the proposal. Otherwise choose fail. Do not fix.
