@@ -9,8 +9,9 @@ where agents fail, and what the user keeps repeating.
   use tables `session_v2` + `session_message`; older ones `session` + `message`.
   Sessions link to a project through `project.worktree` or `session.directory`.
   Child sessions (`parent_id` set) are subagent runs.
-- **Claude Code**: `~/.claude/projects/<escaped-path>/*.jsonl`, one JSON event
-  per line (`type: user|assistant`, `message.content`).
+- **Claude Code**: `~/.claude/projects/<escaped-path>/<session>.jsonl`, one JSON
+  event per line (`type: user|assistant`, `message.content`, `cwd`); subagent
+  runs in `<session>/subagents/*.jsonl`.
 
 Read history only for the project the user asked about, and only with their
 consent; transcripts can contain secrets.
@@ -18,16 +19,16 @@ consent; transcripts can contain secrets.
 ## Digest, then analyze
 
 Raw transcripts are too large to read. `scripts/digest-sessions.py` (Python, stdlib only)
-writes one short markdown file per root session for OpenCode: title, subagent
-titles, user messages, truncated assistant text, compaction summaries and tool
-counts.
+writes one short markdown file per root session: title, subagent titles, user
+messages, truncated assistant text, compaction summaries, tool counts and tool
+errors. Sessions match when their directory contains the substring.
 
 ```sh
-python3 scripts/digest-sessions.py <project-path-substring> <out-dir>
+python3 scripts/digest-sessions.py <project-path-substring> <out-dir>           # OpenCode
+python3 scripts/digest-sessions.py <project-path-substring> <out-dir> --claude  # Claude Code
 ```
 
-For Claude Code, do the same by hand: keep user text, truncate assistant text,
-count tool uses.
+If the user works in both harnesses, run both into the same out-dir.
 
 Then split the digests into batches of ~15 and give each batch to a subagent
 with this brief: for every session record goal, kind (bug, feature, design,
