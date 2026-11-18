@@ -17,8 +17,8 @@ nodes:
     next: propose
   propose:
     task: global/propose-workflows
-    agent: global/workflow-lead
-    execution: main
+    agent: global/workflow-architect
+    execution: subagent
     inputs: [brief.md, findings.md]
     outputs: [proposal.md]
     next: approve-proposal

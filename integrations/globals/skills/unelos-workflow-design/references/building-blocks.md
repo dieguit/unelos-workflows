@@ -65,9 +65,20 @@ An agent is a role, reused across tasks.
 - **Doer roles** (fixer, implementer) get the project's quality rules: root
   cause first, fix shared code once, smallest change, test logic changes, do
   not commit unless the workflow says so.
-- **The main-conversation role** (`execution: main`) talks to the user, writes
-  what was agreed into an artifact so later steps need no chat history, and
-  does not implement. Conversation approval is not gate approval.
+- **The main-conversation role** (`execution: main`) is not a separate agent:
+  the orchestrator (the user's session) takes that role for the step, on the
+  session's model and tools. So a main agent sets no `model` or `mcps` (they
+  are ignored, and validation warns). It talks to the user, writes what was
+  agreed into an artifact so later steps need no chat history, and does not
+  implement. Conversation approval is not gate approval.
+- **Keep the orchestrator thin**: only the orchestrator talks to the user, so
+  make main steps the conversations (intake, questions, agreeing a contract)
+  and nothing else. Drafting specs and plans, checks, fixes, reviews and
+  summaries go to subagents with the model the job needs; the user can then run
+  the session itself on a cheaper model. A subagent that needs the user returns
+  NEEDS_CONTEXT with a question: the orchestrator asks and continues the same
+  subagent, without completing the step. Use a human gate instead when the user
+  must approve a result, not answer a question.
 - **Model by job**: running commands and reporting needs a fast model;
   visual judgment and fixing need a balanced one; design and final review need
   a strong one. Use model aliases so users can remap them.

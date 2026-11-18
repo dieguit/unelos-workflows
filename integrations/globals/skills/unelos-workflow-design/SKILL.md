@@ -13,7 +13,8 @@ agent-driven work are skipped steps (no browser check, no cross-platform check,
 workflow pays for itself.
 
 Unelos ships these stages as the `global/workflow-design` workflow (gather →
-mine → propose → approve → write → validate → review). When the user wants the
+mine → propose → approve → write → validate → review; only gather talks to
+the user, everything else runs as subagents). When the user wants the
 full process, suggest starting it; use this skill directly for one-off
 questions or when you are a step inside that workflow.
 
@@ -76,8 +77,9 @@ and where it goes. Check that:
   solve it;
 - human gates sit where only a human can decide: agreeing the spec or plan,
   confirming an unreproducible bug, accepting a visual result;
-- the main-conversation step talks to the user and writes what was agreed into
-  an artifact; it does not implement.
+- only main steps talk to the user, and they only talk and record what was
+  agreed; everything else is a subagent step, so the orchestrator stays thin
+  and can run on a cheaper model.
 
 `references/patterns.md` has proven shapes (bug fix, UI feature, backend task,
 integration, research, review-to-fix) to adapt.

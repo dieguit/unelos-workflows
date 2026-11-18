@@ -71,7 +71,7 @@ nodes:
 reproduce:
   task: ui-reproduce          # or taskDefinition: {instructions, skills, outcomes, ...} inline
   agent: ui-qa
-  execution: subagent         # or main (the conversation the user is in); default main
+  execution: subagent         # or main: the orchestrator does it in the user's session; default main
   inputs: [bug.md]            # artifacts produced earlier in the run
   outputs: [repro.md]         # artifacts this step must write
   next:                       # a node ID, or a map outcome -> node ID
@@ -82,6 +82,10 @@ reproduce:
 
 Use an inline `taskDefinition` for a step used only in this workflow; a named
 `task` when several workflows share it.
+
+Only subagent steps get a native harness agent (`unelos-<id>`, or
+`unelos-global-<id>`); users never select these in their harness. A main step's
+agent is a role the orchestrator adopts, so its `model` and `mcps` are ignored.
 
 ### Human gate
 
