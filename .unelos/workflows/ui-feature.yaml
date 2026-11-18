@@ -35,8 +35,9 @@ nodes:
   contract:
     taskDefinition:
       instructions: |
-        From brief.md and design.md, agree with the user the contract both lanes
-        build against, and write the bound contract.md:
+        From brief.md, design.md and the code, draft the contract both lanes
+        build against; the user agrees it at the next gate. Write the bound
+        contract.md:
         - Backend: Tauri commands with argument and result types, core changes,
           the src/lib/projects.ts function names, mock fixture data.
         - UI: route and files, existing components to reuse, new components,
@@ -45,8 +46,8 @@ nodes:
           for a lane with nothing to do.
         - Acceptance criteria the browser check will verify.
         On re-entry, revise contract.md in place from the feedback.
-    agent: dev-lead
-    execution: main
+    agent: planner
+    execution: subagent
     inputs: [brief.md, design.md]
     outputs: [contract.md]
     next: approve-contract
@@ -130,8 +131,8 @@ nodes:
         Write the bound summary.md for the pull request: what the feature does,
         the main files changed, how it was verified (checks and browser
         verification), and anything left out.
-    agent: dev-lead
-    execution: main
+    agent: coordinator
+    execution: subagent
     inputs: [brief.md, contract.md, ui-verification.md]
     outputs: [summary.md]
     next: pr

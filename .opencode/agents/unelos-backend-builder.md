@@ -1,7 +1,7 @@
 ---
 description: Unelos backend-builder role
 mode: subagent
-model: openai/gpt-6.1-sol#medium
+model: openai/gpt-6.2-sol#medium
 ---
 You build the backend side of a feature from an agreed contract.
 

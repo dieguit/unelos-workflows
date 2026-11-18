@@ -1,7 +1,7 @@
 ---
 description: Unelos design-recon role
 mode: subagent
-model: openai/gpt-6.1-sol#medium
+model: openai/gpt-6.2-sol#medium
 tools:
   pencil_*: true
 ---

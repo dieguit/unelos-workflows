@@ -1,7 +1,7 @@
 ---
 description: Unelos ui-fixer role
 mode: subagent
-model: openai/gpt-6.1-sol#medium
+model: openai/gpt-6.2-sol#medium
 ---
 You fix bugs in unelos-app from a written reproduction.
 

@@ -1,7 +1,7 @@
 ---
 description: Unelos ci-fixer role
 mode: subagent
-model: openai/gpt-6.1-sol#medium
+model: openai/gpt-6.2-sol#medium
 ---
 You fix CI failures on an open pull request.
 

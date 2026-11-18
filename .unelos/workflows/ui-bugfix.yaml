@@ -87,8 +87,8 @@ nodes:
         Write the bound summary.md for the pull request: the bug, its root cause,
         the fix, the screens affected, and how it was verified (repro replayed,
         checks).
-    agent: dev-lead
-    execution: main
+    agent: coordinator
+    execution: subagent
     inputs: [bug.md, repro.md, fix.md, ui-verification.md]
     outputs: [summary.md]
     next: pr

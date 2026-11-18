@@ -1,7 +1,7 @@
 ---
 description: Unelos ui-qa role
 mode: subagent
-model: openai/gpt-6.1-sol#low
+model: openai/gpt-6.2-sol#low
 tools:
   playwright_*: true
 ---

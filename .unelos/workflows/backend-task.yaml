@@ -45,8 +45,8 @@ nodes:
         writing-plans skill to write the bound plan.md and self-review it against
         the spec. On re-entry after gate rejection, revise plan.md in place from
         the feedback. Do not implement.
-    agent: sp-controller
-    execution: main
+    agent: planner
+    execution: subagent
     inputs: [spec.md]
     outputs: [plan.md]
     next: approve-plan
@@ -67,8 +67,8 @@ nodes:
         describes. Write the bound worktree.md: absolute repository path as the
         worktree path, branch, `Base branch: <name>`, merge-base SHA, baseline
         command and result, the preflight table and every Ruling.
-    agent: sp-controller
-    execution: main
+    agent: coordinator
+    execution: subagent
     inputs: [spec.md, plan.md]
     outputs: [worktree.md]
     next: implement-task
@@ -105,8 +105,8 @@ nodes:
       instructions: |
         Apply the sdd-controller node map for advance: update the bound
         progress.md from the latest review section and choose exactly one outcome.
-    agent: sp-controller
-    execution: main
+    agent: coordinator
+    execution: subagent
     inputs: [spec.md, plan.md, worktree.md, implementation-report.md, review.md]
     outputs: [progress.md]
     next:
@@ -144,8 +144,8 @@ nodes:
       instructions: |
         Apply the sdd-controller node map for advance-final: choose final_fix or
         finish from final-review.md and write residual rulings to final-rulings.md.
-    agent: sp-controller
-    execution: main
+    agent: coordinator
+    execution: subagent
     inputs: [progress.md, final-review.md]
     outputs: [final-rulings.md]
     next:
@@ -178,8 +178,8 @@ nodes:
         paste to check the change by hand (exact commands, with a scratch
         project where needed, and the expected output of each). Cover what the
         automated checks cannot: real CLI runs, harness behaviour, the app.
-    agent: sp-controller
-    execution: main
+    agent: coordinator
+    execution: subagent
     inputs: [spec.md, worktree.md, rust-checks.md]
     outputs: [manual-qa.md]
     next: manual-qa-gate
@@ -197,8 +197,8 @@ nodes:
         main files, how it was verified (rust-checks.md, manual QA), and under
         "Rulings I made" every Ruling: line from worktree.md, progress.md and
         final-rulings.md with its cost if wrong.
-    agent: sp-controller
-    execution: main
+    agent: coordinator
+    execution: subagent
     inputs: [spec.md, worktree.md, progress.md, final-rulings.md, rust-checks.md, manual-qa.md]
     outputs: [summary.md]
     next: pr
