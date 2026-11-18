@@ -79,7 +79,25 @@ nodes:
     type: human-gate
     inputs: [repro.md, fix.md, ui-verification.md]
     next:
-      approved: done
+      approved: summarize
       rejected: fix
+  summarize:
+    taskDefinition:
+      instructions: |
+        Write the bound summary.md for the pull request: the bug, its root cause,
+        the fix, the screens affected, and how it was verified (repro replayed,
+        checks).
+    agent: dev-lead
+    execution: main
+    inputs: [bug.md, repro.md, fix.md, ui-verification.md]
+    outputs: [summary.md]
+    next: pr
+  pr:
+    type: workflow
+    workflow: pr-and-ci
+    inputs: {summary.md: summary.md}
+    next:
+      green: done
+      abandoned: done
   done:
     type: end
