@@ -271,7 +271,11 @@ fn prepare_start_state(
         updated_at: None,
         run_id: run_id.into(),
         name: name.into(),
-        workflow_name: project.workflow.name.clone(),
+        workflow_name: if project.authoring_root != project.project_root.join(".unelos") {
+            format!("global/{}", project.workflow.name)
+        } else {
+            project.workflow.name.clone()
+        },
         request: request.into(),
         naming_pending,
         current: CurrentWork::Finished {

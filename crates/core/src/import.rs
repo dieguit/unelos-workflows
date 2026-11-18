@@ -1,6 +1,5 @@
 use crate::install::{
-    checked_path, collect_files, collect_import_files, fail, io_error, load_install_source,
-    references,
+    checked_path, collect_files, collect_import_files, fail, io_error, references,
 };
 use crate::{AgentExport, InstallError, LoadedProject, McpServer};
 use camino::{Utf8Path, Utf8PathBuf};
@@ -592,8 +591,16 @@ fn load_source(
     source: &Utf8Path,
 ) -> Result<(LoadedProject, Files, Vec<ImportWarning>), InstallError> {
     let workflow = layout(source)?;
-    let mut project = load_install_source(source, &workflow)?;
+    let mut project = crate::install::load_import_source(source, &workflow)?;
     let mut warnings = Vec::new();
+    let (_, agent_ids) = references(&project);
+    for id in agent_ids.keys().filter(|id| id.starts_with("global/")) {
+        if !project.definitions.agents.contains_key(id) {
+            let agent = crate::parse_agent_definition(id, "instructions: External global agent\n")
+                .map_err(text_error)?;
+            project.definitions.agents.insert(id.clone(), agent);
+        }
+    }
     // Missing global tasks are external dependencies, not invalid local definitions.
     for node in project.workflow.nodes.values() {
         let selections: Vec<_> = match node {
@@ -633,10 +640,18 @@ fn load_source(
     let (tasks, agents) = references(&project);
     let global = crate::task_document::global_root().ok();
     let mut globals = BTreeSet::new();
+    for (path, workflow, _) in &project.child_workflows {
+        if global.as_ref().is_some_and(|root| path.starts_with(root)) {
+            globals.insert(("workflow", format!("global/{}", workflow.name)));
+        }
+    }
     for id in tasks.iter().filter(|id| id.starts_with("global/")) {
         globals.insert(("task", id.clone()));
     }
     for id in agents.keys() {
+        if id.starts_with("global/") {
+            globals.insert(("agent", id.clone()));
+        }
         let agent = &project.definitions.agents[id];
         if let Some(crate::AgentModel::Alias(alias)) = &agent.model {
             if crate::list_model_mappings()?
@@ -680,6 +695,8 @@ fn load_source(
     for (kind, id) in globals {
         let bare = id.strip_prefix("global/").unwrap();
         let path = match kind {
+            "workflow" => format!("workflows/{bare}.yaml"),
+            "agent" => format!("agents/{bare}/agent.yaml"),
             "task" => format!("tasks/{bare}/task.yaml"),
             "skill" => format!("skills/{bare}/SKILL.md"),
             _ => format!("mcps/{bare}.yaml"),

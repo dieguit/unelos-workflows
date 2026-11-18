@@ -71,13 +71,13 @@ pub fn harness_instructions(harness: &str) -> String {
 pub fn native_package(mut value: Value, harness: &str) -> Value {
     if value.get("workerPrompt").is_some_and(|v| !v.is_null()) {
         if let Some(agent) = value["packet"]["agent"].as_str() {
-            value["nativeAgent"] = json!(format!("unelos-{agent}"));
+            value["nativeAgent"] = json!(crate::install::native_agent_id(agent));
         }
     }
     if let Some(workers) = value["workerPrompts"].as_array_mut() {
         for worker in workers {
             if let Some(agent) = worker["agent"].as_str() {
-                worker["nativeAgent"] = json!(format!("unelos-{agent}"));
+                worker["nativeAgent"] = json!(crate::install::native_agent_id(agent));
             }
         }
     }

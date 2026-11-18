@@ -98,8 +98,8 @@ fn rewrite(
     }
 }
 
-pub(crate) type ChildLoader<'a> =
-    dyn FnMut(&str) -> Result<(Utf8PathBuf, WorkflowDefinition), ProjectLoadError> + 'a;
+pub(crate) type ChildLoader<'a> = dyn FnMut(&crate::WorkflowNode) -> Result<(Utf8PathBuf, WorkflowDefinition), ProjectLoadError>
+    + 'a;
 
 pub(crate) fn expand(
     source: &Utf8Path,
@@ -150,7 +150,7 @@ fn expand_inner(
                 format!("workflow cycle: {}", chain.join(" -> ")),
             ));
         }
-        let (path, child) = load_child(&call.workflow).map_err(|e| {
+        let (path, child) = load_child(call).map_err(|e| {
             error(
                 source,
                 id,

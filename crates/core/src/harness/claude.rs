@@ -136,7 +136,7 @@ fn render_agents(agents: &[crate::AgentExport]) -> Result<Vec<(Utf8PathBuf, Stri
         .iter()
         .map(|agent| {
             let mut front = json!({
-                "name": format!("unelos-{}", agent.id),
+                "name": crate::install::native_agent_id(&agent.id),
                 "description": format!("Unelos {} role", agent.id),
             });
             if let Some(model) = agent
@@ -198,7 +198,10 @@ fn render_agents(agents: &[crate::AgentExport]) -> Result<Vec<(Utf8PathBuf, Stri
                 )
             };
             Ok((
-                Utf8PathBuf::from(format!(".claude/agents/unelos-{}.md", agent.id)),
+                Utf8PathBuf::from(format!(
+                    ".claude/agents/{}.md",
+                    crate::install::native_agent_id(&agent.id)
+                )),
                 format!("---\n{yaml}---\n{}{}\n", agent.instructions, requirements),
             ))
         })

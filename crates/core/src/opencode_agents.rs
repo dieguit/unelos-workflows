@@ -16,7 +16,10 @@ pub fn check_agents(root: &Utf8Path, agents: &[AgentExport]) -> Result<(), Insta
         }
         crate::check_install_path(
             root,
-            &Utf8PathBuf::from(format!(".opencode/agents/unelos-{}.md", agent.id)),
+            &Utf8PathBuf::from(format!(
+                ".opencode/agents/{}.md",
+                crate::install::native_agent_id(&agent.id)
+            )),
         )?;
     }
     Ok(())
@@ -76,7 +79,10 @@ pub fn render_agents(
         })?;
         let text = format!("---\n{yaml}---\n{}{}\n", agent.instructions, requirements);
         rendered.push((
-            Utf8PathBuf::from(format!(".opencode/agents/unelos-{}.md", agent.id)),
+            Utf8PathBuf::from(format!(
+                ".opencode/agents/{}.md",
+                crate::install::native_agent_id(&agent.id)
+            )),
             text,
         ));
     }

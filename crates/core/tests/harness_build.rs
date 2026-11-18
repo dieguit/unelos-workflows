@@ -92,6 +92,7 @@ fn rebuild_merges_prunes_preserves_and_replaces_mcp_ownership() {
             .written
             .iter()
             .filter(|p| p.extension() == Some("md"))
+            .filter(|p| !p.file_name().unwrap().starts_with("unelos-global-"))
             .count(),
         3
     );

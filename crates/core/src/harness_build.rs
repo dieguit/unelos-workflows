@@ -92,6 +92,25 @@ pub fn build_harness_config(root: &Utf8Path) -> Result<HarnessBuild, InstallErro
             Err(e) => result.skipped.push(format!("{id}: {}", e.message)),
         }
     }
+    for summary in crate::workflow_summaries(root)
+        .map_err(error)?
+        .into_iter()
+        .filter(|row| row.global)
+    {
+        if let Some(problem) = summary.problem {
+            result.skipped.push(format!("{}: {problem}", summary.name));
+            continue;
+        }
+        match crate::export_workflow_agents(root, &summary.name) {
+            Ok(agents) => {
+                workflows.insert(summary.name, agents);
+            }
+            Err(e) => result
+                .skipped
+                .push(format!("{}: {}", summary.name, e.message)),
+        }
+    }
+    merge_agents(&workflows)?;
     let prune = result.skipped.is_empty();
     for adapter in crate::harness::registry() {
         if !installed
@@ -121,7 +140,17 @@ pub(crate) fn merge_agents(
     let mut scopes = BTreeMap::new();
     let mut servers = BTreeMap::new();
     let mut agents: BTreeMap<String, AgentExport> = BTreeMap::new();
+    let mut native_names = BTreeMap::new();
     for agent in workflows.values().flatten() {
+        let native = crate::install::native_agent_id(&agent.id);
+        if let Some(previous) = native_names.insert(native.clone(), agent.id.clone()) {
+            if previous != agent.id {
+                return Err(error(format!(
+                    "Agent native name collision: {previous:?} and {:?} both render as {native:?}",
+                    agent.id
+                )));
+            }
+        }
         for reference in &agent.mcps {
             let id = reference.strip_prefix("global/").unwrap_or(reference);
             if id == "unelos" {

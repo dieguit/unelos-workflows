@@ -62,7 +62,14 @@ pub(crate) fn references(
             Execution::Subagent => modes.1 = true,
         };
     };
-    for node in project.workflow.nodes.values() {
+    for (id, node) in &project.workflow.nodes {
+        if project
+            .node_sources
+            .get(id)
+            .is_some_and(|source| project.external_workflows.contains(&source.path))
+        {
+            continue;
+        }
         match node {
             NodeDefinition::Task(node) => add(&node.task, &node.agent, node.execution),
             NodeDefinition::Parallel(node) => {
@@ -76,13 +83,17 @@ pub(crate) fn references(
     (tasks, agents)
 }
 
+pub(crate) fn native_agent_id(id: &str) -> String {
+    format!("unelos-{}", id.replace("global/", "global-"))
+}
+
 fn export(project: &LoadedProject) -> Result<Vec<AgentExport>, InstallError> {
     let (_, references) = references(project);
     let mut scopes = BTreeMap::new();
     references
         .into_iter()
         .map(|(id, (main, subagent))| {
-            if !safe_id(&id) {
+            if !safe_id(id.strip_prefix("global/").unwrap_or(&id)) {
                 return Err(fail(
                     "unsupported_agent_id",
                     format!("Agent ID cannot be represented as a native profile: {id:?}"),
@@ -135,7 +146,7 @@ pub fn export_workflow_agents(
     root: &Utf8Path,
     workflow: &str,
 ) -> Result<Vec<AgentExport>, InstallError> {
-    if !safe_id(workflow) {
+    if !safe_id(workflow.strip_prefix("global/").unwrap_or(workflow)) {
         return Err(fail(
             "invalid_workflow_name",
             "Workflow must be a safe local identifier",
@@ -150,8 +161,34 @@ pub(crate) fn load_install_source(
     root: &Utf8Path,
     workflow: &str,
 ) -> Result<LoadedProject, InstallError> {
+    load_source(root, workflow, false)
+}
+
+pub(crate) fn load_import_source(
+    root: &Utf8Path,
+    workflow: &str,
+) -> Result<LoadedProject, InstallError> {
+    load_source(root, workflow, true)
+}
+
+fn load_source(
+    root: &Utf8Path,
+    workflow: &str,
+    external: bool,
+) -> Result<LoadedProject, InstallError> {
     checked_path(root, Utf8Path::new(".unelos"))?;
     if root.join(".unelos").exists() {
+        if external {
+            let authoring = root.join(".unelos");
+            let settings = checked_path(&authoring, Utf8Path::new("project.yaml"))?;
+            crate::parse_project_settings(
+                settings.as_str(),
+                &fs::read_to_string(&settings).map_err(io_error)?,
+            )
+            .map_err(|e| fail("invalid_project", e.to_string()))?;
+            return crate::project::load_import_authoring(&authoring, workflow)
+                .map_err(|e| fail("invalid_project", e.to_string()));
+        }
         return crate::load_project(root, workflow)
             .map_err(|error| fail("invalid_project", error.to_string()));
     }
@@ -164,8 +201,12 @@ pub(crate) fn load_install_source(
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(io_error(error)),
     }
-    crate::project::load_authoring(root, workflow)
-        .map_err(|error| fail("invalid_project", error.to_string()))
+    let result = if external {
+        crate::project::load_import_authoring(root, workflow)
+    } else {
+        crate::project::load_authoring(root, workflow)
+    };
+    result.map_err(|error| fail("invalid_project", error.to_string()))
 }
 
 pub fn install_workflow(
@@ -173,7 +214,7 @@ pub fn install_workflow(
     source: Option<&Utf8Path>,
     workflow: &str,
 ) -> Result<WorkflowInstall, InstallError> {
-    if !safe_id(workflow) {
+    if !safe_id(workflow.strip_prefix("global/").unwrap_or(workflow)) {
         return Err(fail(
             "invalid_workflow_name",
             "Workflow must be a safe local identifier",
@@ -263,6 +304,9 @@ pub(crate) fn collect_import_files(
         selected_sources.insert(project.task_sources[id].clone());
     }
     for id in agent_ids.keys() {
+        if id.starts_with("global/") {
+            continue;
+        }
         collect_files(authoring, &Utf8PathBuf::from("agents").join(id), &mut files)?;
         selected_sources.insert(project.agent_sources[id].clone());
     }

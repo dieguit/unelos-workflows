@@ -5,13 +5,28 @@ use std::fs;
 use std::io::Write;
 
 pub fn create_workflow(root: &Utf8Path) -> Result<String, String> {
+    create_workflow_at(root, false)
+}
+
+pub fn create_global_workflow() -> Result<String, String> {
+    create_workflow_at(&crate::task_document::global_root()?, true)
+}
+
+fn create_workflow_at(root: &Utf8Path, global: bool) -> Result<String, String> {
     for number in 1u64.. {
         let id = if number == 1 {
             "new-workflow".to_owned()
         } else {
             format!("new-workflow-{number}")
         };
-        let path = source(root, &id)?;
+        let path = source(
+            root,
+            &if global {
+                format!("global/{id}")
+            } else {
+                id.clone()
+            },
+        )?;
         fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
         if path.with_extension("yml").exists() {
             continue;
@@ -120,6 +135,19 @@ pub struct WorkflowDocument {
 }
 
 fn source(root: &Utf8Path, id: &str) -> Result<Utf8PathBuf, String> {
+    if let Some(id) = id.strip_prefix("global/") {
+        if !crate::project::safe_id(id) {
+            return Err(format!("Invalid global Workflow ID {id:?}"));
+        }
+        let authoring = crate::task_document::global_root()?;
+        return crate::project::bounded_path(
+            &authoring,
+            &Utf8PathBuf::from(format!("workflows/{id}.yaml")),
+            &authoring,
+            "workflow",
+        )
+        .map_err(|e| e.to_string());
+    }
     if id.is_empty()
         || matches!(id, "." | "..")
         || id.contains(['/', '\\'])
@@ -139,8 +167,21 @@ fn source(root: &Utf8Path, id: &str) -> Result<Utf8PathBuf, String> {
     .map_err(|e| e.to_string())
 }
 
+fn load_candidate(
+    root: &Utf8Path,
+    id: &str,
+    text: Option<&str>,
+) -> Result<crate::LoadedProject, String> {
+    if id.starts_with("global/") {
+        crate::project::load_authoring_candidate(&crate::task_document::global_root()?, id, text)
+            .map_err(|e| e.to_string())
+    } else {
+        crate::project::load_project_candidate(root, id, text).map_err(|e| e.to_string())
+    }
+}
+
 fn issues(root: &Utf8Path, id: &str, text: Option<&str>) -> Vec<WorkflowIssue> {
-    let result = crate::project::load_project_candidate(root, id, text)
+    let result = load_candidate(root, id, text)
         .map_err(|e| e.to_string())
         .and_then(|project| {
             crate::validate_project(&project)
@@ -249,7 +290,7 @@ fn outcome_routes(outcomes: &indexmap::IndexMap<String, String>) -> Vec<Workflow
 
 fn document(root: &Utf8Path, id: &str, text: &str) -> Result<WorkflowDocument, String> {
     let workflow = crate::parse_workflow_definition(id, text).map_err(|e| e.to_string())?;
-    let project = crate::project::load_project_candidate(root, id, Some(text)).ok();
+    let project = load_candidate(root, id, Some(text)).ok();
     let steps = workflow
         .nodes
         .iter()
@@ -572,6 +613,9 @@ fn set_list(fields: &mut serde_yaml_ng::Mapping, key: &str, values: &[String]) {
 }
 
 fn step_rename_issue(root: &Utf8Path, id: &str, draft: &WorkflowDraft) -> Option<WorkflowIssue> {
+    if id.starts_with("global/") {
+        return None;
+    }
     let step = draft
         .steps
         .iter()
@@ -614,23 +658,36 @@ pub fn validate_workflow(
             step: None,
         }]);
     }
-    Ok(issues(root, &settings.name, Some(&text)))
+    let target = scoped_name(id, &settings.name);
+    Ok(issues(root, &target, Some(&text)))
+}
+
+fn scoped_name(id: &str, name: &str) -> String {
+    if id.starts_with("global/") {
+        format!("global/{name}")
+    } else {
+        name.into()
+    }
 }
 
 fn rename_target(root: &Utf8Path, id: &str, name: &str) -> Result<Utf8PathBuf, String> {
-    if name != id {
+    if name != id.strip_prefix("global/").unwrap_or(id) {
         if !crate::project::safe_id(name) {
             return Err(
                 "Name must contain 1–128 ASCII letters, digits, underscores or hyphens".into(),
             );
         }
-        let target = source(root, name)?;
+        let target = source(root, &scoped_name(id, name))?;
         if target.try_exists().map_err(|e| e.to_string())? {
             return Err(format!("Workflow {name:?} already exists"));
         }
         // shortcut: run creation is not locked with authoring, add a shared lock before supporting concurrent edits/execution.
-        let runs = crate::runtime::stored_runs(root)
-            .map_err(|e| format!("Cannot safely rename: could not inspect stored runs: {e}"))?;
+        let runs = if id.starts_with("global/") {
+            Vec::new()
+        } else {
+            crate::runtime::stored_runs(root)
+                .map_err(|e| format!("Cannot safely rename: could not inspect stored runs: {e}"))?
+        };
         // Finished runs keep the old workflow name; only in-progress runs need the file to stay put.
         if runs
             .iter()
@@ -657,7 +714,7 @@ pub fn save_workflow(
         return Err(issue.message);
     }
     let target = rename_target(root, id, &settings.name)?;
-    let document = document(root, &settings.name, &text)?;
+    let document = document(root, &scoped_name(id, &settings.name), &text)?;
     if !document.issues.is_empty() {
         return Err(document
             .issues
@@ -690,6 +747,36 @@ pub fn save_workflow(
         let _ = fs::remove_file(staging);
         result?;
     }
+    Ok(document)
+}
+
+pub fn get_global_workflow(id: &str) -> Result<WorkflowDocument, String> {
+    let mut document = get_workflow(
+        &crate::task_document::global_root()?,
+        &format!("global/{id}"),
+    )?;
+    document.id = id.into();
+    Ok(document)
+}
+
+pub fn validate_global_workflow(
+    id: &str,
+    draft: &WorkflowDraft,
+) -> Result<Vec<WorkflowIssue>, String> {
+    validate_workflow(
+        &crate::task_document::global_root()?,
+        &format!("global/{id}"),
+        draft,
+    )
+}
+
+pub fn save_global_workflow(id: &str, draft: &WorkflowDraft) -> Result<WorkflowDocument, String> {
+    let mut document = save_workflow(
+        &crate::task_document::global_root()?,
+        &format!("global/{id}"),
+        draft,
+    )?;
+    document.id = draft.settings.name.clone();
     Ok(document)
 }
 

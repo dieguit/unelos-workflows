@@ -4,15 +4,17 @@ mod authoring_actions;
 pub use authoring_actions::{make_mcp_global, make_skill_global, make_task_global};
 mod context;
 pub use authoring_actions::{
-    duplicate_agent, duplicate_global_skill, duplicate_global_task, duplicate_skill,
-    duplicate_task, duplicate_workflow, remove_agent, remove_global_skill, remove_global_task,
+    duplicate_agent, duplicate_global_agent, duplicate_global_skill, duplicate_global_task,
+    duplicate_global_workflow, duplicate_skill, duplicate_task, duplicate_workflow, remove_agent,
+    remove_global_agent, remove_global_skill, remove_global_task, remove_global_workflow,
     remove_skill, remove_task, remove_workflow,
 };
 mod workflow_document;
 pub use workflow_document::{
-    create_workflow, get_workflow, save_workflow, validate_workflow, StepCall, StepTask,
-    WorkflowDocument, WorkflowDraft, WorkflowIssue, WorkflowRoute, WorkflowSettings, WorkflowStep,
-    WorkflowWorker,
+    create_global_workflow, create_workflow, get_global_workflow, get_workflow,
+    save_global_workflow, save_workflow, validate_global_workflow, validate_workflow, StepCall,
+    StepTask, WorkflowDocument, WorkflowDraft, WorkflowIssue, WorkflowRoute, WorkflowSettings,
+    WorkflowStep, WorkflowWorker,
 };
 mod task_document;
 pub use task_document::{
@@ -28,8 +30,8 @@ mod uninstall;
 pub use uninstall::{uninstall_project, ProjectUninstall};
 pub mod opencode_agents;
 pub use agent_document::{
-    agent_model_options, get_agent, save_agent, AgentDocument, AgentModelOptions,
-    HarnessModelOptions,
+    agent_model_options, get_agent, get_global_agent, save_agent, save_global_agent, AgentDocument,
+    AgentModelOptions, HarnessModelOptions,
 };
 pub use harness_build::{
     auto_build_harness, build_harness_config, get_project_settings, save_project_settings,
@@ -65,7 +67,7 @@ pub use import::{
     ImportWorkflow, SourceSpec,
 };
 mod project;
-pub use project::{project_references, ProjectReferences, Reference};
+pub use project::{global_workflow_summaries, project_references, ProjectReferences, Reference};
 mod runtime;
 mod settings;
 mod skill_document;
@@ -94,9 +96,9 @@ pub use install::{
     install_workflow, write_install_file, AgentExport, InstallError, WorkflowInstall,
 };
 pub use project::{
-    agent_summaries, global_skill_summaries, global_task_summaries, list_workflows, load_project,
-    skill_summaries, task_summaries, workflow_summaries, AgentSummary, LoadedProject,
-    ProjectLoadError, SkillSummary, TaskSummary, WorkflowSummary,
+    agent_summaries, global_agent_summaries, global_skill_summaries, global_task_summaries,
+    list_workflows, load_project, skill_summaries, task_summaries, workflow_summaries,
+    AgentSummary, LoadedProject, ProjectLoadError, SkillSummary, TaskSummary, WorkflowSummary,
 };
 pub use runtime::{
     approve, approve_node, complete, complete_node, confirm_outputs, delete_run, execution_mutate,
