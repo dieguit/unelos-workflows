@@ -20,7 +20,7 @@ pub struct HarnessBuild {
 }
 
 impl HarnessBuild {
-    fn append(&mut self, build: Self) {
+    pub(crate) fn append(&mut self, build: Self) {
         for id in build.harnesses {
             if !self.harnesses.contains(&id) {
                 self.harnesses.push(id);
@@ -91,21 +91,34 @@ fn global_workflows(result: &mut HarnessBuild) -> Result<Workflows, InstallError
 }
 
 pub fn build_global_harness_agents() -> Result<HarnessBuild, InstallError> {
-    let installed = crate::harness::list_harnesses();
+    let installed = installed_harnesses();
     let mut result = HarnessBuild::default();
-    if installed.iter().any(|h| h.installed) {
+    if !installed.is_empty() {
         let agents = global_agents(&mut result)?;
         let prune = result.skipped.is_empty();
         for adapter in crate::harness::registry() {
-            if installed
-                .iter()
-                .any(|h| h.installed && h.id == adapter.id())
-            {
+            if installed.contains(adapter.id()) {
                 refresh_globals(adapter.as_ref(), &agents, prune, &mut result);
             }
         }
     }
     Ok(result)
+}
+
+fn installed_harnesses() -> std::collections::BTreeSet<String> {
+    let mut installed: std::collections::BTreeSet<_> = crate::harness::list_harnesses()
+        .into_iter()
+        .filter(|h| h.installed)
+        .map(|h| h.id)
+        .collect();
+    // OpenCode integration detection cannot parse a broken config; the receipt still lets refresh report it.
+    if !installed.contains("opencode")
+        && crate::global_config::read_state().is_ok_and(|state| state.contains_key("opencode"))
+        && crate::harness::opencode::config_unreadable()
+    {
+        installed.insert("opencode".into());
+    }
+    installed
 }
 
 pub(crate) fn build_globals_for(
@@ -176,8 +189,8 @@ fn changed(
 
 pub fn build_harness_config(root: &Utf8Path) -> Result<HarnessBuild, InstallError> {
     let mut result = HarnessBuild::default();
-    let installed = crate::harness::list_harnesses();
-    if !installed.iter().any(|h| h.installed) {
+    let installed = installed_harnesses();
+    if installed.is_empty() {
         return Ok(result);
     }
     let workflows_path = Utf8Path::new(".unelos/workflows");
@@ -233,10 +246,7 @@ pub fn build_harness_config(root: &Utf8Path) -> Result<HarnessBuild, InstallErro
     }
     result.append(global_result);
     for adapter in crate::harness::registry() {
-        if !installed
-            .iter()
-            .any(|h| h.id == adapter.id() && h.installed)
-        {
+        if !installed.contains(adapter.id()) {
             continue;
         }
         refresh_globals(adapter.as_ref(), &global_agents, global_prune, &mut result);
@@ -371,7 +381,12 @@ pub(crate) fn write_agents(
             let name = path.file_name().unwrap();
             match read_agent_file(&root.join(&path)) {
                 Ok(bytes) if bytes == text.as_bytes() => {
-                    // Equal content without an ownership record is still user-owned.
+                    // Exact project renders can seed receipts for pre-manifest builds.
+                    if directory != "agents" {
+                        owned
+                            .entry(name.to_owned())
+                            .or_insert_with(|| checksum(&bytes));
+                    }
                     continue;
                 }
                 Ok(bytes) if owned.get(name) != Some(&checksum(&bytes)) => {

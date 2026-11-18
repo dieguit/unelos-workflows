@@ -112,6 +112,13 @@ fn text(path: &Utf8Path) -> Result<String> {
         Err(e) => Err(io_error(e)),
     }
 }
+
+pub(crate) fn config_unreadable() -> bool {
+    config()
+        .and_then(|path| text(&path))
+        .and_then(|text| jsonc::config_value(&text))
+        .is_err()
+}
 pub(super) fn validate() -> Result<()> {
     let config = config()?;
     let package = assets()?;
@@ -169,9 +176,20 @@ impl HarnessAdapter for OpenCode {
         let root = self
             .config_dir()
             .ok_or_else(|| error("config_dir_missing", "Set OPENCODE_CONFIG_DIR or HOME"))?;
+        let mut agents = agents.to_vec();
+        let path = config()?;
+        crate::mcp_install::check_uninstall_file(&root, path.file_name().unwrap())?;
+        let mut mcp_result =
+            crate::mcp_install::sync_global(&path, &text(&path)?, &mut agents, prune, false)?;
         let rendered =
-            crate::opencode_agents::render_agents(crate::opencode_agents::Version::V2, agents)?;
-        crate::harness_build::write_global_agents(&root, self.id(), rendered, prune)
+            crate::opencode_agents::render_agents(crate::opencode_agents::Version::V2, &agents)?;
+        mcp_result.append(crate::harness_build::write_global_agents(
+            &root,
+            self.id(),
+            rendered,
+            prune,
+        )?);
+        Ok(mcp_result)
     }
     fn id(&self) -> &str {
         "opencode"
@@ -260,8 +278,12 @@ impl HarnessAdapter for OpenCode {
     fn uninstall(&self, _cx: &Ctx) -> Result<()> {
         let path = config()?;
         let root = assets()?;
+        crate::mcp_install::check_uninstall_file(
+            path.parent().unwrap(),
+            path.file_name().unwrap(),
+        )?;
         let original = text(&path)?;
-        let edited = jsonc::remove_registration(&original, root.parent().unwrap(), &path)?;
+        jsonc::remove_registration(&original, root.parent().unwrap(), &path)?;
         let mut state = read_state()?;
         if let Some(record) = state.get(self.id()) {
             for file in &record.files {
@@ -276,6 +298,14 @@ impl HarnessAdapter for OpenCode {
                 let global = global_config::config_dir()?;
                 crate::check_install_path(&global, file.strip_prefix(&global).unwrap())?;
             }
+        }
+        let cleanup = crate::mcp_install::sync_global(&path, &original, &mut [], true, true)?;
+        for skipped in cleanup.skipped {
+            eprintln!("{skipped}");
+        }
+        let original = text(&path)?;
+        let edited = jsonc::remove_registration(&original, root.parent().unwrap(), &path)?;
+        if let Some(record) = state.get(self.id()) {
             for file in &record.files {
                 match fs::remove_file(file) {
                     Ok(()) => (),

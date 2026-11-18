@@ -266,10 +266,20 @@ pub(crate) fn mcp_text(
             }
         }
         for (key, value) in new {
-            set(&section_object, key, input(value.clone()));
+            if old.get(key) != Some(value) || section_object.get(key).is_none() {
+                set(&section_object, key, input(value.clone()));
+            }
         }
     }
     Ok(document.to_string())
+}
+
+pub(crate) fn config_value(text: &str) -> Result<Value, InstallError> {
+    parse_config(text)?
+        .object_value()
+        .unwrap()
+        .to_serde_value()
+        .ok_or_else(|| fail("invalid_opencode_config", "Invalid OpenCode config value"))
 }
 
 pub fn configured_text(

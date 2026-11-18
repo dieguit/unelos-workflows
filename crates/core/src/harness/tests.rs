@@ -3,6 +3,133 @@ use std::sync::Mutex;
 static ENV: Mutex<()> = Mutex::new(());
 
 #[test]
+fn global_opencode_mcp_ownership_preserves_user_config() {
+    let _lock = ENV.lock().unwrap();
+    let temp = assert_fs::TempDir::new().unwrap();
+    let root = Utf8Path::from_path(temp.path()).unwrap();
+    let unelos = root.join("unelos");
+    let opencode = root.join("opencode");
+    let _env = Env::set(&[
+        ("UNELOS_CONFIG_DIR", unelos.as_str()),
+        ("OPENCODE_CONFIG_DIR", opencode.as_str()),
+        ("HOME", root.as_str()),
+        ("PATH", root.join("empty").as_str()),
+    ]);
+    fs::create_dir_all(&opencode).unwrap();
+    let path = opencode.join("opencode.jsonc");
+    let source = root.join("cli");
+    fs::write(&source, "binary").unwrap();
+    let user_line = r#"    "user": { "type": "local", "command": ["user-command"] }"#;
+    let baseline = format!(
+        "{{\n  // Keep this comment\n  \"mcp\": {{\n{user_line}\n  }},\n  \"tools\": {{}}\n}}\n"
+    );
+    fs::write(&path, &baseline).unwrap();
+    install_harness("opencode", &source).unwrap();
+    let installed = fs::read_to_string(&path).unwrap();
+    let server = crate::McpServer::Local {
+        command: vec!["fixture-command".into()],
+        environment: Default::default(),
+    };
+    let definition = unelos.join("agents").join("probe");
+    fs::create_dir_all(&definition).unwrap();
+    let agent_file = definition.join("agent.yaml");
+    let profile = opencode.join("agents").join("unelos-global-probe.md");
+    let receipt = unelos.join("opencode-mcps.json");
+    let add_mcp = |id: &str| {
+        crate::save_global_mcp(
+            None,
+            crate::McpDocument {
+                id: id.to_owned(),
+                server: server.clone(),
+            },
+        )
+        .unwrap();
+    };
+    add_mcp("probe");
+    fs::write(&agent_file, "instructions: probe\nmcps: [global/probe]\n").unwrap();
+    let build = crate::build_global_harness_agents().unwrap();
+    assert!(build.skipped.is_empty(), "{:?}", build.skipped);
+    let configured = fs::read_to_string(&path).unwrap();
+    assert!(configured.contains(user_line));
+    assert!(configured.contains("// Keep this comment"));
+    assert!(configured.contains("\"enabled\": true"));
+    assert!(configured.contains("\"probe_*\": false"));
+    assert!(fs::read_to_string(&profile)
+        .unwrap()
+        .contains("probe_*: true"));
+    assert!(receipt.is_file());
+    assert!(crate::build_global_harness_agents()
+        .unwrap()
+        .written
+        .is_empty());
+    assert_eq!(fs::read_to_string(&path).unwrap(), configured);
+
+    fs::remove_dir_all(&definition).unwrap();
+    crate::build_global_harness_agents().unwrap();
+    assert_eq!(fs::read_to_string(&path).unwrap(), installed);
+    assert!(!receipt.exists());
+    fs::create_dir_all(&definition).unwrap();
+    add_mcp("user");
+    let identical = installed.replace(
+        user_line,
+        r#"    "user": { "type": "local", "command": ["fixture-command"], "environment": {}, "enabled": true }"#,
+    ).replace("\"tools\": {}", "\"tools\": {\"user_*\": false}");
+    fs::write(&path, &identical).unwrap();
+    fs::write(&agent_file, "instructions: probe\nmcps: [global/user]\n").unwrap();
+    let build = crate::build_global_harness_agents().unwrap();
+    assert!(build.skipped.is_empty(), "{:?}", build.skipped);
+    assert_eq!(fs::read_to_string(&path).unwrap(), identical);
+    assert!(!receipt.exists());
+    assert!(fs::read_to_string(&profile)
+        .unwrap()
+        .contains("user_*: true"));
+    fs::write(&path, &installed).unwrap();
+    fs::write(
+        &agent_file,
+        "instructions: probe\nmcps: [global/probe, global/user]\n",
+    )
+    .unwrap();
+    let build = crate::build_global_harness_agents().unwrap();
+    assert!(build.skipped.iter().any(|s| s.contains("mcp.user")));
+    assert!(!fs::read_to_string(&profile).unwrap().contains("user_*"));
+    let configured = fs::read_to_string(&path).unwrap();
+    let modified = configured.replace("fixture-command", "user-edited");
+    fs::write(&path, &modified).unwrap();
+    let build = crate::build_global_harness_agents().unwrap();
+    assert!(build
+        .skipped
+        .iter()
+        .any(|s| s.contains("released ownership")));
+    assert_eq!(fs::read_to_string(&path).unwrap(), modified);
+    assert!(!fs::read_to_string(&profile).unwrap().contains("probe_*"));
+
+    fs::write(&path, "{invalid").unwrap();
+    let build = crate::build_global_harness_agents().unwrap();
+    assert!(build
+        .skipped
+        .iter()
+        .any(|s| s.starts_with("opencode globals:")));
+    assert_eq!(fs::read_to_string(&path).unwrap(), "{invalid");
+    fs::write(&path, &modified).unwrap();
+    let duplicate = opencode.join("opencode.json");
+    fs::write(&duplicate, "{}\n").unwrap();
+    assert!(crate::build_global_harness_agents()
+        .unwrap()
+        .skipped
+        .iter()
+        .any(|s| s.contains("Both opencode.json and opencode.jsonc exist")));
+    assert_eq!(fs::read_to_string(&path).unwrap(), modified);
+    fs::remove_file(duplicate).unwrap();
+    uninstall_harness("opencode").unwrap();
+    let final_config = fs::read_to_string(&path).unwrap();
+    assert!(final_config.contains("user-edited"));
+    assert!(final_config.contains(user_line));
+    assert!(!final_config.contains("probe_*"));
+    assert!(!receipt.exists());
+    assert!(!opencode.join("opencode.json").exists());
+}
+
+#[test]
 #[cfg(unix)]
 fn bundled_globals_install_update_preserve_and_remove() {
     let _lock = ENV.lock().unwrap();
@@ -426,6 +553,15 @@ fn builds_both_harnesses_and_unmapped_claude_keeps_files() {
     assert_eq!(built.harnesses, ["opencode", "claude"]);
     assert!(built.skipped.is_empty());
     assert_eq!(built.removed, legacy_copies);
+    for harness in ["opencode", "claude"] {
+        let receipt = root
+            .join(format!(".{harness}"))
+            .join("agents")
+            .join(".unelos-owned-agents.json");
+        fs::remove_file(&receipt).unwrap();
+        crate::build_harness_config(root).unwrap();
+        assert!(receipt.is_file());
+    }
     let claude_agent = root.join(".claude/agents/unelos-simple-implementer.md");
     let before = fs::read(&claude_agent).unwrap();
     let stale = root.join(".claude/agents/unelos-stale.md");
