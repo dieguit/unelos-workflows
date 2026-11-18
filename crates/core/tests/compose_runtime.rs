@@ -80,18 +80,28 @@ fn act(
     .unwrap()
 }
 
+// Runtime joins run paths per segment, so Windows paths mix `/` and `\`.
+fn runs(root: &Utf8Path) -> Utf8PathBuf {
+    root.join(".unelos/runs")
+}
+
+fn at(base: &Utf8Path, rel: &str) -> Utf8PathBuf {
+    rel.split('/')
+        .fold(base.to_owned(), |path, part| path.join(part))
+}
+
 #[test]
 fn runs_parent_through_child_gate_and_back() {
     let (_temp, root) = fixture();
     let plan = execution_start(&root, "fullstack", Some("composition")).unwrap();
     let design = act(&root, &plan, ExecutionOperation::Complete, None);
-    let run = root.join(".unelos/runs/r-000001");
+    let run = runs(&root).join("r-000001");
     assert_eq!(packet(&design)["nodeId"], "frontend/design");
     assert_eq!(
         packet(&design)["inputs"][0]["path"],
-        run.join("plan/plan.md").as_str()
+        at(&run, "plan/plan.md").as_str()
     );
-    let path = run.join("frontend/design/design.md");
+    let path = at(&run, "frontend/design/design.md");
     assert_eq!(packet(&design)["outputs"][0]["path"], path.as_str());
     let gate = act(&root, &design, ExecutionOperation::Complete, None);
     assert_eq!(packet(&gate)["nodeId"], "frontend/approve");
@@ -111,7 +121,7 @@ fn runs_parent_through_child_gate_and_back() {
     assert_eq!(packet(&review)["nodeId"], "review");
     assert_eq!(
         packet(&review)["artifacts"][0]["path"],
-        run.join("frontend/build/frontend-report.md").as_str()
+        at(&run, "frontend/build/frontend-report.md").as_str()
     );
     let restart = act(&root, &review, ExecutionOperation::Reject, None);
     assert_eq!(packet(&restart)["nodeId"], "frontend/design");
@@ -125,7 +135,7 @@ fn nested_output_lands_in_scoped_folder() {
     let work = execution_start(&root, "outer", Some("nested")).unwrap();
     assert_eq!(
         packet(&work)["outputs"][0]["path"],
-        root.join(".unelos/runs/r-000001/S/T/m/top.md").as_str()
+        at(&runs(&root), "r-000001/S/T/m/top.md").as_str()
     );
     let done = act(&root, &work, ExecutionOperation::Complete, None);
     assert_eq!(packet(&done)["nodeId"], "done");
@@ -250,7 +260,7 @@ fn many_to_one_inputs_bind_once_for_every_consumer() {
         assert_eq!(inputs.as_array().unwrap().len(), 2);
         assert_eq!(inputs[0]["name"], "x.md");
         assert_eq!(inputs[1]["name"], "y.md");
-        assert_eq!(inputs[0]["path"], root.join(".unelos/runs/r-000001/produce/x.md").as_str());
+        assert_eq!(inputs[0]["path"], at(&runs(&root), "r-000001/produce/x.md").as_str());
         if let Some(workers) = value["workers"].as_array() {
             assert_eq!(workers[0]["inputs"], *inputs);
         }
