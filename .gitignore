@@ -35,3 +35,4 @@ docs/ignored/
 .superpowers/
 .playwright-mcp/
 .slim/
+.unelos/opencode-mcps.json
