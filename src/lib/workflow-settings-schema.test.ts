@@ -2,8 +2,8 @@ import type { WorkflowStep } from "@/lib/projects"
 import { insertStep, removeStep } from "@/lib/step-edit"
 import { expect, test } from "vitest"
 
-import { workflowSettingsSchema } from "@/routes/workflows/-lib/workflow-settings-schema"
-import { toDraft } from "../-hooks/use-workflow-form"
+import { workflowSettingsSchema } from "@/lib/workflow-settings-schema"
+import { toDraft } from "@/hooks/use-workflow-form"
 
 test("workflow settings validate renamed IDs without rejecting unchanged legacy names", () => {
   const schema = workflowSettingsSchema("legacy name")

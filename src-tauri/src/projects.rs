@@ -717,6 +717,103 @@ pub async fn remove_global_skill(
     .map_err(|e| e.to_string())?
 }
 
+#[tauri::command]
+pub async fn list_global_workflows() -> Result<Vec<unelos_core::WorkflowSummary>, String> {
+    tauri::async_runtime::spawn_blocking(unelos_core::global_workflow_summaries)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn create_global_workflow() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(unelos_core::create_global_workflow)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn get_global_workflow(id: String) -> Result<unelos_core::WorkflowDocument, String> {
+    tauri::async_runtime::spawn_blocking(move || unelos_core::get_global_workflow(&id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn validate_global_workflow(
+    id: String,
+    draft: unelos_core::WorkflowDraft,
+) -> Result<Vec<unelos_core::WorkflowIssue>, String> {
+    tauri::async_runtime::spawn_blocking(move || unelos_core::validate_global_workflow(&id, &draft))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn save_global_workflow(
+    id: String,
+    draft: unelos_core::WorkflowDraft,
+) -> Result<unelos_core::WorkflowDocument, String> {
+    tauri::async_runtime::spawn_blocking(move || unelos_core::save_global_workflow(&id, &draft))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn duplicate_global_workflow(id: String, new_id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        unelos_core::duplicate_global_workflow(&id, &new_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn remove_global_workflow(id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || unelos_core::remove_global_workflow(&id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn list_global_agents() -> Result<Vec<unelos_core::AgentSummary>, String> {
+    tauri::async_runtime::spawn_blocking(unelos_core::global_agent_summaries)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn get_global_agent(id: String) -> Result<unelos_core::AgentDocument, String> {
+    tauri::async_runtime::spawn_blocking(move || unelos_core::get_global_agent(&id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn save_global_agent(
+    original_id: Option<String>,
+    agent: unelos_core::AgentDocument,
+) -> Result<unelos_core::AgentDocument, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        unelos_core::save_global_agent(original_id.as_deref(), agent)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn duplicate_global_agent(id: String, new_id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || unelos_core::duplicate_global_agent(&id, &new_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn remove_global_agent(id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || unelos_core::remove_global_agent(&id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

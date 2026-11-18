@@ -4,8 +4,8 @@ import { PencilIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { SkillPicker } from "@/components/skill-picker"
 import { useLazy } from "@/hooks/use-lazy"
-import { listAllSkills } from "@/hooks/skill-fetchers"
-import type { WorkflowForm } from "../-hooks/use-workflow-form"
+import { listSkillChoices } from "@/hooks/skill-fetchers"
+import type { WorkflowForm } from "@/hooks/use-workflow-form"
 import { humanize } from "@/lib/step-edit"
 import { StepIconBox } from "@/components/flow/step-card"
 import { InputsSection, OutputsSection } from "./step-panel/artifact-sections"
@@ -37,7 +37,7 @@ export function StepPanel({
   onClose,
   onRemove,
 }: {
-  root: string
+  root: string | null
   form: WorkflowForm
   index: number
   /** Show every field error (after Validate), not just blurred ones. */
@@ -50,7 +50,7 @@ export function StepPanel({
   onRemove: () => void
 }) {
   const steps = useStore(form.store, (s) => s.values.steps)
-  const fetchSkills = useCallback(() => listAllSkills(root), [root])
+  const fetchSkills = useCallback(() => listSkillChoices(root), [root])
   const skills = useLazy(fetchSkills)
   const agents = useAgents(root)
   const step = steps[index]

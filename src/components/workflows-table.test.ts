@@ -8,6 +8,7 @@ test("workflow rows expose a separate actions control", async () => {
       createElement(WorkflowsTable, {
         workflows: [
           {
+            global: false,
             name: "Example",
             calls: [],
             file: "example.yaml",
@@ -32,6 +33,7 @@ test("unreadable workflow shows a warning by its name and — for unknown cells"
       createElement(WorkflowsTable, {
         workflows: [
           {
+            global: false,
             name: "bad",
             calls: [],
             file: "bad.yaml",

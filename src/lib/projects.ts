@@ -14,6 +14,7 @@ export type Reference = { kind: "workflow" | "agent" | "task"; id: string; name:
 export type ProjectReferences = { agents: Record<string, Reference[]>; tasks: Record<string, Reference[]>; skills: Record<string, Reference[]>; mcps: Record<string, Reference[]> }
 export const getProjectReferences = (root: string) => trackedInvoke<ProjectReferences>("project_references", { root })
 export type WorkflowSummary = {
+  global: boolean
   calls: string[]
   name: string
   file: string
@@ -227,6 +228,18 @@ export const removeWorkflow = withBuild(rawRemoveWorkflow)
 export const saveAgent = withBuild(rawSaveAgent)
 export const duplicateAgent = withBuild(rawDuplicateAgent)
 export const removeAgent = withBuild(rawRemoveAgent)
+export const listGlobalWorkflows = () => trackedInvoke<WorkflowSummary[]>("list_global_workflows")
+export const createGlobalWorkflow = () => trackedInvoke<string>("create_global_workflow")
+export const getGlobalWorkflow = (id: string) => trackedInvoke<WorkflowDocument>("get_global_workflow", { id })
+export const validateGlobalWorkflow = (id: string, draft: WorkflowDraft) => trackedInvoke<WorkflowIssue[]>("validate_global_workflow", { id, draft })
+export const saveGlobalWorkflow = withBuild((_root: string | null, id: string, draft: WorkflowDraft) => trackedInvoke<WorkflowDocument>("save_global_workflow", { id, draft }))
+export const duplicateGlobalWorkflow = (id: string, newId: string) => trackedInvoke<void>("duplicate_global_workflow", { id, newId })
+export const removeGlobalWorkflow = withBuild((_root: string | null, id: string) => trackedInvoke<void>("remove_global_workflow", { id }))
+export const listGlobalAgents = () => trackedInvoke<AgentSummary[]>("list_global_agents")
+export const getGlobalAgent = (id: string) => trackedInvoke<AgentDocument>("get_global_agent", { id })
+export const saveGlobalAgent = withBuild((_root: string | null, originalId: string | null, agent: AgentDocument) => trackedInvoke<AgentDocument>("save_global_agent", { originalId, agent }))
+export const duplicateGlobalAgent = (id: string, newId: string) => trackedInvoke<void>("duplicate_global_agent", { id, newId })
+export const removeGlobalAgent = withBuild((_root: string | null, id: string) => trackedInvoke<void>("remove_global_agent", { id }))
 export const saveMcp = withBuild(rawSaveMcp)
 export const removeMcp = withBuild((root: string, id: string) => trackedInvoke<void>("remove_mcp", { root, id }))
 export const listGlobalMcps = () => trackedInvoke<McpSummary[]>("list_global_mcps")

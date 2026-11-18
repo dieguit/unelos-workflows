@@ -6,8 +6,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { SkillPicker } from "@/components/skill-picker"
 import { useLazy } from "@/hooks/use-lazy"
-import { listAllSkills } from "@/hooks/skill-fetchers"
-import type { WorkflowForm } from "../../-hooks/use-workflow-form"
+import { listSkillChoices } from "@/hooks/skill-fetchers"
+import type { WorkflowForm } from "@/hooks/use-workflow-form"
 import { addWorker, humanize, slugify, taskRef, workerTitle } from "@/lib/step-edit"
 import { StepIconBox } from "@/components/flow/step-card"
 import { stepIconColors, stepIcons } from "@/components/flow/step-icon"
@@ -97,7 +97,7 @@ export function ParallelPanel({ form, index, showErrors, disabled, nameDraft, on
 
 /** Properties panel for one task inside a parallel step (pencil f3s1m2). */
 export function WorkerPanel({ root, form, index, worker: at, showErrors, disabled, onEditInstructions, onBack, onClose, onRemove }: {
-  root: string
+  root: string | null
   form: WorkflowForm
   index: number
   worker: number
@@ -109,7 +109,7 @@ export function WorkerPanel({ root, form, index, worker: at, showErrors, disable
   onRemove: () => void
 }) {
   const steps = useStore(form.store, (s) => s.values.steps)
-  const fetchSkills = useCallback(() => listAllSkills(root), [root])
+  const fetchSkills = useCallback(() => listSkillChoices(root), [root])
   const skills = useLazy(fetchSkills)
   const agents = useAgents(root)
   const loadAgents = agents.load

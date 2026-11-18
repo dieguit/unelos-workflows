@@ -134,6 +134,18 @@ export function AppSidebar() {
           <ArrowLeftRightIcon aria-hidden="true" className={iconClass} />
           Model mappings
         </Link>
+        <Link
+          to="/global-workflows"
+          data-section="global-workflows"
+          className={linkClass}
+        >
+          <WorkflowIcon aria-hidden="true" className={iconClass} />
+          Global workflows
+        </Link>
+        <Link to="/global-agents" data-section="global-agents" className={linkClass}>
+          <BotIcon aria-hidden="true" className={iconClass} />
+          Global agents
+        </Link>
         <Link to="/global-tasks" data-section="global-tasks" className={linkClass}>
           <ListTodoIcon aria-hidden="true" className={iconClass} />
           Global tasks

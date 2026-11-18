@@ -60,7 +60,7 @@ function AgentsTable({
         <ListHead>Model</ListHead>
         <ListHead className="w-[22%]">Skills</ListHead>
         <ListHead className="w-[18%]">MCPs</ListHead>
-        <UsedByHead className="w-28" />
+        <UsedByHead className="w-28" project={usedBy.project} />
         {actions && (
           <ListHead className="w-14">
             <span className="sr-only">Actions</span>
@@ -113,8 +113,10 @@ export function AgentsList({
   query,
   onClear,
   onCreate,
+  emptyDescription = "Agents defined in this project appear here.",
   ...selection
 }: {
+  emptyDescription?: string
   agents: AgentSummary[]
   query: string
   onClear: () => void
@@ -126,7 +128,7 @@ export function AgentsList({
       dashed
       icon={BotIcon}
       title="No agents yet"
-      description="Agents defined in this project appear here."
+      description={emptyDescription}
       action={
         onCreate ? (
           <Button variant="outline" size="sm" onClick={onCreate}>

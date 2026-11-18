@@ -32,19 +32,23 @@ import {
 import { useDiscardChanges } from "@/hooks/use-discard-changes"
 import { registerProjectChangeGuard } from "@/lib/project-change-guard"
 import {
+  getGlobalWorkflow,
   getWorkflow,
+  saveGlobalWorkflow,
   saveWorkflow,
+  validateGlobalWorkflow,
   validateWorkflow,
   type WorkflowDocument,
   type WorkflowDraft,
   type WorkflowIssue,
   type WorkflowStep,
 } from "@/lib/projects"
+import { globalRef } from "@/lib/global-ref"
 import { BodyEditor } from "@/components/body-editor"
 import { applyBodyDraft } from "@/lib/apply-body-draft"
 import { addWorker, humanize, insertStep, removeStep, withDerivedOutcomes, workerTitle } from "@/lib/step-edit"
-import { workflowSettingsSchema } from "../-lib/workflow-settings-schema"
-import { useWorkflowForm } from "../-hooks/use-workflow-form"
+import { workflowSettingsSchema } from "@/lib/workflow-settings-schema"
+import { useWorkflowForm } from "@/hooks/use-workflow-form"
 import { FlowPane } from "@/components/flow/flow-pane"
 import { FlowToolbar } from "@/components/flow/flow-toolbar"
 import { StepPicker } from "./step-picker"
@@ -53,13 +57,16 @@ import { ParallelPanel, WorkerPanel } from "./step-panel/parallel-panel"
 import { WorkflowCallPanel } from "./step-panel/workflow-call-panel"
 import { WorkflowInputsSection } from "./step-panel/artifact-sections"
 
+/** `global` edits the machine-wide definition in ~/.config/unelos; `root` is then only the open project, if any. */
 export function WorkflowEditor({
   root,
   id,
+  global = false,
   onBack,
 }: {
-  root: string
+  root: string | null
   id: string
+  global?: boolean
   onBack: () => void
 }) {
   const [document, setDocument] = useState<WorkflowDocument>()
@@ -67,7 +74,7 @@ export function WorkflowEditor({
   const [attempt, setAttempt] = useState(0)
   useEffect(() => {
     let active = true
-    getWorkflow(root, id).then(
+    ;(global ? getGlobalWorkflow(id) : getWorkflow(root!, id)).then(
       (doc) => {
         if (active) {
           setDocument(doc)
@@ -81,15 +88,15 @@ export function WorkflowEditor({
     return () => {
       active = false
     }
-  }, [root, id, attempt])
+  }, [root, id, global, attempt])
   if (document)
     return (
-      <WorkflowEditorForm root={root} document={document} onBack={onBack} />
+      <WorkflowEditorForm root={root} global={global} document={document} onBack={onBack} />
     )
   return (
     <div className="flex flex-col items-start gap-4">
       <Button variant="ghost" onClick={onBack}>
-        <ArrowLeftIcon /> Workflows
+        <ArrowLeftIcon /> {global ? "Global workflows" : "Workflows"}
       </Button>
       {error ? (
         <div role="alert" className="space-y-3">
@@ -113,10 +120,12 @@ export function WorkflowEditor({
 
 function WorkflowEditorForm({
   root,
+  global,
   document,
   onBack,
 }: {
-  root: string
+  root: string | null
+  global: boolean
   document: WorkflowDocument
   onBack: () => void
 }) {
@@ -139,14 +148,16 @@ function WorkflowEditorForm({
   // Instructions editor buffer for the selected step; replaces the flow while open.
   const [instructions, setInstructions] = useState<string | null>(null)
   const [nameDrafts, setNameDrafts] = useState<Record<string, { text: string; error: string }>>({})
+  // Pickers in a global workflow may only offer global items.
+  const pickerRoot = global ? null : root
   const schema = workflowSettingsSchema(saved.name)
   const form = useWorkflowForm(saved, async (value) => {
     setSaveError(undefined)
     try {
-      const result = await saveWorkflow(root, saved.id, {
-        ...value,
-        steps: withDerivedOutcomes(value.steps),
-      })
+      const body = { ...value, steps: withDerivedOutcomes(value.steps) }
+      const result = global
+        ? await saveGlobalWorkflow(root, saved.id, body)
+        : await saveWorkflow(root!, saved.id, body)
       setSaved(result)
       void router.invalidate()
       return result
@@ -226,10 +237,8 @@ function WorkflowEditorForm({
   }
   useEffect(() => {
     let active = true
-    validateWorkflow(root, saved.id, {
-      ...draft,
-      steps: withDerivedOutcomes(draft.steps),
-    }).then(
+    const body = { ...draft, steps: withDerivedOutcomes(draft.steps) }
+    ;(global ? validateGlobalWorkflow(saved.id, body) : validateWorkflow(root!, saved.id, body)).then(
       (issues) => {
         if (active) setValidation({ value: draft, id: saved.id, issues })
       },
@@ -246,7 +255,7 @@ function WorkflowEditorForm({
     return () => {
       active = false
     }
-  }, [root, saved.id, draft, validationAttempt])
+  }, [root, global, saved.id, draft, validationAttempt])
   const current =
     validation?.value === draft && validation.id === saved.id
       ? validation
@@ -334,14 +343,19 @@ function WorkflowEditorForm({
           onClick={() => void back()}
           disabled={visualSaving}
         >
-          <ArrowLeftIcon /> Workflows
+          <ArrowLeftIcon /> {global ? "Global workflows" : "Workflows"}
         </Button>
         <div className="h-6 border-l" />
         <div className="flex min-w-0 items-baseline gap-2">
           <h1 className="truncate text-lg font-semibold">{saved.name}</h1>
           <span className="truncate font-mono text-xs text-muted-foreground">
-            {saved.id}.yaml
+            {global ? `global/${saved.id}.yaml` : `${saved.id}.yaml`}
           </span>
+          {global && (
+            <span className="shrink-0 rounded-sm bg-primary-muted px-1.5 py-0.5 text-xs font-medium text-primary">
+              Global
+            </span>
+          )}
         </div>
         {dirty && (
           <span className="flex shrink-0 items-center gap-1.5 rounded-sm bg-warning-muted px-2 py-0.5 text-xs text-warning">
@@ -523,7 +537,7 @@ function WorkflowEditorForm({
             ) : (
               <WorkerPanel
                 key={selection}
-                root={root}
+                root={pickerRoot}
                 form={form}
                 index={selected}
                 worker={selectedWorker}
@@ -538,8 +552,8 @@ function WorkflowEditorForm({
           ) : step && selected !== null && step.kind === "workflow" ? (
             <WorkflowCallPanel
               key={selection}
-              root={root}
-              current={saved.id}
+              root={pickerRoot}
+              current={global ? globalRef(saved.id) : saved.id}
               form={form}
               index={selected}
               showErrors={validationAttempt > 0}
@@ -552,7 +566,7 @@ function WorkflowEditorForm({
           ) : step && selected !== null ? (
             <StepPanel
               key={selection}
-              root={root}
+              root={pickerRoot}
               form={form}
               index={selected}
               showErrors={validationAttempt > 0}

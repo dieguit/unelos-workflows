@@ -32,7 +32,7 @@ import {
   listTasks,
   type StepTask,
 } from "@/lib/projects"
-import type { WorkflowForm } from "../../-hooks/use-workflow-form"
+import type { WorkflowForm } from "@/hooks/use-workflow-form"
 import { humanize, taskRef } from "@/lib/step-edit"
 import { Row } from "@/components/step-panel/panel-ui"
 
@@ -54,12 +54,13 @@ export function TaskSourceField({
   path,
   task,
 }: {
-  root: string
+  /** null = global workflow: no project tasks to share. */
+  root: string | null
   form: WorkflowForm
   path: `steps[${number}].task` | `steps[${number}].workers[${number}].task`
   task: StepTask
 }) {
-  const fetchShared = useCallback(() => listTasks(root), [root])
+  const fetchShared = useCallback(() => (root === null ? Promise.resolve([]) : listTasks(root)), [root])
   const lists = {
     shared: useLazy(fetchShared),
     global: useLazy(listGlobalTasks),
@@ -70,6 +71,7 @@ export function TaskSourceField({
   const [error, setError] = useState<string>()
   const ref = task.source === "named" && task.id ? taskRef(task.id) : null
   const current: Kind = ref ? (ref.global ? "global" : "shared") : "inline"
+  const visibleKinds = root === null ? kinds.filter((k) => k.value !== "shared") : kinds
   const active = picking ?? current
   const list = active === "inline" ? null : lists[active]
   // The picker trigger only shows the stored task while its kind is the active one.
@@ -96,7 +98,7 @@ export function TaskSourceField({
       const doc =
         kind === "global"
           ? await getGlobalTask(name)
-          : await getTask(root, name)
+          : await getTask(root!, name)
       form.setFieldValue(path, {
         source: "named",
         id: kind === "global" ? `global/${doc.id}` : doc.id,
@@ -137,9 +139,9 @@ export function TaskSourceField({
         <div
           role="group"
           aria-labelledby="step-task-label"
-          className="grid h-8 grid-cols-3 gap-0.5 rounded-md bg-muted p-0.5"
+          className={cn("grid h-8 gap-0.5 rounded-md bg-muted p-0.5", visibleKinds.length === 3 ? "grid-cols-3" : "grid-cols-2")}
         >
-          {kinds.map(({ value, label, icon: Icon }) => {
+          {visibleKinds.map(({ value, label, icon: Icon }) => {
             const on = active === value
             return (
               <button
@@ -185,7 +187,7 @@ export function TaskSourceField({
                   <span className="flex min-w-0 flex-1 flex-col text-left">
                     <span className="truncate">{humanize(chosen)}</span>
                     <span className="truncate font-mono text-xs text-muted-foreground">
-                      {active === "global" ? "Global task" : `tasks/${chosen}`}
+                      {active === "global" ? `global/${chosen}` : `tasks/${chosen}`}
                     </span>
                   </span>
                 ) : (
@@ -228,7 +230,7 @@ export function TaskSourceField({
                                   {humanize(t.name)}
                                 </span>
                                 <span className="truncate text-xs text-muted-foreground">
-                                  {t.problem ?? t.description ?? t.name}
+                                  {t.problem ?? t.description ?? (active === "global" ? `global/${t.name}` : t.name)}
                                 </span>
                               </span>
                             </CommandItem>

@@ -24,10 +24,10 @@ const workflows: WorkflowSummary[] =
   mode === "empty"
     ? []
     : [
-        { calls: [], name: "Implement feature", file: "implement-feature.yaml", description: "Plan, approve, implement and review a feature with a correction loop.", steps: 5, problem: null },
-        { calls: [], name: "Investigate bug", file: "investigate-bug.yaml", description: "Reproduce the issue, locate the root cause and propose a fix with evidence.", steps: 4, problem: null },
-        { calls: [], name: "Review change", file: "review-change.yaml", description: "Independent review of a diff with a findings report and human sign-off.", steps: 3, problem: "nodes.review.agent: Agent reference missing" },
-        { calls: [], name: "Refactor module", file: "refactor-module.yaml", description: "Map affected code, refactor in parallel slices and verify behavior is unchanged.", steps: 6, problem: null },
+        { global: false, calls: [], name: "Implement feature", file: "implement-feature.yaml", description: "Plan, approve, implement and review a feature with a correction loop.", steps: 5, problem: null },
+        { global: false, calls: [], name: "Investigate bug", file: "investigate-bug.yaml", description: "Reproduce the issue, locate the root cause and propose a fix with evidence.", steps: 4, problem: null },
+        { global: false, calls: [], name: "Review change", file: "review-change.yaml", description: "Independent review of a diff with a findings report and human sign-off.", steps: 3, problem: "nodes.review.agent: Agent reference missing" },
+        { global: false, calls: [], name: "Refactor module", file: "refactor-module.yaml", description: "Map affected code, refactor in parallel slices and verify behavior is unchanged.", steps: 6, problem: null },
       ]
 
 const agents: AgentSummary[] = [
@@ -125,6 +125,54 @@ const agentDocuments: Record<string, AgentDocument> = Object.fromEntries(
     skills: [...a.skills], mcps: [...a.mcps], tools: a.name === "engineer" ? ["read-file", "run-command"] : [], model: a.model, effort: null,
   }])
 )
+
+const globalAgents: AgentSummary[] = mode === "empty" ? [] : [
+  { name: "architect", model: "smart", skills: ["global/tdd"], mcps: [], problem: null },
+  { name: "writer", model: null, skills: [], mcps: [], problem: null },
+]
+const globalAgentDocuments: Record<string, AgentDocument> = Object.fromEntries(globalAgents.map((a) => [a.name, {
+  id: a.name, instructions: a.name === "architect" ? "Design the approach before any code is written." : "Write clear, short documentation.",
+  skills: [...a.skills], mcps: [...a.mcps], tools: [], model: a.model, effort: null,
+}]))
+
+const globalSkills: SkillSummary[] = [{ name: "tdd", description: "Write the failing test first.", problem: null }]
+
+const globalWorkflowStep = (id: string, kind: WorkflowStep["kind"], next: string | null, agent: string | null = null): WorkflowStep => ({
+  id, originalId: id, label: id, kind, title: kind === "task" ? id : null, agent, execution: kind === "task" ? "main" : null,
+  task: kind === "task" ? { source: "inline", id: null, description: null, instructions: `Perform ${id}`, skills: [], outcomes: [] } : null,
+  routes: next ? [{ outcome: null, target: next }] : [], workers: [], inputs: [], outputs: [],
+})
+const globalWorkflows: { summary: WorkflowSummary; document: WorkflowDocument }[] = mode === "empty" ? [] : [{
+  summary: { global: true, calls: [], name: "global/workflow-design", file: "global/workflow-design.yaml", description: "Design a change with a global architect before any project writes code.", steps: 3, problem: null },
+  document: {
+    id: "workflow-design", name: "workflow-design", description: "Design a change with a global architect before any project writes code.", start: "design", inputs: [],
+    steps: [globalWorkflowStep("design", "task", "approve", "global/architect"), globalWorkflowStep("approve", "human-gate", "done"), globalWorkflowStep("done", "end", null)],
+    issues: [],
+  },
+}]
+function globalWorkflowFor(id: string) {
+  const workflow = globalWorkflows.find((w) => w.document.id === id)
+  if (!workflow) throw `Global workflow ${id} could not be loaded`
+  return workflow
+}
+function globalWorkflowIssues(id: string, draft: WorkflowDraft): WorkflowIssue[] {
+  globalWorkflowFor(id)
+  if (draft.name !== id) {
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(draft.name)) return [{ message: "Name must contain 1–128 ASCII letters, digits, underscores or hyphens", step: null }]
+    if (globalWorkflows.some((w) => w.document.id === draft.name)) return [{ message: `Workflow ${draft.name} already exists`, step: null }]
+  }
+  if (!draft.steps.some((step) => step.id === draft.start)) return [{ message: `start: unknown target ${JSON.stringify(draft.start)}`, step: null }]
+  const globalOnly = (step: WorkflowStep) => [
+    ...(step.kind === "task" ? [{ agent: step.agent, task: step.task }] : step.workers),
+  ].flatMap(({ agent, task }) => [
+    ...(!agent?.trim() ? [{ message: "Pick an agent", step: step.id }] : !agent.startsWith("global/") ? [{ message: `Global workflows can only use global agents (${agent})`, step: step.id }] : []),
+    ...(task?.source === "named" && task.id && !task.id.startsWith("global/") ? [{ message: `Global workflows can only use global tasks (${task.id})`, step: step.id }] : []),
+  ])
+  return [
+    ...draft.steps.filter((s) => s.kind === "task" || s.kind === "parallel").flatMap(globalOnly),
+    ...draft.steps.filter((s) => s.kind === "workflow" && s.call?.workflow && !s.call.workflow.startsWith("global/")).map((s) => ({ message: `Global workflows can only call global workflows (${s.call!.workflow})`, step: s.id })),
+  ]
+}
 
 const skills: SkillSummary[] = [
   { name: "broken", description: null, problem: "frontmatter: missing closing ---" },
@@ -484,7 +532,97 @@ export function installDevIpcMock() {
       case "list_workflows": {
         const root = (args as { root: string }).root
         if (mode === "switch") await new Promise((resolve) => setTimeout(resolve, 900))
-        return structuredClone(workflowsFor(root).map((w) => w.summary))
+        const own = workflowsFor(root).map((w) => w.summary)
+        return structuredClone(mode === "error" ? own : [...own, ...globalWorkflows.map((w) => w.summary)])
+      }
+      case "list_global_workflows":
+        return structuredClone(globalWorkflows.map((w) => w.summary))
+      case "get_global_workflow":
+        return structuredClone(globalWorkflowFor((args as { id: string }).id).document)
+      case "create_global_workflow": {
+        let id = "new-workflow"
+        for (let n = 2; globalWorkflows.some((w) => w.document.id === id); n++) id = `new-workflow-${n}`
+        globalWorkflows.push({
+          summary: { global: true, calls: [], name: `global/${id}`, file: `global/${id}.yaml`, description: null, steps: 2, problem: null },
+          document: { id, name: id, description: null, start: "new-task", inputs: [], steps: [globalWorkflowStep("new-task", "task", "end", ""), globalWorkflowStep("end", "end", null)], issues: [{ message: "Pick an agent", step: "new-task" }] },
+        })
+        return id
+      }
+      case "validate_global_workflow": {
+        const { id, draft } = args as { id: string; draft: WorkflowDraft }
+        return globalWorkflowIssues(id, draft)
+      }
+      case "save_global_workflow": {
+        const { id, draft } = args as { id: string; draft: WorkflowDraft }
+        await new Promise((resolve) => setTimeout(resolve, 900))
+        if (mode === "save-error") throw "Config folder is read-only (mock save failure)"
+        const issues = globalWorkflowIssues(id, draft)
+        if (issues.length) throw issues.map((issue) => issue.message).join("\n")
+        const workflow = globalWorkflowFor(id)
+        Object.assign(workflow.document, structuredClone(draft), { id: draft.name, steps: structuredClone(draft.steps).map((step) => ({ ...step, originalId: step.id })), issues: [] })
+        Object.assign(workflow.summary, { name: `global/${draft.name}`, file: `global/${draft.name}.yaml`, description: draft.description, steps: draft.steps.length, problem: null })
+        return structuredClone(workflow.document)
+      }
+      case "duplicate_global_workflow": {
+        const { id, newId } = args as { id: string; newId: string }
+        const workflow = globalWorkflowFor(id)
+        if (!/^[A-Za-z0-9_-]{1,128}$/.test(newId)) throw "Name must contain 1–128 ASCII letters, digits, underscores or hyphens"
+        if (globalWorkflows.some((w) => w.document.id === newId)) throw "Already exists"
+        globalWorkflows.push({ summary: { ...structuredClone(workflow.summary), name: `global/${newId}`, file: `global/${newId}.yaml` }, document: { ...structuredClone(workflow.document), name: newId, id: newId } })
+        return null
+      }
+      case "remove_global_workflow": {
+        const { id } = args as { id: string }
+        const index = globalWorkflows.findIndex((w) => w.document.id === id)
+        if (index === -1) throw `Global workflow ${id} not found`
+        globalWorkflows.splice(index, 1)
+        return null
+      }
+      case "list_global_agents":
+        return structuredClone(globalAgents)
+      case "get_global_agent": {
+        const { id } = args as { id: string }
+        if (!Object.hasOwn(globalAgentDocuments, id)) throw `Global agent ${id} could not be loaded`
+        return structuredClone(globalAgentDocuments[id])
+      }
+      case "save_global_agent": {
+        const { originalId, agent } = args as { originalId: string | null; agent: AgentDocument }
+        if (mode === "save-error") throw "Config folder is read-only (mock save failure)"
+        if (!/^[A-Za-z0-9_-]{1,128}$/.test(agent.id)) throw "Name must contain 1–128 ASCII letters, digits, underscores or hyphens"
+        if (originalId === null && globalAgents.some((a) => a.name === agent.id)) throw `Agent ${agent.id} already exists`
+        globalAgentDocuments[agent.id] = structuredClone(agent)
+        const summary = { name: agent.id, model: agent.model, skills: agent.skills, mcps: agent.mcps, problem: null }
+        const index = globalAgents.findIndex((a) => a.name === originalId)
+        if (index === -1) globalAgents.push(summary)
+        else globalAgents[index] = summary
+        return structuredClone(agent)
+      }
+      case "duplicate_global_agent": {
+        const { id, newId } = args as { id: string; newId: string }
+        const agent = globalAgents.find((a) => a.name === id)
+        if (!agent) throw `Global agent ${id} not found`
+        if (!/^[A-Za-z0-9_-]{1,128}$/.test(newId)) throw "Name must contain 1–128 ASCII letters, digits, underscores or hyphens"
+        if (globalAgents.some((a) => a.name === newId)) throw "Already exists"
+        globalAgents.push({ ...structuredClone(agent), name: newId })
+        globalAgentDocuments[newId] = { ...structuredClone(globalAgentDocuments[id]), id: newId }
+        return null
+      }
+      case "remove_global_agent": {
+        const { id } = args as { id: string }
+        const index = globalAgents.findIndex((a) => a.name === id)
+        if (index === -1) throw `Global agent ${id} not found`
+        if (globalWorkflows.some((w) => w.document.steps.some((s) => s.agent === `global/${id}`))) throw "Cannot remove Agent: referenced by a global workflow (mock fixture)"
+        globalAgents.splice(index, 1)
+        delete globalAgentDocuments[id]
+        return null
+      }
+      case "list_global_skills":
+        return structuredClone(globalSkills)
+      case "get_global_skill": {
+        const { id } = args as { id: string }
+        const skill = globalSkills.find((s) => s.name === id)
+        if (!skill) throw `Skill ${id} not found`
+        return { name: id, description: skill.description, body: `# ${id}\n` }
       }
       case "get_workflow": {
         const { root, id } = args as { root: string; id: string }
@@ -503,7 +641,7 @@ export function installDevIpcMock() {
           ],
           issues: [{ message: "Pick an agent", step: "new-task" }],
         }
-        workflows.push({ summary: { calls: [], name: id, file: `${id}.yaml`, description: null, steps: 2, problem: null }, document })
+        workflows.push({ summary: { global: false, calls: [], name: id, file: `${id}.yaml`, description: null, steps: 2, problem: null }, document })
         return id
       }
       case "validate_workflow": {
@@ -686,7 +824,7 @@ export function installDevIpcMock() {
         const key = `workflow:${plan.workflow.id}`
         const name = renames[key] ?? plan.conflicts.find((c) => c.key === key)?.suggested ?? plan.workflow.id
         workflowsFor(root).push({
-          summary: { calls: [], name, file: `${name}.yaml`, description: plan.workflow.description ?? null, steps: 2, problem: null },
+          summary: { global: false, calls: [], name, file: `${name}.yaml`, description: plan.workflow.description ?? null, steps: 2, problem: null },
           document: {
             id: name, name, description: plan.workflow.description ?? null, start: "end", inputs: [],
             steps: [{ id: "end", originalId: "end", label: "end", kind: "end", title: null, agent: null, execution: null, task: null, routes: [], workers: [], inputs: [], outputs: [] }],

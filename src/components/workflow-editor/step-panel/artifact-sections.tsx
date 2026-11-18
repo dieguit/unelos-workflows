@@ -13,7 +13,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import type { WorkflowStep } from "@/lib/projects"
-import type { WorkflowForm } from "../../-hooks/use-workflow-form"
+import type { WorkflowForm } from "@/hooks/use-workflow-form"
 import { humanize, producers } from "@/lib/step-edit"
 import { ErrorText, InlineAdd, inlineAddClass, RemoveButton, rowFrame, Section } from "@/components/step-panel/panel-ui"
 

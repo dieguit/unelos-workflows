@@ -14,10 +14,13 @@ import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { PickerStatus } from "@/components/picker-status"
 import { useLazy } from "@/hooks/use-lazy"
-import { listAgents, type WorkflowStep } from "@/lib/projects"
-import type { WorkflowForm } from "../../-hooks/use-workflow-form"
+import type { WorkflowStep } from "@/lib/projects"
+import { isGlobalRef, listAgentChoices, stripGlobal } from "@/lib/global-ref"
+import type { WorkflowForm } from "@/hooks/use-workflow-form"
 import { humanize, renameStep, slugify, stepNameError } from "@/lib/step-edit"
 import { Row, shown } from "@/components/step-panel/panel-ui"
+
+const agentLabel = (name: string) => (isGlobalRef(name) ? name : `agents/${name}`)
 
 type Props = { form: WorkflowForm; index: number; showErrors: boolean }
 
@@ -78,8 +81,9 @@ export function NameField({ form, index, showErrors, step, nameDraft, onNameDraf
   )
 }
 
-export function useAgents(root: string) {
-  const fetchAgents = useCallback(() => listAgents(root), [root])
+/** `root` null = global workflow: only global agents. */
+export function useAgents(root: string | null) {
+  const fetchAgents = useCallback(() => listAgentChoices(root), [root])
   return useLazy(fetchAgents)
 }
 
@@ -110,8 +114,8 @@ export function AgentField({ agents, form, index, worker, showErrors }: Props & 
                 <BotIcon aria-hidden="true" className="text-muted-foreground" />
                 {value ? (
                   <span className="flex min-w-0 flex-1 flex-col text-left">
-                    <span className="truncate">{humanize(value)}</span>
-                    <span className="truncate font-mono text-xs text-muted-foreground">agents/{value}</span>
+                    <span className="truncate">{humanize(stripGlobal(value))}</span>
+                    <span className="truncate font-mono text-xs text-muted-foreground">{agentLabel(value)}</span>
                   </span>
                 ) : (
                   <span className="flex-1 text-left text-muted-foreground">Select agent</span>
@@ -124,7 +128,7 @@ export function AgentField({ agents, form, index, worker, showErrors }: Props & 
                   <CommandList>
                     {agents.data ? (
                       <>
-                        <CommandEmpty>{agents.data.length ? "No agents match." : "No project agents."}</CommandEmpty>
+                        <CommandEmpty>{agents.data.length ? "No agents match." : "No agents available."}</CommandEmpty>
                         <CommandGroup>
                           {agents.data.map((agent) => (
                             <CommandItem
@@ -139,9 +143,9 @@ export function AgentField({ agents, form, index, worker, showErrors }: Props & 
                             >
                               <BotIcon aria-hidden="true" className="text-muted-foreground" />
                               <span className="flex min-w-0 flex-1 flex-col">
-                                <span className="truncate">{humanize(agent.name)}</span>
+                                <span className="truncate">{humanize(stripGlobal(agent.name))}</span>
                                 <span className="truncate font-mono text-xs text-muted-foreground">
-                                  agents/{agent.name}
+                                  {agentLabel(agent.name)}
                                 </span>
                               </span>
                             </CommandItem>

@@ -13,20 +13,21 @@ import {
   FieldLabel,
   FieldTitle,
 } from "@/components/ui/field"
-import { listAllSkills } from "@/hooks/skill-fetchers"
+import { listSkillChoices } from "@/hooks/skill-fetchers"
 import { agentModelOptions, listGlobalMcps, listMcps, type AgentDocument, type Reference } from "@/lib/projects"
 import { UsedByRow } from "@/components/used-by"
-import type { AgentForm } from "../-hooks/use-agent-form"
+import type { AgentForm } from "@/hooks/use-agent-form"
 import { useLazy } from "@/hooks/use-lazy"
 import { AgentModelPicker } from "./model-picker"
 import { SkillPicker } from "@/components/skill-picker"
 import { SkillLink } from "@/components/skill-link"
 import { EffortPicker } from "@/components/effort-picker"
 import { effortChoices } from "@/lib/effort-options"
-import { aliasEfforts, directEfforts, inheritedLabel } from "../-lib/agent-effort"
+import { aliasEfforts, directEfforts, inheritedLabel } from "@/lib/agent-effort"
 
 export function AgentInspector({
   root,
+  global = false,
   usedBy,
   originalId,
   form,
@@ -43,7 +44,9 @@ export function AgentInspector({
   footer,
 }: {
   footer?: ReactNode
-  root: string
+  /** Project whose skills and MCPs are offered; null on the global page, which only offers global ones. */
+  root: string | null
+  global?: boolean
   usedBy: Reference[] | null
   originalId: string | null
   form: AgentForm
@@ -59,11 +62,11 @@ export function AgentInspector({
   onRetry: () => void
 }) {
   const visualSaving = useDelayedFlag(saving)
-  const fetchSkills = useCallback(() => listAllSkills(root), [root])
+  const fetchSkills = useCallback(() => listSkillChoices(root), [root])
   const skills = useLazy(fetchSkills)
   const fetchMcps = useCallback(async () => {
-    const [project, global] = await Promise.all([listMcps(root), listGlobalMcps()])
-    return [...project, ...global.map((m) => ({ ...m, name: `global/${m.name}` }))]
+    const [project, shared] = await Promise.all([root === null ? [] : listMcps(root), listGlobalMcps()])
+    return [...project, ...shared.map((m) => ({ ...m, name: `global/${m.name}` }))]
   }, [root])
   const mcps = useLazy(fetchMcps)
   const options = useLazy(agentModelOptions)
@@ -86,7 +89,7 @@ export function AgentInspector({
             {originalId ?? "New Agent"}
           </h2>
           <p className="truncate font-mono text-xs text-muted-foreground">
-            {originalId ? `agents/${originalId}` : "Project Agent"}
+            {originalId ? (global ? `global/${originalId}` : `agents/${originalId}`) : global ? "Global Agent" : "Project Agent"}
           </p>
           {dirty ? (
             <p role="status" className="mt-1 text-xs text-warning">

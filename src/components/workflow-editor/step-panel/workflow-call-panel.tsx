@@ -5,9 +5,10 @@ import { Button } from "@/components/ui/button"
 import { StepIconBox } from "@/components/flow/step-card"
 import { PanelBody, PanelHeader, PanelTabs, RemoveStep } from "@/components/step-panel/panel-chrome"
 import { InlineAdd, RemoveButton, Section } from "@/components/step-panel/panel-ui"
-import { getWorkflow, listWorkflows, type StepCall, type WorkflowDocument, type WorkflowStep, type WorkflowSummary } from "@/lib/projects"
+import { getGlobalWorkflow, getWorkflow, type StepCall, type WorkflowDocument, type WorkflowStep, type WorkflowSummary } from "@/lib/projects"
 import { callableWorkflows, childContract, humanize, producers } from "@/lib/step-edit"
-import type { WorkflowForm } from "../../-hooks/use-workflow-form"
+import { isGlobalRef, listWorkflowChoices, stripGlobal } from "@/lib/global-ref"
+import type { WorkflowForm } from "@/hooks/use-workflow-form"
 import { NameField } from "./basic-fields"
 import { RoutesSection } from "./route-sections"
 
@@ -18,7 +19,8 @@ export const withCall = (step: WorkflowStep, call: StepCall): WorkflowStep => ({
 export function WorkflowCallPanel({
   root, current, form, index, showErrors, disabled, nameDraft, onNameDraft, onClose, onRemove,
 }: {
-  root: string
+  /** null = global workflow: only global children. */
+  root: string | null
   current: string
   form: WorkflowForm
   index: number
@@ -38,7 +40,7 @@ export function WorkflowCallPanel({
   const [attempt, setAttempt] = useState(0)
   useEffect(() => {
     let active = true
-    listWorkflows(root).then(
+    listWorkflowChoices(root).then(
       (items) => { if (active) setSummaries(items) },
       (err) => { if (active) setError(String(err)) },
     )
@@ -47,7 +49,7 @@ export function WorkflowCallPanel({
   useEffect(() => {
     if (!workflow) return
     let active = true
-    getWorkflow(root, workflow).then((doc) => {
+    ;(root === null || isGlobalRef(workflow) ? getGlobalWorkflow(stripGlobal(workflow)) : getWorkflow(root!, workflow)).then((doc) => {
       if (!active) return
       setChild(doc)
       const target = form.state.values.steps[index]
@@ -60,7 +62,7 @@ export function WorkflowCallPanel({
     }, (err) => { if (active) setError(String(err)) })
     return () => { active = false }
   }, [root, workflow, form, index, attempt])
-  const contract = child?.id === workflow ? childContract(child) : undefined
+  const contract = child && child.id === stripGlobal(workflow) ? childContract(child) : undefined
   const call = step.call ?? { workflow, inputs: {}, outputs: {} }
   const update = (next: StepCall) => form.setFieldValue(`steps[${index}]`, withCall(form.state.values.steps[index], next))
   const options = [...new Set([...draft.inputs, ...producers(draft.steps, index).map((p) => p.artifact)])]

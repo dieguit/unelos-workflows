@@ -1,6 +1,6 @@
 import { useForm } from "@tanstack/react-form"
 import type { AgentDocument } from "@/lib/projects"
-import { agentSchema } from "../-lib/agent-schema"
+import { agentSchema } from "@/lib/agent-schema"
 
 export const emptyAgent: AgentDocument = {
   id: "",

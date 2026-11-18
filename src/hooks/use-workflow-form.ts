@@ -1,6 +1,6 @@
 import { useForm } from "@tanstack/react-form"
 import type { WorkflowDraft } from "@/lib/projects"
-import { workflowSettingsSchema } from "../-lib/workflow-settings-schema"
+import { workflowSettingsSchema } from "@/lib/workflow-settings-schema"
 
 export const toDraft = (doc: WorkflowDraft): WorkflowDraft => ({
   name: doc.name,

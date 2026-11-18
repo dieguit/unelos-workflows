@@ -7,22 +7,25 @@ import { ListSearch } from "@/components/list-search"
 import { PageHeader } from "@/components/page-header"
 import { ListActions } from "@/components/list-actions"
 import {
+  duplicateGlobalWorkflow,
   duplicateWorkflow,
   createWorkflow,
   listWorkflows,
+  removeGlobalWorkflow,
   removeWorkflow,
   requireProject,
 } from "@/lib/projects"
-import { filterWorkflows } from "./-lib/filter"
-import { workflowSettingsSchema } from "./-lib/workflow-settings-schema"
+import { isGlobalRef, stripGlobal } from "@/lib/global-ref"
+import { filterWorkflows } from "@/lib/workflow-filter"
+import { workflowSettingsSchema } from "@/lib/workflow-settings-schema"
 import {
   ImportWorkflowButton,
   NewWorkflowButton,
   WorkflowsTable,
-} from "./-components/workflows-table"
+} from "@/components/workflows-table"
 import { ImportDialog } from "./-components/import-dialog"
-import { NoResults, NoWorkflows } from "./-components/workflows-empty"
-import { WorkflowEditor } from "./-components/workflow-editor"
+import { NoResults, NoWorkflows } from "@/components/workflows-empty"
+import { WorkflowEditor } from "@/components/workflow-editor/workflow-editor"
 
 export const Route = createFileRoute("/workflows/")({
   beforeLoad: requireProject,
@@ -38,7 +41,7 @@ function Header({ onCreate, creating, onImport }: { onCreate?: () => void; creat
   return (
     <PageHeader
       title="Workflows"
-      description="Reusable process definitions for this project. Open one to edit its settings."
+      description="Reusable process definitions for this project, plus global workflows from ~/.config/unelos. Open one to edit its settings."
       action={
         <div className="flex gap-2">
           <ImportWorkflowButton onClick={onImport} />
@@ -54,7 +57,7 @@ function WorkflowsHome() {
   const { project } = Route.useRouteContext()
   const workflows = data.root === project.path ? data.workflows : []
   const [query, setQuery] = useState("")
-  const [selected, setSelected] = useState<{ root: string; id: string }>()
+  const [selected, setSelected] = useState<{ root: string; id: string; global: boolean }>()
   const search = useRef<HTMLInputElement>(null)
   const router = useRouter()
   const [creating, setCreating] = useState(false)
@@ -63,7 +66,7 @@ function WorkflowsHome() {
     setCreating(true)
     try {
       const id = await createWorkflow(data.root)
-      setSelected({ root: data.root, id })
+      setSelected({ root: data.root, id, global: false })
       void router.invalidate()
     } catch (error) {
       toast.error(`Could not create workflow: ${String(error)}`)
@@ -103,7 +106,7 @@ function WorkflowsHome() {
             closeButton: true,
             duration: 8000,
             classNames: { actionButton: "!bg-primary-muted !text-primary" },
-            action: { label: "Open", onClick: () => setSelected({ root: data.root, id: workflow }) },
+            action: { label: "Open", onClick: () => setSelected({ root: data.root, id: workflow, global: false }) },
           }
         )
       }}
@@ -124,6 +127,7 @@ function WorkflowsHome() {
         key={`${selected.root}:${selected.id}`}
         root={data.root}
         id={selected.id}
+        global={selected.global}
         onBack={() => setSelected(undefined)}
       />
     )
@@ -154,22 +158,28 @@ function WorkflowsHome() {
         <WorkflowsTable
           workflows={shown}
           highlight={highlight}
-          onOpen={(file) =>
-            setSelected({ root: data.root, id: file.replace(/\.ya?ml$/i, "") })
-          }
+          markGlobal
+          onOpen={(file) => {
+            const id = file.replace(/\.ya?ml$/i, "")
+            const global = isGlobalRef(id) || !!workflows.find((w) => w.file === file)?.global
+            setSelected({ root: data.root, id: stripGlobal(id), global })
+          }}
           actions={(workflow) => {
-            const id = workflow.file.replace(/\.ya?ml$/i, "")
+            const id = stripGlobal(workflow.file.replace(/\.ya?ml$/i, ""))
+            const global = workflow.global
             return (
               <ListActions
                 kind="Workflow"
-                name={workflow.name}
+                name={stripGlobal(workflow.name)}
                 nameSchema={workflowSettingsSchema("").shape.name}
                 duplicate={async (newId) => {
-                  await duplicateWorkflow(data.root, id, newId)
+                  if (global) await duplicateGlobalWorkflow(id, newId)
+                  else await duplicateWorkflow(data.root, id, newId)
                   void router.invalidate()
                 }}
                 remove={async () => {
-                  await removeWorkflow(data.root, id)
+                  if (global) await removeGlobalWorkflow(data.root, id)
+                  else await removeWorkflow(data.root, id)
                   void router.invalidate()
                 }}
               />
