@@ -1,0 +1,213 @@
+name: backend-task
+description: Spec, plan, task-by-task implementation with review on a feature branch (no worktree), then Rust checks, manual QA and a PR watched until CI is green.
+start: brainstorm
+nodes:
+  brainstorm:
+    taskDefinition:
+      skills: [brainstorming]
+      outcomes: [check, ready]
+      instructions: |
+        Ask what needs to be done if the request is not clear, then follow the
+        brainstorming skill with the user until the design is agreed and write
+        the bound spec.md. Choose check for a project's first full draft, ready
+        for a small change. When transition feedback carries builder-questions.md,
+        sort the questions as the skill's Builder Check says, update spec.md, and
+        choose ready. On re-entry after gate rejection, revise spec.md in place
+        from the feedback; choose check only if the revision is substantial.
+        Conversation approval is not gate approval.
+    agent: sp-controller
+    execution: main
+    outputs: [spec.md]
+    next:
+      check: spec-check
+      ready: approve-spec
+  spec-check:
+    taskDefinition:
+      instructions: |
+        Read spec.md as the builder who must plan from it alone, then write the
+        bound builder-questions.md.
+    agent: sp-builder-check
+    execution: subagent
+    inputs: [spec.md]
+    outputs: [builder-questions.md]
+    next: brainstorm
+  approve-spec:
+    type: human-gate
+    inputs: [spec.md]
+    next:
+      approved: write-plan
+      rejected: brainstorm
+  write-plan:
+    taskDefinition:
+      skills: [writing-plans]
+      instructions: |
+        Read spec.md, project instructions and relevant code. Follow the
+        writing-plans skill to write the bound plan.md and self-review it against
+        the spec. On re-entry after gate rejection, revise plan.md in place from
+        the feedback. Do not implement.
+    agent: sp-controller
+    execution: main
+    inputs: [spec.md]
+    outputs: [plan.md]
+    next: approve-plan
+  approve-plan:
+    type: human-gate
+    inputs: [spec.md, plan.md]
+    next:
+      approved: setup-branch
+      rejected: write-plan
+  # Keeps the worktree.md name because the sp-* agents and skills read it; it records the current checkout.
+  setup-branch:
+    taskDefinition:
+      skills: [sdd-controller]
+      instructions: |
+        Do not create a worktree. In the current checkout, switch to or create a
+        feature branch for this change (never work on main), run the baseline
+        tests, then run the preflight scan of plan.md as the sdd-controller skill
+        describes. Write the bound worktree.md: absolute repository path as the
+        worktree path, branch, `Base branch: <name>`, merge-base SHA, baseline
+        command and result, the preflight table and every Ruling.
+    agent: sp-controller
+    execution: main
+    inputs: [spec.md, plan.md]
+    outputs: [worktree.md]
+    next: implement-task
+  implement-task:
+    taskDefinition:
+      instructions: |
+        Implement one plan task or one fix round in the worktree from worktree.md.
+        Your assignment is in transition feedback progress.md (Current task, Open
+        findings and Carry forward, whose rulings bind over the plan text); with no
+        progress.md feedback, implement Task 1 (or the batch starting at Task 1
+        listed in worktree.md). Append your
+        section to the bound implementation report.
+    agent: sp-implementer
+    execution: subagent
+    inputs: [spec.md, plan.md, worktree.md]
+    outputs: [implementation-report.md]
+    next: review-task
+  review-task:
+    taskDefinition:
+      instructions: |
+        Review the latest section of implementation-report.md: a task section gets
+        a full task review, a fix-round section gets a scoped re-review. When
+        transition feedback carries escalation-report.md, scoped-re-review its
+        latest fix-round section instead. Append your section to the bound review.
+    agent: sp-task-reviewer
+    execution: subagent
+    inputs: [spec.md, plan.md, worktree.md, implementation-report.md]
+    outputs: [review.md]
+    next: advance
+  advance:
+    taskDefinition:
+      skills: [sdd-controller]
+      outcomes: [fix, escalate, next_task, all_done]
+      instructions: |
+        Apply the sdd-controller node map for advance: update the bound
+        progress.md from the latest review section and choose exactly one outcome.
+    agent: sp-controller
+    execution: main
+    inputs: [spec.md, plan.md, worktree.md, implementation-report.md, review.md]
+    outputs: [progress.md]
+    next:
+      fix: implement-task
+      escalate: escalate-task
+      next_task: implement-task
+      all_done: final-review
+  escalate-task:
+    taskDefinition:
+      instructions: |
+        Own fix round R (4 or 5) of the Current task from transition feedback
+        progress.md. Read implementation-report.md and review.md for what was
+        tried, fix the open findings in the worktree from worktree.md, and append
+        your section to the bound escalation report.
+    agent: sp-implementer-escalation
+    execution: subagent
+    inputs: [spec.md, plan.md, worktree.md, implementation-report.md, review.md]
+    outputs: [escalation-report.md]
+    next: review-task
+  final-review:
+    taskDefinition:
+      instructions: |
+        Review the whole branch from the merge-base in worktree.md and triage the
+        deferred and parked lines in progress.md. When transition feedback carries
+        final-fix-report.md, append a scoped re-review of the fix wave instead.
+    agent: sp-final-reviewer
+    execution: subagent
+    inputs: [spec.md, plan.md, worktree.md, implementation-report.md, review.md, progress.md]
+    outputs: [final-review.md]
+    next: advance-final
+  advance-final:
+    taskDefinition:
+      skills: [sdd-controller]
+      outcomes: [final_fix, finish]
+      instructions: |
+        Apply the sdd-controller node map for advance-final: choose final_fix or
+        finish from final-review.md and write residual rulings to final-rulings.md.
+    agent: sp-controller
+    execution: main
+    inputs: [progress.md, final-review.md]
+    outputs: [final-rulings.md]
+    next:
+      final_fix: fix-final
+      finish: rust-checks
+  fix-final:
+    taskDefinition:
+      instructions: |
+        Fix every must-fix finding in final-review.md in one wave, in the worktree
+        from worktree.md. When transition feedback carries rust-checks.md or
+        manual-QA gate feedback, fix those failures instead. Write the bound report under a Final fix wave heading
+        with BASE and HEAD and test evidence.
+    agent: sp-implementer
+    execution: subagent
+    inputs: [spec.md, plan.md, worktree.md, final-review.md]
+    outputs: [final-fix-report.md]
+    next: final-review
+  rust-checks:
+    task: rust-checks
+    agent: check-runner
+    execution: subagent
+    outputs: [rust-checks.md]
+    next:
+      pass: manual-qa
+      fail: fix-final
+  manual-qa:
+    taskDefinition:
+      instructions: |
+        Write the bound manual-qa.md: at most 10 short steps the user can copy and
+        paste to check the change by hand (exact commands, with a scratch
+        project where needed, and the expected output of each). Cover what the
+        automated checks cannot: real CLI runs, harness behaviour, the app.
+    agent: sp-controller
+    execution: main
+    inputs: [spec.md, worktree.md, rust-checks.md]
+    outputs: [manual-qa.md]
+    next: manual-qa-gate
+  # Approve when the steps pass; reject with what failed to send it to a fix wave.
+  manual-qa-gate:
+    type: human-gate
+    inputs: [manual-qa.md]
+    next:
+      approved: summarize
+      rejected: fix-final
+  summarize:
+    taskDefinition:
+      instructions: |
+        Write the bound summary.md for the pull request: what changed and why,
+        main files, how it was verified (rust-checks.md, manual QA), and under
+        "Rulings I made" every Ruling: line from worktree.md, progress.md and
+        final-rulings.md with its cost if wrong.
+    agent: sp-controller
+    execution: main
+    inputs: [spec.md, worktree.md, progress.md, final-rulings.md, rust-checks.md, manual-qa.md]
+    outputs: [summary.md]
+    next: pr
+  pr:
+    type: workflow
+    workflow: pr-and-ci
+    inputs: {summary.md: summary.md}
+    next:
+      green: done
+      abandoned: done
+  done:
+    type: end
