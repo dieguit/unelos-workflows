@@ -1,0 +1,22 @@
+description: Reproduce a reported UI bug in the browser and write exact repro steps with evidence.
+skills:
+- app-dev
+outcomes:
+- reproduced
+- not-reproduced
+- blocked
+instructions: |
+  Read the bug report from your inputs or transition feedback. Reproduce it in
+  the running app following the app-dev skill.
+
+  Write the bound repro.md with:
+  - Report: the bug in one line, as reported.
+  - Steps: numbered, starting from a URL (with mock mode), precise enough for
+    someone else to replay.
+  - Expected vs actual.
+  - Evidence: screenshot paths and browser console errors.
+  - Scope: other screens sharing the component, and whether they show the bug.
+
+  Choose reproduced when the bug shows. Choose not-reproduced when you followed
+  the report and it did not show; list what you tried and what detail is
+  missing. Choose blocked when you could not run the check. Do not fix.

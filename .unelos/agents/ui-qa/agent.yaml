@@ -1,0 +1,7 @@
+instructionsFile: instructions.md
+skills:
+- app-dev
+mcps:
+- playwright
+model: balanced
+effort: low

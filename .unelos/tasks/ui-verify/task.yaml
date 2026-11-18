@@ -1,0 +1,24 @@
+description: Verify a UI change in the browser against its acceptance criteria and write a pass/fail report with evidence.
+skills:
+- app-dev
+outcomes:
+- pass
+- fail
+- blocked
+instructions: |
+  Read the bound inputs: the spec or plan for acceptance criteria, repro.md when
+  this verifies a bug fix, and design notes or Pencil frame names when given.
+  List the user-visible criteria first; if repro.md is bound, replaying its steps
+  without the bug is a criterion.
+
+  Check each criterion in the running app following the app-dev skill. When
+  Pencil frames are named and the Pencil MCP is reachable, compare layout,
+  spacing, copy and states against them. Check sibling screens that share the
+  changed component for the same behaviour.
+
+  Write the bound ui-verification.md: one row per criterion with pass/fail, URL,
+  screenshot path and a one-line note; then console errors; then anything
+  unchecked and why.
+
+  Choose pass only if every criterion passes. Choose fail if any fails. Choose
+  blocked if any criterion could not be checked. Do not fix.

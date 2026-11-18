@@ -1,0 +1,36 @@
+description: Build the current CLI and integration fresh, install them and a workflow into a sandbox project, and prove nothing stale is in use.
+outcomes:
+- ready
+- needs-restart
+- fail
+instructions: |
+  Read from your inputs or transition feedback: the sandbox project path, the
+  workflow(s) to install and their source (default: this repo's .unelos). If no
+  sandbox path is given, choose fail and say so. Never use this repository as
+  the sandbox.
+
+  1. Build: cargo build -p unelos-cli. Use ./target/debug/unelos for every
+     command below, never `unelos` from PATH.
+  2. Stale binaries: run `which -a unelos` and compare each hit and
+     ~/.config/unelos/bin/unelos (sha256sum, mtime) with the fresh build. Report
+     every copy that differs.
+  3. Integration: ./target/debug/unelos harness install opencode, then confirm
+     ~/.config/unelos/bin/unelos now matches the fresh build and the files listed
+     in ~/.config/unelos/harnesses.json have new mtimes.
+  4. Sandbox: if the sandbox is a git repo with uncommitted changes under
+     .unelos or .opencode, choose fail rather than overwrite them. Otherwise run
+     init, then install <workflow> --source <source> --opencode v2 with
+     --project <sandbox>.
+  5. Prove it: --project <sandbox> start lists the workflow, and
+     <sandbox>/.opencode/agents/unelos-*.md exist for its agents.
+  6. Running harnesses: list opencode and unelos processes (ps -eo pid,lstart,cmd)
+     started before step 3. Never kill them; they keep the old plugin and CLI
+     until restarted.
+
+  Write the bound sandbox.md: commands with exit status, binary hashes before and
+  after, installed files, and processes needing a restart with their pid and
+  working directory.
+
+  Choose ready when every step passed and no old harness process is running in
+  the sandbox. Choose needs-restart when everything installed but such a process
+  is running. Choose fail otherwise. Do not edit repository code.

@@ -1,0 +1,25 @@
+description: Run the Rust CI checks locally and review the diff for Windows/macOS pitfalls; write a pass/fail report.
+skills:
+- cross-platform-rust
+outcomes:
+- pass
+- fail
+instructions: |
+  Run, in order, from the repository root (these mirror .github/workflows/rust.yml):
+
+  1. cargo fmt --all -- --check
+  2. cargo clippy --locked -p unelos-core -p unelos-cli --all-targets -- -D warnings
+  3. cargo nextest run --locked --no-fail-fast -p unelos-core -p unelos-cli
+  4. cargo test --locked -p unelos-core --doc
+  5. cargo clippy --locked -p tauri-native --all-targets -- -D warnings
+     (not in CI; if it fails only because src-tauri/binaries/unelos is missing,
+     run sh scripts/build-sidecar.sh once and retry this step)
+
+  Then review the branch diff against main with the cross-platform-rust skill.
+
+  Write the bound rust-checks.md: a table of the steps with command, exit status
+  and failure excerpt; then cross-platform findings with file:line, pitfall and
+  whether it is a real risk.
+
+  Choose pass only if every step exits 0 and no cross-platform finding is a real
+  risk. Otherwise choose fail. Do not fix.
