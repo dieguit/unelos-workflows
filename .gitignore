@@ -31,6 +31,7 @@ dist-ssr
 docs/superpowers/
 docs/ignored/
 .unelos/runs/
+.unelos/run-sequence
 .superpowers/
 .playwright-mcp/
 .slim/
