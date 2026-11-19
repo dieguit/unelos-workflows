@@ -85,7 +85,7 @@ fn open_current(
             current: current_node.clone(),
         });
     }
-    let project = crate::load_project(root, &state.workflow_name)?;
+    let project = super::load_run_project(root, &state)?;
     crate::validate_project(&project)?;
     Ok((store, project, state))
 }

@@ -5,7 +5,7 @@ export type ExecutionIdentity =
 
 export interface ToolArguments {
   next: Record<string, never>;
-  start: {workflow:string;name?:string};
+  start: ({workflow:string;steps?:never}|{workflow?:never;steps:InlineStep[]}) & {name?:string};
   resume: {runId:string};
   complete: {expected:ExecutionIdentity;resultText?:string;summary?:string;outcome?:string};
   approve: {expected:ExecutionIdentity};
@@ -40,3 +40,6 @@ export interface CliResult {
   workerPrompt?:string|null;
   workerPrompts?:WorkerPrompt[];
 }
+export type InlineStep =
+  | {workflow:string;inputs?:Record<string,string>;stopOn?:string[];gate?:never}
+  | {gate:string;workflow?:never;inputs?:never;stopOn?:never};

@@ -62,6 +62,7 @@ pub fn run() {
             imports::import_cancel,
             runs::list_runs,
             runs::get_run,
+            runs::get_run_workflow,
             runs::delete_run,
             runs::read_run_artifact,
             harnesses::list_harnesses,

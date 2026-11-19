@@ -90,6 +90,160 @@ fn at(base: &Utf8Path, rel: &str) -> Utf8PathBuf {
         .fold(base.to_owned(), |path, part| path.join(part))
 }
 
+fn inline_fixture() -> (TempDir, Utf8PathBuf) {
+    let (temp, root) = fixture();
+    let workflows = root.join(".unelos/workflows");
+    std::fs::write(workflows.join("a.yaml"), "name: a\nstart: write\nnodes:\n  write:\n    agent: worker\n    taskDefinition: {instructions: Write, outcomes: [ok, quit]}\n    outputs: [summary.md, notes.md]\n    next: {ok: done, quit: abandoned}\n  done: {type: end}\n  abandoned: {type: end}\n").unwrap();
+    std::fs::write(workflows.join("b.yaml"), "name: b\nstart: read\ninputs: [summary.md, extra.md, missing.md]\nnodes:\n  read:\n    agent: worker\n    taskDefinition: {instructions: Read}\n    inputs: [summary.md, extra.md, missing.md]\n    next: done\n  done: {type: end}\n").unwrap();
+    (temp, root)
+}
+
+fn inline_steps(yaml: &str) -> Vec<InlineStep> {
+    serde_yaml_ng::from_str(yaml).unwrap()
+}
+
+#[test]
+fn run_workflow_uses_the_saved_inline_graph_or_the_named_document() {
+    let (_temp, root) = inline_fixture();
+    let named = start(&load_project(&root, "a").unwrap(), "named", "").unwrap();
+    assert_eq!(
+        serde_json::to_value(get_run_workflow(&root, &named.run_id).unwrap()).unwrap(),
+        serde_json::to_value(get_workflow(&root, "a").unwrap()).unwrap()
+    );
+
+    let steps = inline_steps("- workflow: a\n- gate: Continue?\n- workflow: a\n");
+    execution_start_inline(&root, &steps, None).unwrap();
+    let run_id = list_runs(&root)
+        .unwrap()
+        .into_iter()
+        .find(|run| run.run_id != named.run_id)
+        .unwrap()
+        .run_id;
+    std::fs::remove_file(root.join(".unelos/workflows/a.yaml")).unwrap();
+    let doc = get_run_workflow(&root, &run_id).unwrap();
+    assert_eq!(doc.settings.start, "a");
+    assert_eq!(
+        doc.steps
+            .iter()
+            .map(|step| (step.id.as_str(), step.kind.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("a", "workflow"),
+            ("gate-1", "human-gate"),
+            ("a-2", "workflow"),
+            ("done", "end"),
+            ("stopped", "end"),
+        ]
+    );
+}
+
+#[test]
+fn inline_synthesizes_routes_and_binds_latest_outputs_across_a_gate() {
+    let (_temp, root) = inline_fixture();
+    let steps = inline_steps(
+        "- workflow: a\n  stopOn: [abandoned]\n- workflow: a\n- gate: Open the PR?\n- workflow: b\n  inputs: {extra.md: a/notes.md}\n",
+    );
+    let first = execution_start_inline(&root, &steps, None).unwrap();
+    let path = runs(&root).join("r-000001/workflow.yaml");
+    let saved = std::fs::read_to_string(path).unwrap();
+    let definition = parse_workflow_definition("workflow.yaml", &saved).unwrap();
+    assert_eq!(
+        definition
+            .nodes
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["a", "a-2", "gate-1", "b", "done", "stopped"]
+    );
+    let NodeDefinition::Workflow(call) = &definition.nodes["a"] else {
+        panic!()
+    };
+    let Transition::Outcomes(routes) = &call.next else {
+        panic!()
+    };
+    assert_eq!(routes["abandoned"], "stopped");
+    assert_eq!(routes["done"], "a-2");
+    let second = act(&root, &first, ExecutionOperation::Complete, Some("ok"));
+    let gate = act(&root, &second, ExecutionOperation::Complete, Some("ok"));
+    assert_eq!(packet(&gate)["nodeId"], "gate-1");
+    assert_eq!(packet(&gate)["description"], "Open the PR?");
+    assert_eq!(
+        packet(&execution_resume(&root, "r-000001").unwrap()),
+        packet(&gate)
+    );
+    let catalog = execution_runs(&root).unwrap();
+    assert_eq!(catalog.runs[0].workflow_name, "a → a → gate → b");
+    let b = act(&root, &gate, ExecutionOperation::Approve, None);
+    assert_eq!(packet(&b)["inputs"][0], packet(&second)["outputs"][0]);
+    assert_eq!(packet(&b)["inputs"][1], packet(&first)["outputs"][1]);
+    assert_eq!(
+        packet(&b)["missingInputs"],
+        serde_json::json!(["missing.md"])
+    );
+    assert_eq!(
+        packet(&execution_next(&root, "r-000001").unwrap()),
+        packet(&b)
+    );
+
+    let child = root.join(".unelos/workflows/b.yaml");
+    let text = std::fs::read_to_string(&child)
+        .unwrap()
+        .replace("start: read", "start: changed")
+        .replace("  read:", "  changed:");
+    std::fs::write(child, text).unwrap();
+    for error in [
+        execution_resume(&root, "r-000001").unwrap_err(),
+        execution_next(&root, "r-000001").unwrap_err(),
+    ] {
+        assert!(
+            error
+                .to_string()
+                .contains("incompatible with live Workflow"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn inline_gate_can_be_first_and_rejection_stops() {
+    let (_temp, root) = inline_fixture();
+    let steps = inline_steps("- gate: Start?\n- workflow: a");
+    let gate = execution_start_inline(&root, &steps, None).unwrap();
+    assert_eq!(packet(&gate)["nodeId"], "gate-1");
+    let stopped = act(&root, &gate, ExecutionOperation::Reject, None);
+    assert_eq!(packet(&stopped)["nodeId"], "stopped");
+}
+
+#[test]
+fn inline_validates_step_references_before_starting() {
+    let (_temp, root) = inline_fixture();
+    for (yaml, diagnostic) in [
+        ("- gate: Start?", "requires at least one workflow"),
+        ("- workflow: not-here", "cannot load workflow"),
+        ("- workflow: a\n  stopOn: [typo]", "unknown stopOn outcome"),
+        (
+            "- workflow: b\n  inputs: {typo: summary.md}",
+            "unknown input",
+        ),
+        (
+            "- workflow: b\n  inputs: {summary.md: a/summary.md}",
+            "no earlier output",
+        ),
+    ] {
+        let error = execution_start_inline(&root, &inline_steps(yaml), None).unwrap_err();
+        assert!(error.to_string().contains(diagnostic), "{error}");
+    }
+    let run = execution_start_inline(&root, &[InlineStep::workflow("a")], None).unwrap();
+    assert_eq!(packet(&run)["nodeId"], "a/write");
+    let (_temp, root) = inline_fixture();
+    execution_start(&root, "a", None).unwrap();
+    let state = runs(&root).join("r-000001/state.json");
+    let mut json: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&state).unwrap()).unwrap();
+    json.as_object_mut().unwrap().remove("inline");
+    assert!(!serde_json::from_value::<RunState>(json).unwrap().inline);
+}
+
 #[test]
 fn runs_parent_through_child_gate_and_back() {
     let (_temp, root) = fixture();

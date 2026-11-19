@@ -16,12 +16,16 @@ mod rename;
 mod resume;
 mod runs_ui;
 mod store;
-pub use runs_ui::{delete_run, get_run, list_runs, read_run_artifact, RunDetails, RunListItem};
+pub use runs_ui::{
+    delete_run, get_run, get_run_workflow, list_runs, read_run_artifact, RunDetails, RunListItem,
+};
 
 pub use commands::{approve_node, complete_node, reject_node};
 pub use completion::complete;
 pub use execution::{execution_mutate, execution_next, execution_start};
+mod inline;
 pub use gates::{approve, reject};
+pub use inline::{execution_start_inline, InlineStep};
 pub use rename::rename_run;
 pub use resume::{execution_new, execution_resume, execution_runs};
 
@@ -35,6 +39,8 @@ pub struct RunState {
     pub run_id: String,
     pub name: String,
     pub workflow_name: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub inline: bool,
     pub request: String,
     #[serde(default)]
     pub naming_pending: bool,
@@ -277,6 +283,7 @@ fn prepare_start_state(
             project.workflow.name.clone()
         },
         request: request.into(),
+        inline: false,
         naming_pending,
         current: CurrentWork::Finished {
             node_id: node_id.clone(),
@@ -303,9 +310,21 @@ pub(crate) fn stored_runs(project_root: &Utf8Path) -> Result<Vec<RunState>, Runt
 }
 
 pub fn status(project_root: &Utf8Path, run_id: &str) -> Result<RunState, RuntimeError> {
-    store::RunStore::open(project_root)?.run(run_id)
+    let store = store::RunStore::open(project_root)?;
+    let state = store.run(run_id)?;
+    if state.inline {
+        load_run_project(store.root(), &state)?;
+    }
+    Ok(state)
 }
 
+fn load_run_project(root: &Utf8Path, state: &RunState) -> Result<LoadedProject, RuntimeError> {
+    Ok(if state.inline {
+        crate::project::load_inline_project(root, &state.run_id, None)?
+    } else {
+        crate::load_project(root, &state.workflow_name)?
+    })
+}
 pub fn confirm_outputs(
     project_root: &Utf8Path,
     run_id: &str,
@@ -389,7 +408,7 @@ pub fn verify_work_outputs(
 pub fn next(project_root: &Utf8Path, run_id: &str) -> Result<WorkPacket, RuntimeError> {
     let store = store::RunStore::open(project_root)?;
     let state = store.run(run_id)?;
-    let project = crate::load_project(project_root, &state.workflow_name)?;
+    let project = load_run_project(store.root(), &state)?;
     crate::validate_project(&project)?;
     packet_for_state(&project, &state)
 }
@@ -692,6 +711,7 @@ mod tests {
             run_id: "qa-run".into(),
             name: "qa-run".into(),
             workflow_name: "implement-feature".into(),
+            inline: false,
             request: "Change color".into(),
             naming_pending: false,
             current: CurrentWork::Finished {

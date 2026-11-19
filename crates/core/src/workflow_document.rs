@@ -321,12 +321,25 @@ fn outcome_routes(outcomes: &indexmap::IndexMap<String, String>) -> Vec<Workflow
 fn document(root: &Utf8Path, id: &str, text: &str) -> Result<WorkflowDocument, String> {
     let workflow = crate::parse_workflow_definition(id, text).map_err(|e| e.to_string())?;
     let project = load_candidate(root, id, Some(text)).ok();
+    Ok(graph_document(
+        id,
+        workflow,
+        project.as_ref(),
+        issues(root, id, Some(text)),
+    ))
+}
+
+pub(crate) fn graph_document(
+    id: &str,
+    workflow: crate::WorkflowDefinition,
+    project: Option<&crate::LoadedProject>,
+    issues: Vec<WorkflowIssue>,
+) -> WorkflowDocument {
     let steps = workflow
         .nodes
         .iter()
         .map(|(id, node)| {
             let resolved = project
-                .as_ref()
                 .and_then(|p| p.workflow.nodes.get(id))
                 .unwrap_or(node);
             let mut step = WorkflowStep {
@@ -350,10 +363,7 @@ fn document(root: &Utf8Path, id: &str, text: &str) -> Result<WorkflowDocument, S
                         crate::NodeDefinition::Task(resolved) => &resolved.task,
                         _ => &task.task,
                     };
-                    step.task = Some(step_task(
-                        selection,
-                        project.as_ref().map(|p| &p.definitions),
-                    ));
+                    step.task = Some(step_task(selection, project.map(|p| &p.definitions)));
                     step.title = Some(title(&task.task));
                     step.agent = Some(task.agent.clone());
                     step.execution = Some(task.execution);
@@ -375,7 +385,7 @@ fn document(root: &Utf8Path, id: &str, text: &str) -> Result<WorkflowDocument, S
                                     }
                                     _ => &worker.task,
                                 },
-                                project.as_ref().map(|p| &p.definitions),
+                                project.map(|p| &p.definitions),
                             ),
                             agent: worker.agent.clone(),
                         })
@@ -407,7 +417,7 @@ fn document(root: &Utf8Path, id: &str, text: &str) -> Result<WorkflowDocument, S
             step
         })
         .collect();
-    Ok(WorkflowDocument {
+    WorkflowDocument {
         id: id.into(),
         settings: WorkflowSettings {
             name: workflow.name,
@@ -416,8 +426,8 @@ fn document(root: &Utf8Path, id: &str, text: &str) -> Result<WorkflowDocument, S
             inputs: workflow.inputs,
         },
         steps,
-        issues: issues(root, id, Some(text)),
-    })
+        issues,
+    }
 }
 
 pub fn get_workflow(root: &Utf8Path, id: &str) -> Result<WorkflowDocument, String> {

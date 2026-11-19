@@ -63,6 +63,14 @@ fn artifacts(node: &NodeDefinition) -> (Vec<String>, Vec<String>) {
     }
 }
 
+pub(crate) fn produced_artifacts(workflow: &WorkflowDefinition) -> BTreeSet<String> {
+    workflow
+        .nodes
+        .values()
+        .flat_map(|n| artifacts(n).1)
+        .collect()
+}
+
 fn rewrite(
     node: &mut NodeDefinition,
     target: &dyn Fn(&str) -> String,
@@ -180,7 +188,7 @@ fn expand_inner(
                 format!("keys must match child inputs {:?}", child.inputs),
             ));
         }
-        let produced: BTreeSet<_> = child.nodes.values().flat_map(|n| artifacts(n).1).collect();
+        let produced = produced_artifacts(&child);
         for name in call.outputs.keys() {
             if !produced.contains(name) {
                 return Err(error(
@@ -236,10 +244,7 @@ fn expand_inner(
             .inputs
             .iter()
             .cloned()
-            .chain(root.nodes.values().flat_map(|n| {
-                let (i, o) = artifacts(n);
-                i.into_iter().chain(o)
-            }))
+            .chain(root.nodes.values().flat_map(|n| artifacts(n).1))
             .any(|name| name.starts_with(&prefix))
         {
             return Err(error(
@@ -254,6 +259,7 @@ fn expand_inner(
             .iter()
             .cloned()
             .chain(root.nodes.values().flat_map(|n| artifacts(n).1))
+            .chain(nodes.values().flat_map(|n| artifacts(n).1))
             .collect();
         for name in call.inputs.values() {
             if !available.contains(name) {

@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge"
 import { FlowPane } from "@/components/flow/flow-pane"
 import { FlowToolbar } from "@/components/flow/flow-toolbar"
 import { humanize } from "@/lib/step-edit"
-import { getWorkflow, type WorkflowDocument } from "@/lib/projects"
+import type { WorkflowDocument } from "@/lib/projects"
 import {
   executionsByNode,
   missingNodes,
@@ -19,6 +19,7 @@ import {
 } from "../../-lib/run-graph"
 import {
   deleteRun,
+  getRunWorkflow,
   type ArtifactReference,
   type RunState,
 } from "../../-lib/runs-api"
@@ -56,28 +57,28 @@ function RunStatus({ current }: { current: RunState["current"] }) {
 }
 
 /** Workflow is loaded once; `undefined` while loading, `null` when it cannot be read. */
-function useWorkflow(root: string, name: string) {
+function useWorkflow(root: string, runId: string) {
   const [state, setState] = useState<{
     key: string
     doc: WorkflowDocument | null
   }>()
-  const key = `${root}:${name}`
+  const key = `${root}:${runId}`
   useEffect(() => {
     let active = true
-    getWorkflow(root, name).then(
+    getRunWorkflow(root, runId).then(
       (doc) => active && setState({ key, doc }),
       () => active && setState({ key, doc: null })
     )
     return () => {
       active = false
     }
-  }, [root, name, key])
+  }, [root, runId, key])
   return state?.key === key ? state.doc : undefined
 }
 
 export function RunView({ root, run }: { root: string; run: RunState }) {
   const navigate = useNavigate()
-  const workflow = useWorkflow(root, run.workflowName)
+  const workflow = useWorkflow(root, run.runId)
   const [selected, setSelected] = useState<string>()
   const [artifact, setArtifact] = useState<ArtifactReference>()
   const executions = useMemo(() => executionsByNode(run), [run])

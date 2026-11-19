@@ -22,7 +22,7 @@ fn identity(
     root: &Utf8Path,
     state: &RunState,
 ) -> Result<Option<ExecutionIdentity>, ExecutionError> {
-    let project = crate::load_project(root, &state.workflow_name).map_err(RuntimeError::from)?;
+    let project = super::load_run_project(root, state)?;
     let packet = packet_for_snapshot(&project, state, false)?;
     Ok(ExecutionIdentity::from_packet(&packet))
 }
@@ -91,8 +91,7 @@ pub fn execution_resume(root: &Utf8Path, run_id: &str) -> Result<ExecutionPackag
             "Finished runs cannot be resumed; begin a new run explicitly",
         ));
     }
-    let project =
-        crate::load_project(store.root(), &state.workflow_name).map_err(RuntimeError::from)?;
+    let project = super::load_run_project(store.root(), &state)?;
     crate::validate_project(&project).map_err(RuntimeError::from)?;
     // Missing required inputs are recovery issues, not a reason to hide the current identity.
     // All live definition/binding validation still runs.

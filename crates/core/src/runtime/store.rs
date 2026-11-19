@@ -617,6 +617,7 @@ mod tests {
             run_id: name.into(),
             name: name.into(),
             workflow_name: "flow".into(),
+            inline: false,
             request: "request".into(),
             naming_pending: false,
             current: CurrentWork::Finished {

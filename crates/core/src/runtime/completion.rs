@@ -20,7 +20,7 @@ pub fn complete(
             current: state.run_id,
         });
     }
-    let project = crate::load_project(project_root, &state.workflow_name)?;
+    let project = super::load_run_project(project_root, &state)?;
     crate::validate_project(&project)?;
     let candidate = prepare_completion(&project, &state, expected_execution_id, outcome, reason)?;
     artifacts::prepare_work_directories(

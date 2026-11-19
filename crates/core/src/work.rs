@@ -84,6 +84,8 @@ pub struct ParallelPacket {
 #[serde(rename_all = "camelCase")]
 pub struct GatePacket {
     pub kind: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     pub run_id: String,
     pub activation_id: String,
     pub node_id: String,
@@ -258,6 +260,7 @@ pub fn build_work_packet(
             let missing_inputs = crate::runtime::missing_inputs(project, &node_id, &artifacts);
             Ok(WorkPacket::HumanGate(GatePacket {
                 kind: "human-gate",
+                description: inspection.description,
                 run_id,
                 activation_id,
                 node_id,
@@ -328,6 +331,8 @@ pub struct ParallelInspection {
 #[serde(rename_all = "camelCase")]
 pub struct GateInspection {
     pub kind: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     pub node_id: String,
     pub inputs: Vec<String>,
     pub decisions: Vec<String>,
@@ -413,6 +418,7 @@ pub fn inspect_node(
             }
             Ok(NodeInspection::HumanGate(GateInspection {
                 kind: "human-gate",
+                description: gate.description.clone(),
                 node_id: node_id.into(),
                 inputs: gate.inputs.clone(),
                 decisions: vec!["approved".into(), "rejected".into()],

@@ -52,7 +52,7 @@ fn decide(
             current: state.run_id,
         });
     }
-    let project = crate::load_project(project_root, &state.workflow_name)?;
+    let project = super::load_run_project(project_root, &state)?;
     crate::validate_project(&project)?;
     let candidate = prepare_decision(&project, &state, expected_gate_activation, outcome, reason)?;
     artifacts::prepare_work_directories(

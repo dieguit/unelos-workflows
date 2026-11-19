@@ -97,15 +97,17 @@ pub use install::{
 };
 pub use project::{
     agent_summaries, global_agent_summaries, global_skill_summaries, global_task_summaries,
-    list_workflows, load_project, skill_summaries, task_summaries, workflow_summaries,
-    AgentSummary, LoadedProject, ProjectLoadError, SkillSummary, TaskSummary, WorkflowSummary,
+    list_workflow_descriptions, list_workflows, load_project, skill_summaries, task_summaries,
+    workflow_summaries, AgentSummary, LoadedProject, ProjectLoadError, SkillSummary, TaskSummary,
+    WorkflowSummary,
 };
 pub use runtime::{
     approve, approve_node, complete, complete_node, confirm_outputs, delete_run, execution_mutate,
-    execution_new, execution_next, execution_resume, execution_runs, execution_start, get_run,
-    list_runs, next, prepare_work, read_run_artifact, reject, reject_node, rename_run, start,
-    start_workflow, status, verify_outputs, verify_work_outputs, CompletedExecution, CurrentWork,
-    ExecutionRecord, RunDetails, RunListItem, RunState, RuntimeError,
+    execution_new, execution_next, execution_resume, execution_runs, execution_start,
+    execution_start_inline, get_run, get_run_workflow, list_runs, next, prepare_work,
+    read_run_artifact, reject, reject_node, rename_run, start, start_workflow, status,
+    verify_outputs, verify_work_outputs, CompletedExecution, CurrentWork, ExecutionRecord,
+    InlineStep, RunDetails, RunListItem, RunState, RuntimeError,
 };
 pub use settings::{Settings, SettingsError};
 pub use skills::{resolve_skills, ResolvedSkill, SkillResolveError};

@@ -145,6 +145,7 @@ fn every_state_delivers_only_its_policy_block() {
         ),
         (
             Some(WorkPacket::HumanGate(GatePacket {
+                description: None,
                 missing_inputs: vec![],
                 kind: "human-gate",
                 run_id: "run".into(),

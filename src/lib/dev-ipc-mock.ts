@@ -142,6 +142,36 @@ const globalWorkflowStep = (id: string, kind: WorkflowStep["kind"], next: string
   task: kind === "task" ? { source: "inline", id: null, description: null, instructions: `Perform ${id}`, skills: [], outcomes: [] } : null,
   routes: next ? [{ outcome: null, target: next }] : [], workers: [], inputs: [], outputs: [],
 })
+const inlineRun = {
+  runId: "r-000001", name: "Review a fix", workflowName: "investigate-bug → gate → review-change",
+  request: "", current: {
+    kind: "human-gate", nodeId: "gate-1", executionId: "task-2", inputs: [], outputs: [], workerReports: [], feedback: null,
+  },
+  history: [{
+    work: { kind: "human-gate", nodeId: "investigate-bug/approve", executionId: "task-1", inputs: [], outputs: [], workerReports: [], feedback: null },
+    outcome: "approved", reason: null,
+  }],
+}
+const inlineDocument: WorkflowDocument = {
+  id: inlineRun.runId, name: "inline/run", description: null, start: "investigate-bug", inputs: [], issues: [],
+  steps: [
+    {
+      ...globalWorkflowStep("investigate-bug", "workflow", "gate-1"),
+      call: { workflow: "investigate-bug", inputs: {}, outputs: {} },
+    },
+    {
+      ...globalWorkflowStep("gate-1", "human-gate", null), title: "Proceed to review?",
+      routes: [{ outcome: "approved", target: "review-change" }, { outcome: "rejected", target: "stopped" }],
+    },
+    {
+      ...globalWorkflowStep("review-change", "workflow", "done"),
+      call: { workflow: "review-change", inputs: {}, outputs: {} },
+    },
+    globalWorkflowStep("done", "end", null),
+    globalWorkflowStep("stopped", "end", null),
+  ],
+}
+const inlineRunRoots = new Set(mode === "empty" ? [] : state.recents.slice(0, 1).map((recent) => recent.path))
 const globalWorkflows: { summary: WorkflowSummary; document: WorkflowDocument }[] = mode === "empty" ? [] : [{
   summary: { global: true, calls: [], name: "global/workflow-design", file: "global/workflow-design.yaml", description: "Design a change with a global architect before any project writes code.", steps: 3, problem: null },
   document: {
@@ -338,7 +368,21 @@ export function installDevIpcMock() {
       projectTasks.set(root, documents)
       return documents
     })())
+    const runId = (args as { runId?: string })?.runId
     switch (cmd) {
+      case "list_runs":
+        return inlineRunRoots.has(root) ? [{
+          runId: inlineRun.runId, name: inlineRun.name, workflowName: inlineRun.workflowName,
+          nodeId: inlineRun.current.nodeId, status: "waiting",
+        }] : []
+      case "get_run":
+      case "get_run_workflow":
+      case "delete_run":
+        if (runId !== inlineRun.runId || !inlineRunRoots.has(root)) throw `Unknown run ${runId}`
+        if (cmd === "get_run") return inlineRun
+        if (cmd === "get_run_workflow") return inlineDocument
+        inlineRunRoots.delete(root)
+        return
       case "project_references": {
         const result: ProjectReferences = { agents: {}, tasks: {}, skills: {}, mcps: {} }
         const add = (map: Record<string, Reference[]>, id: string, reference: Reference) => {

@@ -29,7 +29,15 @@ pub fn tool_definitions() -> Vec<Tool> {
     );
     TOOLS.iter().map(|(name, description)| {
         let mut schema = match *name {
-            "start" => object(json!({"workflow":string,"name":string}), &["workflow"]),
+            "start" => {
+                let step = json!({"oneOf":[
+                    object(json!({"workflow":string,"inputs":{"type":"object","additionalProperties":string},"stopOn":{"type":"array","items":string}}), &["workflow"]),
+                    object(json!({"gate":string}), &["gate"])
+                ]});
+                let mut schema = object(json!({"workflow":string,"steps":{"type":"array","minItems":1,"items":step},"name":string}), &[]);
+                schema["oneOf"] = json!([{"required":["workflow"]},{"required":["steps"]}]);
+                schema
+            },
             "resume" => object(json!({"runId":string}), &["runId"]),
             "complete" => object(json!({"expected":identity,
                 "resultText":{"type":"string","description":"the worker's final message, verbatim (only newly finished workers for parallel; write aggregates before the last submission; empty once all receipts exist)"},
@@ -91,6 +99,24 @@ fn required<'a>(input: &'a Value, key: &str) -> Result<&'a str, SessionError> {
         .ok_or_else(|| fail("invalid_control", format!("Missing string {key}")))
 }
 
+enum StartTarget<'a> {
+    Workflow(&'a str),
+    Steps(Vec<crate::InlineStep>),
+}
+
+fn start_target(input: &Value) -> Result<StartTarget<'_>, SessionError> {
+    match (input.get("workflow"), input.get("steps")) {
+        (Some(_), None) => required(input, "workflow").map(StartTarget::Workflow),
+        (None, Some(steps)) => serde_json::from_value(steps.clone())
+            .map(StartTarget::Steps)
+            .map_err(|e| fail("invalid_control", format!("Invalid steps: {e}"))),
+        _ => Err(fail(
+            "invalid_control",
+            "Provide exactly one of workflow or steps",
+        )),
+    }
+}
+
 impl SessionService {
     pub fn dispatch(
         &self,
@@ -149,7 +175,7 @@ impl SessionService {
         let value = match tool {
             "next" => serde_json::to_value(crate::execution_next(root, run)?).map_err(io_error)?,
             "start" => {
-                let workflow = required(input, "workflow")?;
+                let target = start_target(input)?;
                 binding.pending_start = Some(PendingStart {
                     entry_id: binding.entry_id.clone(),
                     at: std::time::SystemTime::now()
@@ -158,8 +184,15 @@ impl SessionService {
                         .as_secs(),
                 });
                 lock.write(&binding)?;
-                let result =
-                    crate::execution_start(&binding.project, workflow, input["name"].as_str());
+                let name = input["name"].as_str();
+                let result = match target {
+                    StartTarget::Workflow(workflow) => {
+                        crate::execution_start(&binding.project, workflow, name)
+                    }
+                    StartTarget::Steps(steps) => {
+                        crate::execution_start_inline(&binding.project, &steps, name)
+                    }
+                };
                 match result {
                     Ok(package) => serde_json::to_value(package).map_err(|_| fail("mutation_uncertain", "Start response unavailable; explicitly reconcile with /unelos resume; never retry start"))?,
                     Err(error) => {
@@ -332,6 +365,28 @@ impl ServerHandler for ControllerMcp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn start_arguments_accept_steps_or_workflow_but_not_both() {
+        assert!(matches!(
+            start_target(&json!({"steps":[{"workflow":"a","stopOn":["abandoned"]},{"gate":"Continue?"}]})).unwrap(),
+            StartTarget::Steps(steps)
+                if matches!(&steps[0], crate::InlineStep::Workflow { stop_on, .. } if stop_on == &["abandoned"])
+                    && matches!(&steps[1], crate::InlineStep::Gate { gate } if gate == "Continue?")
+        ));
+        assert!(matches!(
+            start_target(&json!({"workflow":"a"})).unwrap(),
+            StartTarget::Workflow("a")
+        ));
+        assert!(start_target(&json!({"workflow":"a","steps":[]})).is_err());
+        assert!(start_target(&json!({"steps":[{"workflow":"a","gate":"?"}]})).is_err());
+        let start = tool_definitions()
+            .into_iter()
+            .find(|tool| tool.name == "start")
+            .unwrap();
+        assert!(start.input_schema["properties"]["steps"].is_object());
+        assert_eq!(start.input_schema["oneOf"][1]["required"][0], "steps");
+    }
 
     #[test]
     fn harness_packages_map_native_agents_and_parallel_dispatch() {

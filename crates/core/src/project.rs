@@ -217,7 +217,7 @@ pub fn list_workflows(project_root: &Utf8Path) -> Result<Vec<String>, ProjectLoa
     Ok(names)
 }
 
-pub(crate) fn list_workflow_descriptions(
+pub fn list_workflow_descriptions(
     project_root: &Utf8Path,
 ) -> Result<BTreeMap<String, Option<String>>, ProjectLoadError> {
     let (root, names) = workflow_files(project_root)?;
@@ -231,7 +231,31 @@ pub(crate) fn list_workflow_descriptions(
             continue;
         }
         let project = result?;
-        workflows.insert(name, project.workflow.description);
+        let inputs = &project.workflow.inputs;
+        let outputs = crate::compose::produced_artifacts(&project.workflow);
+        let description = project.workflow.description;
+        let description = if inputs.is_empty() && outputs.is_empty() {
+            description
+        } else {
+            let interface = format!(
+                "inputs: {}; outputs: {}",
+                if inputs.is_empty() {
+                    "—".into()
+                } else {
+                    inputs.join(", ")
+                },
+                if outputs.is_empty() {
+                    "—".into()
+                } else {
+                    outputs.into_iter().collect::<Vec<_>>().join(", ")
+                }
+            );
+            Some(match description {
+                Some(text) => format!("{text} ({interface})"),
+                None => interface,
+            })
+        };
+        workflows.insert(name, description);
     }
     Ok(workflows)
 }
@@ -761,6 +785,28 @@ pub(crate) fn load_project_candidate(
     workflow_name: &str,
     candidate: Option<&str>,
 ) -> Result<LoadedProject, ProjectLoadError> {
+    load_project_inner(project_root, workflow_name, candidate, None)
+}
+
+pub(crate) fn load_inline_project(
+    project_root: &Utf8Path,
+    run_id: &str,
+    candidate: Option<&str>,
+) -> Result<LoadedProject, ProjectLoadError> {
+    load_project_inner(
+        project_root,
+        "inline/run",
+        candidate,
+        Some(&Utf8PathBuf::from(format!("runs/{run_id}/workflow.yaml"))),
+    )
+}
+
+fn load_project_inner(
+    project_root: &Utf8Path,
+    workflow_name: &str,
+    candidate: Option<&str>,
+    run_workflow: Option<&Utf8Path>,
+) -> Result<LoadedProject, ProjectLoadError> {
     let project_root = absolute_root(project_root).map_err(|source| ProjectLoadError::Root {
         path: project_root.to_owned(),
         source,
@@ -773,7 +819,13 @@ pub(crate) fn load_project_candidate(
         "project",
     )?;
     parse_project_settings(settings.as_str(), &read(&settings)?)?;
-    let mut loaded = load_authoring_candidate(&authoring_root, workflow_name, candidate)?;
+    let mut loaded = load_authoring_inner(
+        &authoring_root,
+        workflow_name,
+        candidate,
+        false,
+        run_workflow,
+    )?;
     loaded.project_root = project_root;
     Ok(loaded)
 }
@@ -790,14 +842,14 @@ pub(crate) fn load_authoring_candidate(
     workflow_name: &str,
     candidate: Option<&str>,
 ) -> Result<LoadedProject, ProjectLoadError> {
-    load_authoring_inner(authoring_root, workflow_name, candidate, false)
+    load_authoring_inner(authoring_root, workflow_name, candidate, false, None)
 }
 
 pub(crate) fn load_import_authoring(
     authoring_root: &Utf8Path,
     workflow_name: &str,
 ) -> Result<LoadedProject, ProjectLoadError> {
-    load_authoring_inner(authoring_root, workflow_name, None, true)
+    load_authoring_inner(authoring_root, workflow_name, None, true, None)
 }
 
 fn load_authoring_inner(
@@ -805,10 +857,11 @@ fn load_authoring_inner(
     workflow_name: &str,
     candidate: Option<&str>,
     external: bool,
+    run_workflow: Option<&Utf8Path>,
 ) -> Result<LoadedProject, ProjectLoadError> {
     let project_authoring_root = authoring_root;
-    let global = workflow_name.starts_with("global/");
-    let global_root = if let Some(id) = workflow_name.strip_prefix("global/") {
+    let global = run_workflow.is_none() && workflow_name.starts_with("global/");
+    let global_root = if let Some(id) = workflow_name.strip_prefix("global/").filter(|_| global) {
         if !safe_id(id) {
             return Err(ProjectLoadError::InvalidWorkflowName {
                 name: workflow_name.into(),
@@ -824,11 +877,13 @@ fn load_authoring_inner(
     let authoring_root = global_root.as_deref().unwrap_or(project_authoring_root);
     let workflow_name = workflow_name
         .strip_prefix("global/")
+        .filter(|_| global)
         .unwrap_or(workflow_name);
-    if workflow_name.is_empty()
-        || matches!(workflow_name, "." | "..")
-        || workflow_name.contains(['/', '\\'])
-        || Utf8Path::new(workflow_name).is_absolute()
+    if run_workflow.is_none()
+        && (workflow_name.is_empty()
+            || matches!(workflow_name, "." | "..")
+            || workflow_name.contains(['/', '\\'])
+            || Utf8Path::new(workflow_name).is_absolute())
     {
         return Err(ProjectLoadError::InvalidWorkflowName {
             name: workflow_name.to_owned(),
@@ -842,7 +897,9 @@ fn load_authoring_inner(
     let project_source = authoring_root.join("project.yaml");
     let workflow_source = bounded_path(
         &authoring_root,
-        &Utf8PathBuf::from(format!("workflows/{workflow_name}.yaml")),
+        run_workflow.unwrap_or(&Utf8PathBuf::from(format!(
+            "workflows/{workflow_name}.yaml"
+        ))),
         &project_source,
         "workflow",
     )?;
