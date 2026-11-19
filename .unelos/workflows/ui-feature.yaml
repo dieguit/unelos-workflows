@@ -1,10 +1,12 @@
 name: ui-feature
-description: Build a UI feature from a Pencil design (or the closest existing screens) with backend and UI lanes, checks, browser verification, visual QA and a PR.
+description: Build a UI feature from a Pencil design (or the closest existing screens) with backend and UI lanes, checks, browser verification and visual QA. Ends with summary.md; run pr-and-ci to deliver.
 start: intake
+inputs: [request.md]
 nodes:
   intake:
     taskDefinition:
       instructions: |
+        If request.md is bound, start from it and ask only for what it lacks.
         Agree the feature with the user: what it does, the screen it lives on,
         the existing screen it should behave like, backend data or commands it
         needs, and its acceptance criteria. Ask whether the UI is already designed
@@ -13,6 +15,7 @@ nodes:
         brief.md in place.
     agent: dev-lead
     execution: main
+    inputs: [request.md]
     outputs: [brief.md]
     next: recon
   recon:
@@ -128,20 +131,15 @@ nodes:
   summarize:
     taskDefinition:
       instructions: |
-        Write the bound summary.md for the pull request: what the feature does,
-        the main files changed, how it was verified (checks and browser
-        verification), and anything left out.
+        Write the bound summary.md: what the feature does, the main files
+        changed, how it was verified (checks and browser verification), and
+        anything left out.
+        End with "Next: run pr-and-ci with this summary.md to open or update
+        the PR, if one is wanted."
     agent: coordinator
     execution: subagent
     inputs: [brief.md, contract.md, ui-verification.md]
     outputs: [summary.md]
-    next: pr
-  pr:
-    type: workflow
-    workflow: pr-and-ci
-    inputs: {summary.md: summary.md}
-    next:
-      green: done
-      abandoned: done
+    next: done
   done:
     type: end

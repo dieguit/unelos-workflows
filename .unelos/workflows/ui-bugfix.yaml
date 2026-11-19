@@ -1,16 +1,20 @@
 name: ui-bugfix
-description: Reproduce a UI bug in the browser, fix the root cause, run checks, verify the fix with the same repro, then approve.
+description: Reproduce a UI bug in the browser, fix the root cause, run checks, verify the fix with the same repro, then approve. Ends with summary.md; run pr-and-ci to deliver.
 start: intake
+inputs: [request.md]
 nodes:
   intake:
     taskDefinition:
       instructions: |
-        Get the bug from the user: what is wrong, where (screen or route), steps,
-        expected behaviour, and screenshots if any. Ask only for what is missing.
+        If request.md is bound, take the bug from it and ask only for what it
+        lacks. Otherwise get the bug from the user: what is wrong, where (screen
+        or route), steps, expected behaviour, and screenshots if any. Ask only
+        for what is missing.
         Write the bound bug.md. On re-entry, read the feedback (what the
         reproduction tried, or the user's extra details) and update bug.md in place.
     agent: dev-lead
     execution: main
+    inputs: [request.md]
     outputs: [bug.md]
     next: reproduce
   reproduce:
@@ -84,20 +88,14 @@ nodes:
   summarize:
     taskDefinition:
       instructions: |
-        Write the bound summary.md for the pull request: the bug, its root cause,
-        the fix, the screens affected, and how it was verified (repro replayed,
-        checks).
+        Write the bound summary.md: the bug, its root cause, the fix, the
+        screens affected, and how it was verified (repro replayed, checks).
+        End with "Next: run pr-and-ci with this summary.md to open or update
+        the PR, if one is wanted."
     agent: coordinator
     execution: subagent
     inputs: [bug.md, repro.md, fix.md, ui-verification.md]
     outputs: [summary.md]
-    next: pr
-  pr:
-    type: workflow
-    workflow: pr-and-ci
-    inputs: {summary.md: summary.md}
-    next:
-      green: done
-      abandoned: done
+    next: done
   done:
     type: end

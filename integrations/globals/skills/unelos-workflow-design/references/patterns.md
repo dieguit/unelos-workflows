@@ -80,3 +80,13 @@ decision table [gate] → phased fix lanes (each formats only its own files)
 
 Small loops shared by several workflows are worth extracting as child
 workflows, e.g. `pr-and-ci`: open PR → wait for CI → fail → fix → push → wait.
+
+## Work and delivery apart
+
+End a work workflow at its summary artifact and keep delivery (`pr-and-ci`)
+as its own workflow. The user then picks per run: no PR for one-time work,
+update the branch's PR, or a new one, and can drive bigger work by running
+workflows one by one. Give the first step an optional input (e.g.
+`request.md`): a missing input does not block the run; the step uses it when
+bound and asks the user otherwise. The same workflow then runs standalone or
+as a child that receives its brief.
