@@ -98,7 +98,9 @@ reason handles edge cases a rule list misses.
 2. Walk every branch in a throwaway copy with `scripts/walk-workflow.py`, which
    starts a run, writes placeholder outputs and completes, approves or rejects
    each step along a path you give it. Walk at least: the happy path, each
-   failure loop, and each gate rejection.
+   failure loop, and each gate rejection. With `--steps-file FILE`, it starts and
+   walks a composed (inline) run; node ids are `<workflow>/<node>` and gate steps
+   are `gate-N`.
 
 ## 7. Pilot and iterate
 

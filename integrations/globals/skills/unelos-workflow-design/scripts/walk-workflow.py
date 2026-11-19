@@ -3,11 +3,16 @@
 
 Usage:
   walk-workflow.py <project> <workflow> <step> [<step> ...] [--unelos BIN]
+  walk-workflow.py <project> --steps-file FILE <step> [<step> ...] [--unelos BIN]
 
 Each step is <node>, <node>:<outcome>, <node>:approve or <node>:reject.
 Example:
   walk-workflow.py . ui-bugfix intake reproduce:reproduced fix:ui-only \
       frontend-checks:fail fix:ui-only frontend-checks:pass verify:pass approve:approve
+
+Inline (composed) run: node ids are <workflow>/<node>, gate steps gate-1, gate-2, ...
+  walk-workflow.py . --steps-file steps.yaml council/assignment council/council \
+      council/synthesis council/approve-council:approve gate-1:approve pr-and-ci/open-pr:opened
 
 The project's .unelos authoring is copied to a temp dir (runs are not), a run is
 started, placeholder outputs are written before each step, and the node each
@@ -25,10 +30,19 @@ import tempfile
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("project")
-    ap.add_argument("workflow")
-    ap.add_argument("steps", nargs="+")
+    ap.add_argument("first")
+    ap.add_argument("rest", nargs="*")
+    ap.add_argument("--steps-file")
     ap.add_argument("--unelos", default="unelos")
     args = ap.parse_args()
+    if args.steps_file is not None:
+        args.steps_file = os.path.abspath(args.steps_file)
+        steps = [args.first, *args.rest]
+    else:
+        if not args.rest:
+            ap.error("a workflow and at least one step are required")
+        workflow = args.first
+        steps = args.rest
     if os.sep in args.unelos:
         args.unelos = os.path.abspath(args.unelos)
 
@@ -46,13 +60,13 @@ def main():
         except ValueError:
             sys.exit(f"unelos {' '.join(argv)} failed:\n{r.stdout}{r.stderr}")
 
-    started = cli("start", args.workflow)
+    started = cli("start", "--steps-file", args.steps_file) if args.steps_file is not None else cli("start", workflow)
     if "error" in started:
         sys.exit(f"start failed: {started['error']}")
     run = started.get("runId") or cli("next", "--run", "r-000001").get("runId", "r-000001")
 
     failed = False
-    for step in args.steps:
+    for step in steps:
         node, _, action = step.partition(":")
         packet = cli("next", "--run", run)
         if packet.get("nodeId") not in (None, node):
