@@ -17,3 +17,17 @@ test("workflow card identifies the called workflow", () => {
   expect(html).toContain("Workflow")
   expect(html).toContain("lucide-workflow")
 })
+
+test.each([
+  { title: "Approve the fix?", inputs: ["plan.md"], subtitle: "Approve the fix?" },
+  { title: null, inputs: ["plan.md"], subtitle: "Decision on plan.md" },
+  { title: null, inputs: [], subtitle: "Human decision" },
+  { title: "  ", inputs: [], subtitle: "Human decision" },
+])("human gate with title $title and inputs $inputs shows $subtitle", ({ title, inputs, subtitle }) => {
+  const step = {
+    id: "approve", kind: "human-gate", originalId: "approve", label: "approve",
+    title, inputs, agent: null, execution: null, task: null, outputs: [], routes: [], workers: [],
+  } satisfies WorkflowStep
+  const html = renderToStaticMarkup(h(StepCard, { step, issues: 0, highlight: false }))
+  expect(html).toContain(`>${subtitle}</p>`)
+})

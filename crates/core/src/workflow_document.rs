@@ -396,6 +396,7 @@ pub(crate) fn graph_document(
                     "parallel"
                 }
                 crate::NodeDefinition::HumanGate(gate) => {
+                    step.title = gate.description.clone();
                     step.routes = outcome_routes(&gate.next);
                     step.inputs = gate.inputs.clone();
                     "human-gate"

@@ -122,6 +122,7 @@ fn run_workflow_uses_the_saved_inline_graph_or_the_named_document() {
     std::fs::remove_file(root.join(".unelos/workflows/a.yaml")).unwrap();
     let doc = get_run_workflow(&root, &run_id).unwrap();
     assert_eq!(doc.settings.start, "a");
+    assert_eq!(doc.steps[1].title.as_deref(), Some("Continue?"));
     assert_eq!(
         doc.steps
             .iter()

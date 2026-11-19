@@ -206,6 +206,10 @@ fn rich_steps_preserve_authored_order_through_save() {
         .unwrap()
         .replace("\r\n", "\n")
         .replace(
+            "    type: human-gate\n",
+            "    type: human-gate\n    description: Approve the plan?\n",
+        )
+        .replace(
             "      approved: implement\n      rejected: plan",
             "      rejected: plan\n      approved: implement",
         )
@@ -231,6 +235,7 @@ fn rich_steps_preserve_authored_order_through_save() {
     assert_eq!(loaded.steps[0].title.as_deref(), Some("create-plan"));
     assert_eq!(loaded.steps[0].routes[0].outcome, None);
     assert_eq!(loaded.steps[0].routes[0].target, "approve-plan");
+    assert_eq!(loaded.steps[1].title.as_deref(), Some("Approve the plan?"));
     assert_eq!(
         loaded.steps[1].routes[0].outcome.as_deref(),
         Some("rejected")

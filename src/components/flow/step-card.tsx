@@ -90,9 +90,7 @@ export function StepCard({
     step.kind === "workflow"
       ? `calls ${step.call?.workflow ?? ""}`
       : step.kind === "human-gate"
-        ? step.inputs[0]
-          ? `Decision on ${step.inputs[0]}`
-          : "Human decision"
+        ? step.title?.trim() || (step.inputs[0] ? `Decision on ${step.inputs[0]}` : "Human decision")
         : [step.title, step.task?.source === "named" && step.task.id && taskLabel(step.task.id), step.agent].filter(Boolean).join(" · ") ||
           "Not configured"
   const badge =
