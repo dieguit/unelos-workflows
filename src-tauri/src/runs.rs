@@ -37,6 +37,23 @@ pub async fn get_run(
 }
 
 #[tauri::command]
+pub async fn get_run_workflow(
+    app: AppHandle,
+    root: String,
+    run_id: String,
+) -> Result<unelos_core::WorkflowDocument, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = approved_root(&load_from(&store_file(&app)?), Path::new(&root))?;
+        unelos_core::get_run_workflow(
+            camino::Utf8Path::from_path(&root).ok_or("Project path is not UTF-8")?,
+            &run_id,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn delete_run(app: AppHandle, root: String, run_id: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let root = approved_root(&load_from(&store_file(&app)?), Path::new(&root))?;

@@ -1,0 +1,16 @@
+description: Commit the finished change on a feature branch, push it and open or update its pull request.
+outcomes:
+- opened
+- blocked
+instructions: |
+  Read the bound summary (what changed and why). Check git status and the
+  current branch, then commit the change's files, push, and open a pull request
+  with `gh pr create` (title from the summary, body: what, why, how it was
+  verified). If the branch already has an open PR, push to it and leave its
+  title and body unless the summary changes them.
+
+  Write the bound pr.md: branch, commits added (sha + message), HEAD sha, PR
+  number and URL, and the commands run with exit statuses.
+
+  Choose blocked when you cannot push or open the PR (gh not authenticated, no
+  remote, merge conflict, nothing to commit); say why. Otherwise opened.

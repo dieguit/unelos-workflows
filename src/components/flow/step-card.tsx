@@ -87,20 +87,22 @@ export function StepCard({
       </div>
     )
   const subtitle =
-    step.kind === "human-gate"
-      ? step.inputs[0]
-        ? `Decision on ${step.inputs[0]}`
-        : "Human decision"
-      : [step.title, step.task?.source === "named" && step.task.id && taskLabel(step.task.id), step.agent].filter(Boolean).join(" · ") ||
-        "Not configured"
+    step.kind === "workflow"
+      ? `calls ${step.call?.workflow ?? ""}`
+      : step.kind === "human-gate"
+        ? step.title?.trim() || (step.inputs[0] ? `Decision on ${step.inputs[0]}` : "Human decision")
+        : [step.title, step.task?.source === "named" && step.task.id && taskLabel(step.task.id), step.agent].filter(Boolean).join(" · ") ||
+          "Not configured"
   const badge =
-    step.kind === "human-gate"
-      ? "Human gate"
-      : step.execution === "main"
-        ? "Main session"
-        : step.execution === "subagent"
-          ? "Subagent"
-          : null
+    step.kind === "workflow"
+      ? "Workflow"
+      : step.kind === "human-gate"
+        ? "Human gate"
+        : step.execution === "main"
+          ? "Main session"
+          : step.execution === "subagent"
+            ? "Subagent"
+            : null
   return (
     <div
       id={`flow-step-${step.id}`}

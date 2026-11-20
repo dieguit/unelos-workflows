@@ -79,6 +79,9 @@ pub fn project_references(root: &Utf8Path) -> Result<ProjectReferences, ProjectL
         }
     }
     for id in workflows {
+        if id.starts_with("global/") {
+            continue;
+        }
         let source = bounded_path(
             &root.join(".unelos"),
             &Utf8PathBuf::from(format!("workflows/{id}.yaml")),
@@ -132,6 +135,14 @@ pub struct LoadedProject {
     pub instruction_dependencies: BTreeMap<Utf8PathBuf, BTreeSet<Utf8PathBuf>>,
     pub definitions: ProjectDefinitions,
     pub workflow: WorkflowDefinition,
+    pub authoring_workflow: WorkflowDefinition,
+    pub node_sources: BTreeMap<String, crate::NodeSource>,
+    pub(crate) external_workflows: BTreeSet<Utf8PathBuf>,
+    pub(crate) child_workflows: Vec<(
+        Utf8PathBuf,
+        WorkflowDefinition,
+        BTreeMap<String, crate::NodeSource>,
+    )>,
 }
 
 impl LoadedProject {
@@ -195,20 +206,56 @@ pub enum ProjectLoadError {
 
 /// List valid project Workflows in filename order without changing runtime state.
 pub fn list_workflows(project_root: &Utf8Path) -> Result<Vec<String>, ProjectLoadError> {
-    Ok(list_workflow_descriptions(project_root)?
+    let mut names: Vec<_> = list_workflow_descriptions(project_root)?
         .into_keys()
-        .collect())
+        .collect();
+    names.sort_by(|a, b| {
+        a.starts_with("global/")
+            .cmp(&b.starts_with("global/"))
+            .then_with(|| a.cmp(b))
+    });
+    Ok(names)
 }
 
-pub(crate) fn list_workflow_descriptions(
+pub fn list_workflow_descriptions(
     project_root: &Utf8Path,
 ) -> Result<BTreeMap<String, Option<String>>, ProjectLoadError> {
     let (root, names) = workflow_files(project_root)?;
     let mut workflows = BTreeMap::new();
     for name in names {
-        let project = load_project(&root, &name)?;
-        crate::validate_project(&project)?;
-        workflows.insert(name, project.workflow.description);
+        let result = load_project(&root, &name).and_then(|project| {
+            crate::validate_project(&project)?;
+            Ok(project)
+        });
+        if name.starts_with("global/") && result.is_err() {
+            continue;
+        }
+        let project = result?;
+        let inputs = &project.workflow.inputs;
+        let outputs = crate::compose::produced_artifacts(&project.workflow);
+        let description = project.workflow.description;
+        let description = if inputs.is_empty() && outputs.is_empty() {
+            description
+        } else {
+            let interface = format!(
+                "inputs: {}; outputs: {}",
+                if inputs.is_empty() {
+                    "—".into()
+                } else {
+                    inputs.join(", ")
+                },
+                if outputs.is_empty() {
+                    "—".into()
+                } else {
+                    outputs.into_iter().collect::<Vec<_>>().join(", ")
+                }
+            );
+            Some(match description {
+                Some(text) => format!("{text} ({interface})"),
+                None => interface,
+            })
+        };
+        workflows.insert(name, description);
     }
     Ok(workflows)
 }
@@ -218,6 +265,8 @@ pub(crate) fn list_workflow_descriptions(
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowSummary {
+    pub global: bool,
+    pub calls: Vec<String>,
     pub name: String,
     pub file: String,
     pub description: Option<String>,
@@ -230,19 +279,48 @@ pub fn workflow_summaries(
     project_root: &Utf8Path,
 ) -> Result<Vec<WorkflowSummary>, ProjectLoadError> {
     let (root, names) = workflow_files(project_root)?;
+    Ok(workflow_summaries_at(&root.join(".unelos"), names))
+}
+
+pub fn global_workflow_summaries() -> Result<Vec<WorkflowSummary>, String> {
+    let root = crate::task_document::global_root()?;
+    let names = workflow_files_at(&root).map_err(|e| e.to_string())?;
+    let mut summaries = workflow_summaries_at(
+        &root,
+        names.into_iter().map(|id| format!("global/{id}")).collect(),
+    );
+    for summary in &mut summaries {
+        summary.name = summary.name.strip_prefix("global/").unwrap().to_owned();
+    }
+    Ok(summaries)
+}
+
+fn workflow_summaries_at(root: &Utf8Path, names: Vec<String>) -> Vec<WorkflowSummary> {
     let mut summaries: Vec<_> = names
         .into_iter()
         .map(|name| {
-            let file = format!("{name}.yaml");
-            match load_project(&root, &name) {
+            let file = format!("{}.yaml", name.strip_prefix("global/").unwrap_or(&name));
+            match load_authoring(root, &name) {
                 Ok(project) => WorkflowSummary {
+                    global: name.starts_with("global/"),
+                    calls: project
+                        .authoring_workflow
+                        .nodes
+                        .values()
+                        .filter_map(|node| match node {
+                            NodeDefinition::Workflow(call) => Some(call.workflow.clone()),
+                            _ => None,
+                        })
+                        .collect::<BTreeSet<_>>()
+                        .into_iter()
+                        .collect(),
                     problem: crate::validate_project(&project)
                         .err()
                         .map(|error| format!("{}: {}", error.field, error.cause)),
                     description: project.workflow.description.clone(),
                     steps: Some(
                         project
-                            .workflow
+                            .authoring_workflow
                             .nodes
                             .values()
                             .filter(|node| !matches!(node, NodeDefinition::End))
@@ -252,6 +330,8 @@ pub fn workflow_summaries(
                     file,
                 },
                 Err(error) => WorkflowSummary {
+                    global: name.starts_with("global/"),
+                    calls: Vec::new(),
                     problem: Some(error.to_string()),
                     description: None,
                     steps: None,
@@ -261,8 +341,8 @@ pub fn workflow_summaries(
             }
         })
         .collect();
-    summaries.sort_by(|a, b| a.file.cmp(&b.file));
-    Ok(summaries)
+    summaries.sort_by(|a, b| a.global.cmp(&b.global).then_with(|| a.file.cmp(&b.file)));
+    summaries
 }
 
 /// Resolved project root plus sorted Workflow names (file stems).
@@ -280,15 +360,27 @@ fn workflow_files(project_root: &Utf8Path) -> Result<(Utf8PathBuf, Vec<String>),
     )?;
     parse_project_settings(definitions_path.as_str(), &read(&definitions_path)?)?;
 
+    let mut names = workflow_files_at(&authoring_root)?;
+    if let Ok(global) = crate::task_document::global_root() {
+        names.extend(
+            workflow_files_at(&global)?
+                .into_iter()
+                .map(|id| format!("global/{id}")),
+        );
+    }
+    Ok((root, names))
+}
+
+fn workflow_files_at(authoring_root: &Utf8Path) -> Result<Vec<String>, ProjectLoadError> {
     let directory = bounded_path(
-        &authoring_root,
+        authoring_root,
         Utf8Path::new("workflows"),
-        &definitions_path,
+        authoring_root,
         "workflows",
     )?;
     let entries = match fs::read_dir(&directory) {
         Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok((root, Vec::new())),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(source) => {
             return Err(ProjectLoadError::Read {
                 path: directory,
@@ -324,7 +416,7 @@ fn workflow_files(project_root: &Utf8Path) -> Result<(Utf8PathBuf, Vec<String>),
         names.push(name);
     }
     names.sort();
-    Ok((root, names))
+    Ok(names)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -428,46 +520,73 @@ fn summarize_authoring<T>(
 
 /// Summarize each `.unelos/agents/<id>/agent.yaml`; a broken agent is a row with `problem`.
 pub fn agent_summaries(project_root: &Utf8Path) -> Result<Vec<AgentSummary>, ProjectLoadError> {
-    summarize_definitions(
-        project_root,
+    summarize_definitions(project_root, "agents", summarize_agent, broken_agent)
+}
+
+pub fn global_agent_summaries() -> Result<Vec<AgentSummary>, String> {
+    summarize_authoring(
+        &crate::task_document::global_root()?,
         "agents",
-        |authoring_root, directory, id| {
-            let relative = Utf8PathBuf::from(format!("agents/{id}"));
-            let entry = bounded_path(authoring_root, &relative, directory, id)?;
-            if !safe_id(id) {
-                return Err(diagnostic(&entry, "id", "invalid definition ID"));
+        |root, directory, id| {
+            let row = summarize_agent(root, directory, id)?;
+            for (field, ids) in [("skills", &row.skills), ("mcps", &row.mcps)] {
+                for (index, reference) in ids.iter().enumerate() {
+                    require_global(
+                        &directory.join(id).join("agent.yaml"),
+                        &format!("{field}[{index}]"),
+                        reference,
+                    )?;
+                }
             }
-            let source = bounded_path(
-                authoring_root,
-                &Utf8PathBuf::from(format!("{relative}/agent.yaml")),
-                &entry,
-                "agent.yaml",
-            )?;
-            let mut agent = parse_agent_definition(source.as_str(), &read(&source)?)?;
-            resolve_instructions(
-                authoring_root,
-                &source,
-                "instructionsFile",
-                &agent.instructions_file,
-                &mut agent.instructions,
-                &mut BTreeMap::new(),
-            )?;
-            Ok(AgentSummary {
-                name: id.to_owned(),
-                model: agent.model,
-                skills: agent.skills,
-                mcps: agent.mcps,
-                problem: None,
-            })
+            Ok(row)
         },
-        |name, problem| AgentSummary {
-            name,
-            model: None,
-            skills: Vec::new(),
-            mcps: Vec::new(),
-            problem: Some(problem),
-        },
+        broken_agent,
     )
+    .map_err(|e| e.to_string())
+}
+
+fn summarize_agent(
+    authoring_root: &Utf8Path,
+    directory: &Utf8Path,
+    id: &str,
+) -> Result<AgentSummary, ProjectLoadError> {
+    let relative = Utf8PathBuf::from(format!("agents/{id}"));
+    let entry = bounded_path(authoring_root, &relative, directory, id)?;
+    if !safe_id(id) {
+        return Err(diagnostic(&entry, "id", "invalid definition ID"));
+    }
+    let source = bounded_path(
+        authoring_root,
+        &Utf8PathBuf::from(format!("{relative}/agent.yaml")),
+        &entry,
+        "agent.yaml",
+    )?;
+    let mut agent = parse_agent_definition(source.as_str(), &read(&source)?)?;
+    resolve_instructions(
+        authoring_root,
+        &source,
+        "instructionsFile",
+        &agent.instructions_file,
+        &mut agent.instructions,
+        &mut BTreeMap::new(),
+    )?;
+    Ok(AgentSummary {
+        name: id.to_owned(),
+        model: agent.model,
+        skills: agent.skills,
+        mcps: agent.mcps,
+        problem: None,
+    })
+}
+
+fn broken_agent(name: String, problem: String) -> AgentSummary {
+    AgentSummary {
+        name,
+        model: None,
+        skills: Vec::new(),
+        mcps: Vec::new(),
+        problem: Some(problem),
+    }
 }
 
 /// Summarize each `.unelos/tasks/<id>/task.yaml`; a broken task is a row with `problem`.
@@ -666,6 +785,28 @@ pub(crate) fn load_project_candidate(
     workflow_name: &str,
     candidate: Option<&str>,
 ) -> Result<LoadedProject, ProjectLoadError> {
+    load_project_inner(project_root, workflow_name, candidate, None)
+}
+
+pub(crate) fn load_inline_project(
+    project_root: &Utf8Path,
+    run_id: &str,
+    candidate: Option<&str>,
+) -> Result<LoadedProject, ProjectLoadError> {
+    load_project_inner(
+        project_root,
+        "inline/run",
+        candidate,
+        Some(&Utf8PathBuf::from(format!("runs/{run_id}/workflow.yaml"))),
+    )
+}
+
+fn load_project_inner(
+    project_root: &Utf8Path,
+    workflow_name: &str,
+    candidate: Option<&str>,
+    run_workflow: Option<&Utf8Path>,
+) -> Result<LoadedProject, ProjectLoadError> {
     let project_root = absolute_root(project_root).map_err(|source| ProjectLoadError::Root {
         path: project_root.to_owned(),
         source,
@@ -678,7 +819,13 @@ pub(crate) fn load_project_candidate(
         "project",
     )?;
     parse_project_settings(settings.as_str(), &read(&settings)?)?;
-    let mut loaded = load_authoring_candidate(&authoring_root, workflow_name, candidate)?;
+    let mut loaded = load_authoring_inner(
+        &authoring_root,
+        workflow_name,
+        candidate,
+        false,
+        run_workflow,
+    )?;
     loaded.project_root = project_root;
     Ok(loaded)
 }
@@ -690,15 +837,53 @@ pub(crate) fn load_authoring(
     load_authoring_candidate(authoring_root, workflow_name, None)
 }
 
-fn load_authoring_candidate(
+pub(crate) fn load_authoring_candidate(
     authoring_root: &Utf8Path,
     workflow_name: &str,
     candidate: Option<&str>,
 ) -> Result<LoadedProject, ProjectLoadError> {
-    if workflow_name.is_empty()
-        || matches!(workflow_name, "." | "..")
-        || workflow_name.contains(['/', '\\'])
-        || Utf8Path::new(workflow_name).is_absolute()
+    load_authoring_inner(authoring_root, workflow_name, candidate, false, None)
+}
+
+pub(crate) fn load_import_authoring(
+    authoring_root: &Utf8Path,
+    workflow_name: &str,
+) -> Result<LoadedProject, ProjectLoadError> {
+    load_authoring_inner(authoring_root, workflow_name, None, true, None)
+}
+
+fn load_authoring_inner(
+    authoring_root: &Utf8Path,
+    workflow_name: &str,
+    candidate: Option<&str>,
+    external: bool,
+    run_workflow: Option<&Utf8Path>,
+) -> Result<LoadedProject, ProjectLoadError> {
+    let project_authoring_root = authoring_root;
+    let global = run_workflow.is_none() && workflow_name.starts_with("global/");
+    let global_root = if let Some(id) = workflow_name.strip_prefix("global/").filter(|_| global) {
+        if !safe_id(id) {
+            return Err(ProjectLoadError::InvalidWorkflowName {
+                name: workflow_name.into(),
+            });
+        }
+        Some(
+            crate::task_document::global_root()
+                .map_err(|e| diagnostic(authoring_root, "workflow", e))?,
+        )
+    } else {
+        None
+    };
+    let authoring_root = global_root.as_deref().unwrap_or(project_authoring_root);
+    let workflow_name = workflow_name
+        .strip_prefix("global/")
+        .filter(|_| global)
+        .unwrap_or(workflow_name);
+    if run_workflow.is_none()
+        && (workflow_name.is_empty()
+            || matches!(workflow_name, "." | "..")
+            || workflow_name.contains(['/', '\\'])
+            || Utf8Path::new(workflow_name).is_absolute())
     {
         return Err(ProjectLoadError::InvalidWorkflowName {
             name: workflow_name.to_owned(),
@@ -712,7 +897,9 @@ fn load_authoring_candidate(
     let project_source = authoring_root.join("project.yaml");
     let workflow_source = bounded_path(
         &authoring_root,
-        &Utf8PathBuf::from(format!("workflows/{workflow_name}.yaml")),
+        run_workflow.unwrap_or(&Utf8PathBuf::from(format!(
+            "workflows/{workflow_name}.yaml"
+        ))),
         &project_source,
         "workflow",
     )?;
@@ -723,7 +910,11 @@ fn load_authoring_candidate(
     let mut task_sources = BTreeMap::new();
     let mut agent_sources = BTreeMap::new();
     let mut instruction_dependencies = BTreeMap::new();
-    for (id, source) in definition_sources(&authoring_root, "tasks", "task.yaml")? {
+    for (id, source) in if global {
+        BTreeMap::new()
+    } else {
+        definition_sources(&authoring_root, "tasks", "task.yaml")?
+    } {
         let mut task = parse_task_definition(source.as_str(), &read(&source)?)?;
         resolve_instructions(
             &authoring_root,
@@ -736,7 +927,11 @@ fn load_authoring_candidate(
         task_sources.insert(id.clone(), source);
         definitions.task_definitions.insert(id, task);
     }
-    for (id, source) in definition_sources(&authoring_root, "agents", "agent.yaml")? {
+    for (id, source) in if global {
+        BTreeMap::new()
+    } else {
+        definition_sources(&authoring_root, "agents", "agent.yaml")?
+    } {
         let mut agent = parse_agent_definition(source.as_str(), &read(&source)?)?;
         resolve_instructions(
             &authoring_root,
@@ -754,12 +949,124 @@ fn load_authoring_candidate(
         None => read(&workflow_source)?,
     };
     let mut workflow = parse_workflow_definition(workflow_source.as_str(), &text)?;
+    if global {
+        validate_global_workflow(&workflow_source, &workflow)?;
+    }
     if workflow.name != workflow_name {
         return Err(ProjectLoadError::NameMismatch {
             path: workflow_source,
             requested: workflow_name.to_owned(),
             declared: workflow.name,
         });
+    }
+    let authoring_workflow = workflow.clone();
+    let mut external_workflows = BTreeSet::new();
+    let expanded = crate::compose::expand(&workflow_source, &workflow, &mut |call| {
+        let id = call.workflow.as_str();
+        let child_global = id.starts_with("global/");
+        let id = id.strip_prefix("global/").unwrap_or(id);
+        if (child_global && !safe_id(id))
+            || id.is_empty()
+            || matches!(id, "." | "..")
+            || id.contains(['/', '\\'])
+            || Utf8Path::new(id).is_absolute()
+        {
+            return Err(diagnostic(
+                &workflow_source,
+                "workflow",
+                "invalid workflow ID",
+            ));
+        }
+        let child_root = if child_global {
+            crate::task_document::global_root()
+                .map_err(|e| diagnostic(&workflow_source, "workflow", e))?
+        } else {
+            project_authoring_root.to_owned()
+        };
+        let path = bounded_path(
+            &child_root,
+            &Utf8PathBuf::from(format!("workflows/{id}.yaml")),
+            &workflow_source,
+            "workflow",
+        )?;
+        let child = match read(&path) {
+            Ok(text) => parse_workflow_definition(path.as_str(), &text)?,
+            Err(ProjectLoadError::Missing { .. }) if external && child_global => {
+                external_workflows.insert(path.clone());
+                external_workflow(id, call)
+            }
+            Err(error) => return Err(error),
+        };
+        if child_global && !external_workflows.contains(&path) {
+            validate_global_workflow(&path, &child)?;
+        }
+        if child.name != id {
+            return Err(ProjectLoadError::NameMismatch {
+                path,
+                requested: id.to_owned(),
+                declared: child.name,
+            });
+        }
+        Ok((path, child))
+    })?;
+    workflow = expanded.workflow;
+    let node_sources = expanded.node_sources;
+    let child_workflows = expanded.children;
+    if !external_workflows.is_empty() {
+        definitions.agents.insert(
+            String::new(),
+            parse_agent_definition("external", "instructions: External global workflow\n")?,
+        );
+    }
+    let agents: BTreeSet<_> = workflow
+        .nodes
+        .values()
+        .flat_map(|node| match node {
+            NodeDefinition::Task(task) => vec![task.agent.clone()],
+            NodeDefinition::Parallel(parallel) => parallel
+                .tasks
+                .iter()
+                .map(|worker| worker.agent.clone())
+                .collect(),
+            _ => Vec::new(),
+        })
+        .collect();
+    for name in agents {
+        if let Some(id) = name.strip_prefix("global/") {
+            if !safe_id(id) {
+                return Err(diagnostic(
+                    &workflow_source,
+                    "agent",
+                    "invalid global agent ID",
+                ));
+            }
+            let root = crate::task_document::global_root()
+                .map_err(|e| diagnostic(&workflow_source, "agent", e))?;
+            let source = bounded_path(
+                &root,
+                &Utf8PathBuf::from(format!("agents/{id}/agent.yaml")),
+                &workflow_source,
+                "agent",
+            )?;
+            match read(&source) {
+                Ok(text) => {
+                    let mut agent = parse_agent_definition(source.as_str(), &text)?;
+                    validate_global_agent(&source, &agent)?;
+                    resolve_instructions(
+                        &root,
+                        &source,
+                        "instructionsFile",
+                        &agent.instructions_file,
+                        &mut agent.instructions,
+                        &mut BTreeMap::new(),
+                    )?;
+                    agent_sources.insert(name.clone(), source);
+                    definitions.agents.insert(name, agent);
+                }
+                Err(ProjectLoadError::Missing { .. }) => {}
+                Err(error) => return Err(error),
+            }
+        }
     }
     for (id, node) in &mut workflow.nodes {
         let selections: Vec<_> = match node {
@@ -802,6 +1109,9 @@ fn load_authoring_candidate(
                         match read(&source) {
                             Ok(text) => {
                                 let mut task = parse_task_definition(source.as_str(), &text)?;
+                                for (index, skill) in task.skills.iter().enumerate() {
+                                    require_global(&source, &format!("skills[{index}]"), skill)?;
+                                }
                                 // Global dependencies are not project-relative install inputs; runtime uses resolved text.
                                 resolve_instructions(
                                     &root,
@@ -821,9 +1131,11 @@ fn load_authoring_candidate(
                 }
             }
             if let TaskSelection::Inline(task) = selection {
+                let source = &node_sources[id].path;
+                let source_root = source.parent().and_then(Utf8Path::parent).unwrap();
                 resolve_instructions(
-                    &authoring_root,
-                    &workflow_source,
+                    source_root,
+                    source,
                     &field,
                     &task.instructions_file,
                     &mut task.instructions,
@@ -842,7 +1154,112 @@ fn load_authoring_candidate(
         instruction_dependencies,
         definitions,
         workflow,
+        authoring_workflow,
+        node_sources,
+        external_workflows,
+        child_workflows,
     })
+}
+
+fn external_workflow(id: &str, call: &crate::WorkflowNode) -> WorkflowDefinition {
+    WorkflowDefinition {
+        name: id.into(),
+        description: None,
+        start: "external".into(),
+        inputs: call.inputs.keys().cloned().collect(),
+        nodes: [
+            (
+                "external".into(),
+                NodeDefinition::Task(crate::TaskNode {
+                    task: TaskSelection::Inline(crate::TaskDefinition {
+                        description: None,
+                        instructions: "External global workflow".into(),
+                        instructions_file: None,
+                        skills: Vec::new(),
+                        outcomes: Vec::new(),
+                    }),
+                    agent: String::new(),
+                    execution: crate::Execution::default(),
+                    inputs: call.inputs.keys().cloned().collect(),
+                    outputs: call.outputs.keys().cloned().collect(),
+                    next: crate::Transition::Single("end".into()),
+                }),
+            ),
+            ("end".into(), NodeDefinition::End),
+        ]
+        .into_iter()
+        .collect(),
+    }
+}
+
+fn require_global(source: &Utf8Path, field: &str, id: &str) -> Result<(), ProjectLoadError> {
+    if !id.strip_prefix("global/").is_some_and(|id| !id.is_empty()) {
+        return Err(diagnostic(
+            source,
+            field,
+            "global authoring can only reference global/<id> definitions",
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_global_agent(
+    source: &Utf8Path,
+    agent: &crate::AgentDefinition,
+) -> Result<(), ProjectLoadError> {
+    for (field, ids) in [("skills", &agent.skills), ("mcps", &agent.mcps)] {
+        for (index, id) in ids.iter().enumerate() {
+            require_global(source, &format!("{field}[{index}]"), id)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_global_workflow(
+    source: &Utf8Path,
+    workflow: &WorkflowDefinition,
+) -> Result<(), ProjectLoadError> {
+    for (id, node) in &workflow.nodes {
+        let field = format!("nodes.{id}");
+        let tasks = match node {
+            NodeDefinition::Task(task) => vec![(field, &task.agent, &task.task)],
+            NodeDefinition::Parallel(parallel) => parallel
+                .tasks
+                .iter()
+                .enumerate()
+                .map(|(index, worker)| {
+                    (
+                        format!("{field}.tasks[{index}]"),
+                        &worker.agent,
+                        &worker.task,
+                    )
+                })
+                .collect(),
+            NodeDefinition::Workflow(call) => {
+                require_global(source, &format!("{field}.workflow"), &call.workflow)?;
+                Vec::new()
+            }
+            _ => Vec::new(),
+        };
+        for (field, agent, task) in tasks {
+            if !agent.is_empty() {
+                require_global(source, &format!("{field}.agent"), agent)?;
+            }
+            match task {
+                TaskSelection::Named(id) => require_global(source, &format!("{field}.task"), id)?,
+                TaskSelection::Inline(task) => {
+                    for (index, skill) in task.skills.iter().enumerate() {
+                        require_global(
+                            source,
+                            &format!("{field}.taskDefinition.skills[{index}]"),
+                            skill,
+                        )?;
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn safe_id(id: &str) -> bool {

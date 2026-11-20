@@ -2,6 +2,223 @@ use super::*;
 use std::sync::Mutex;
 static ENV: Mutex<()> = Mutex::new(());
 
+#[test]
+fn global_opencode_mcp_ownership_preserves_user_config() {
+    let _lock = ENV.lock().unwrap();
+    let temp = assert_fs::TempDir::new().unwrap();
+    let root = Utf8Path::from_path(temp.path()).unwrap();
+    let unelos = root.join("unelos");
+    let opencode = root.join("opencode");
+    let _env = Env::set(&[
+        ("UNELOS_CONFIG_DIR", unelos.as_str()),
+        ("OPENCODE_CONFIG_DIR", opencode.as_str()),
+        ("HOME", root.as_str()),
+        ("PATH", root.join("empty").as_str()),
+    ]);
+    fs::create_dir_all(&opencode).unwrap();
+    let path = opencode.join("opencode.jsonc");
+    let source = root.join("cli");
+    fs::write(&source, "binary").unwrap();
+    let user_line = r#"    "user": { "type": "local", "command": ["user-command"] }"#;
+    let baseline = format!(
+        "{{\n  // Keep this comment\n  \"mcp\": {{\n{user_line}\n  }},\n  \"tools\": {{}}\n}}\n"
+    );
+    fs::write(&path, &baseline).unwrap();
+    install_harness("opencode", &source).unwrap();
+    let installed = fs::read_to_string(&path).unwrap();
+    let server = crate::McpServer::Local {
+        command: vec!["fixture-command".into()],
+        environment: Default::default(),
+    };
+    let definition = unelos.join("agents").join("probe");
+    fs::create_dir_all(&definition).unwrap();
+    let agent_file = definition.join("agent.yaml");
+    let profile = opencode.join("agents").join("unelos-global-probe.md");
+    let receipt = unelos.join("opencode-mcps.json");
+    let add_mcp = |id: &str| {
+        crate::save_global_mcp(
+            None,
+            crate::McpDocument {
+                id: id.to_owned(),
+                server: server.clone(),
+            },
+        )
+        .unwrap();
+    };
+    add_mcp("probe");
+    fs::write(&agent_file, "instructions: probe\nmcps: [global/probe]\n").unwrap();
+    let build = crate::build_global_harness_agents().unwrap();
+    assert!(build.skipped.is_empty(), "{:?}", build.skipped);
+    let configured = fs::read_to_string(&path).unwrap();
+    assert!(configured.contains(user_line));
+    assert!(configured.contains("// Keep this comment"));
+    assert!(configured.contains("\"enabled\": true"));
+    assert!(configured.contains("\"probe_*\": false"));
+    assert!(fs::read_to_string(&profile)
+        .unwrap()
+        .contains("probe_*: true"));
+    assert!(receipt.is_file());
+    assert!(crate::build_global_harness_agents()
+        .unwrap()
+        .written
+        .is_empty());
+    assert_eq!(fs::read_to_string(&path).unwrap(), configured);
+
+    fs::remove_dir_all(&definition).unwrap();
+    crate::build_global_harness_agents().unwrap();
+    assert_eq!(fs::read_to_string(&path).unwrap(), installed);
+    assert!(!receipt.exists());
+    fs::create_dir_all(&definition).unwrap();
+    add_mcp("user");
+    let identical = installed.replace(
+        user_line,
+        r#"    "user": { "type": "local", "command": ["fixture-command"], "environment": {}, "enabled": true }"#,
+    ).replace("\"tools\": {}", "\"tools\": {\"user_*\": false}");
+    fs::write(&path, &identical).unwrap();
+    fs::write(&agent_file, "instructions: probe\nmcps: [global/user]\n").unwrap();
+    let build = crate::build_global_harness_agents().unwrap();
+    assert!(build.skipped.is_empty(), "{:?}", build.skipped);
+    assert_eq!(fs::read_to_string(&path).unwrap(), identical);
+    assert!(!receipt.exists());
+    assert!(fs::read_to_string(&profile)
+        .unwrap()
+        .contains("user_*: true"));
+    fs::write(&path, &installed).unwrap();
+    fs::write(
+        &agent_file,
+        "instructions: probe\nmcps: [global/probe, global/user]\n",
+    )
+    .unwrap();
+    let build = crate::build_global_harness_agents().unwrap();
+    assert!(build.skipped.iter().any(|s| s.contains("mcp.user")));
+    assert!(!fs::read_to_string(&profile).unwrap().contains("user_*"));
+    let configured = fs::read_to_string(&path).unwrap();
+    let modified = configured.replace("fixture-command", "user-edited");
+    fs::write(&path, &modified).unwrap();
+    let build = crate::build_global_harness_agents().unwrap();
+    assert!(build
+        .skipped
+        .iter()
+        .any(|s| s.contains("released ownership")));
+    assert_eq!(fs::read_to_string(&path).unwrap(), modified);
+    assert!(!fs::read_to_string(&profile).unwrap().contains("probe_*"));
+
+    fs::write(&path, "{invalid").unwrap();
+    let build = crate::build_global_harness_agents().unwrap();
+    assert!(build
+        .skipped
+        .iter()
+        .any(|s| s.starts_with("opencode globals:")));
+    assert_eq!(fs::read_to_string(&path).unwrap(), "{invalid");
+    fs::write(&path, &modified).unwrap();
+    let duplicate = opencode.join("opencode.json");
+    fs::write(&duplicate, "{}\n").unwrap();
+    assert!(crate::build_global_harness_agents()
+        .unwrap()
+        .skipped
+        .iter()
+        .any(|s| s.contains("Both opencode.json and opencode.jsonc exist")));
+    assert_eq!(fs::read_to_string(&path).unwrap(), modified);
+    fs::remove_file(duplicate).unwrap();
+    uninstall_harness("opencode").unwrap();
+    let final_config = fs::read_to_string(&path).unwrap();
+    assert!(final_config.contains("user-edited"));
+    assert!(final_config.contains(user_line));
+    assert!(!final_config.contains("probe_*"));
+    assert!(!receipt.exists());
+    assert!(!opencode.join("opencode.json").exists());
+}
+
+#[test]
+#[cfg(unix)]
+fn bundled_globals_install_update_preserve_and_remove() {
+    let _lock = ENV.lock().unwrap();
+    let temp = assert_fs::TempDir::new().unwrap();
+    let root = Utf8Path::from_path(temp.path()).unwrap();
+    let fake = fake_claude(root);
+    let config = root.join("unelos");
+    let _env = Env::set(&[
+        ("UNELOS_CONFIG_DIR", config.as_str()),
+        ("CLAUDE_CONFIG_DIR", root.join("claude").as_str()),
+        ("UNELOS_CLAUDE_BIN", fake.as_str()),
+        ("OPENCODE_CONFIG_DIR", root.join("opencode").as_str()),
+        ("HOME", root.as_str()),
+        ("PATH", root.join("empty").as_str()),
+    ]);
+    let source = root.join("source");
+    fs::write(&source, "binary").unwrap();
+    install_harness("opencode", &source).unwrap();
+    let opencode_agents = root.join("opencode").join("agents");
+    let author = opencode_agents.join("unelos-global-workflow-author.md");
+    let analyst = opencode_agents.join("unelos-global-workflow-analyst.md");
+    assert!(author.is_file());
+    assert!(analyst.is_file());
+    assert!(!opencode_agents
+        .join("unelos-global-workflow-lead.md")
+        .exists());
+    fs::write(&author, "user edits").unwrap();
+    let initial: std::collections::BTreeMap<String, String> =
+        serde_json::from_slice(&fs::read(config.join("bundled.json")).unwrap()).unwrap();
+    assert!(initial.contains_key("workflows/workflow-design.yaml"));
+    for relative in initial.keys() {
+        assert!(relative
+            .split('/')
+            .fold(config.clone(), |p, s| p.join(s))
+            .is_file());
+    }
+    uninstall_harness("opencode").unwrap();
+    assert!(!analyst.exists());
+    assert_eq!(fs::read_to_string(&author).unwrap(), "user edits");
+    install_harness("claude", &source).unwrap();
+    let claude_author = root
+        .join("claude")
+        .join("agents")
+        .join("unelos-global-workflow-author.md");
+    assert!(claude_author.is_file());
+    uninstall_harness("claude").unwrap();
+    assert!(!claude_author.exists());
+    let unowned = config
+        .join("agents")
+        .join("workflow-author")
+        .join("instructions.md");
+    fs::create_dir_all(unowned.parent().unwrap()).unwrap();
+    fs::write(&unowned, "pre-existing").unwrap();
+    install_harness("opencode", &source).unwrap();
+    assert_eq!(fs::read_to_string(&unowned).unwrap(), "pre-existing");
+    let manifest_path = config.join("bundled.json");
+    let mut manifest: std::collections::BTreeMap<String, String> =
+        serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+    assert_eq!(manifest.len() + 1, initial.len());
+    for relative in manifest.keys() {
+        let file = relative.split('/').fold(config.clone(), |p, s| p.join(s));
+        assert!(file.is_file(), "{file}");
+    }
+    // Simulate the bytes and recorded hash from an older bundled release.
+    use sha2::{Digest, Sha256};
+    let workflow = config.join("workflows").join("workflow-design.yaml");
+    fs::write(&workflow, "older release").unwrap();
+    manifest.insert(
+        "workflows/workflow-design.yaml".into(),
+        format!("{:x}", Sha256::digest(b"older release")),
+    );
+    fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    install_harness("opencode", &source).unwrap();
+    assert_ne!(fs::read_to_string(&workflow).unwrap(), "older release");
+    assert_eq!(fs::read_to_string(&unowned).unwrap(), "pre-existing");
+    fs::write(&workflow, "user changes").unwrap();
+    install_harness("claude", &source).unwrap();
+    assert_eq!(fs::read_to_string(&workflow).unwrap(), "user changes");
+    uninstall_harness("opencode").unwrap();
+    assert!(manifest_path.exists());
+    let skill = config.join("skills").join("unelos-workflow-design");
+    assert!(skill.exists());
+    uninstall_harness("claude").unwrap();
+    assert!(!manifest_path.exists());
+    assert!(!skill.exists());
+    assert_eq!(fs::read_to_string(&workflow).unwrap(), "user changes");
+    assert_eq!(fs::read_to_string(&unowned).unwrap(), "pre-existing");
+}
+
 #[cfg(unix)]
 fn fake_claude(root: &Utf8Path) -> Utf8PathBuf {
     use std::os::unix::fs::PermissionsExt;
@@ -133,8 +350,8 @@ fn failed_workflow_export_preserves_existing_profiles() {
     assert!(!result.skipped.is_empty());
     assert!(result.removed.is_empty());
     assert_eq!(fs::read_to_string(profile).unwrap(), "keep");
-    assert!(result.written.contains(&valid));
-    assert_ne!(fs::read_to_string(valid).unwrap(), "outdated");
+    assert!(!result.written.contains(&valid));
+    assert_eq!(fs::read_to_string(valid).unwrap(), "outdated");
 }
 
 #[test]
@@ -174,7 +391,6 @@ fn claude_agent_model_mapping_and_mcp_list() {
             ),
         ]
         .into(),
-        main: true,
         subagent: true,
     };
     let path = root.join(".claude/agents/unelos-test.md");
@@ -201,6 +417,7 @@ fn claude_agent_model_mapping_and_mcp_list() {
             .build_project(
                 root,
                 &[("workflow".into(), vec![agent.clone()])].into(),
+                &[],
                 true,
             )
             .unwrap();
@@ -236,8 +453,17 @@ fn adapter_write_failure_restores_existing_files() {
     let temp = assert_fs::TempDir::new().unwrap();
     let root = Utf8Path::from_path(temp.path()).unwrap();
     fs::create_dir_all(root.join(".claude/agents")).unwrap();
-    fs::write(root.join(".claude/agents/unelos-a.md"), "original a").unwrap();
-    fs::write(root.join(".claude/agents/unelos-b.md"), "original b").unwrap();
+    crate::harness_build::write_agents(
+        root,
+        ".claude/agents",
+        vec![
+            (".claude/agents/unelos-a.md".into(), "original a".into()),
+            (".claude/agents/unelos-b.md".into(), "original b".into()),
+        ],
+        vec![],
+        true,
+    )
+    .unwrap();
     fs::write(root.join(".claude/agents/unelos-stale.md"), "stale").unwrap();
     fs::write(
         root.join(format!(
@@ -254,6 +480,7 @@ fn adapter_write_failure_restores_existing_files() {
             (".claude/agents/unelos-a.md".into(), "new a".into()),
             (".claude/agents/unelos-b.md".into(), "new b".into()),
         ],
+        vec![],
         true
     )
     .is_err());
@@ -300,6 +527,17 @@ fn builds_both_harnesses_and_unmapped_claude_keeps_files() {
     fs::write(&source, "binary").unwrap();
     install_harness("opencode", &source).unwrap();
     install_harness("claude", &source).unwrap();
+    let mut legacy_copies = Vec::new();
+    for harness in ["opencode", "claude"] {
+        let directory = root.join(format!(".{harness}")).join("agents");
+        fs::create_dir_all(&directory).unwrap();
+        let name = "unelos-global-workflow-author.md";
+        let source = root.join(harness).join("agents").join(name);
+        let copy = directory.join(name);
+        let text = fs::read_to_string(source).unwrap();
+        fs::write(&copy, text).unwrap();
+        legacy_copies.push(copy);
+    }
     crate::save_model_mapping(
         Some("smart"),
         "smart",
@@ -316,6 +554,16 @@ fn builds_both_harnesses_and_unmapped_claude_keeps_files() {
     let built = crate::build_harness_config(root).unwrap();
     assert_eq!(built.harnesses, ["opencode", "claude"]);
     assert!(built.skipped.is_empty());
+    assert_eq!(built.removed, legacy_copies);
+    for harness in ["opencode", "claude"] {
+        let receipt = root
+            .join(format!(".{harness}"))
+            .join("agents")
+            .join(".unelos-owned-agents.json");
+        fs::remove_file(&receipt).unwrap();
+        crate::build_harness_config(root).unwrap();
+        assert!(receipt.is_file());
+    }
     let claude_agent = root.join(".claude/agents/unelos-simple-implementer.md");
     let before = fs::read(&claude_agent).unwrap();
     let stale = root.join(".claude/agents/unelos-stale.md");
@@ -327,7 +575,7 @@ fn builds_both_harnesses_and_unmapped_claude_keeps_files() {
     )
     .unwrap();
     let built = crate::build_harness_config(root).unwrap();
-    assert_eq!(built.harnesses, ["opencode"]);
+    assert_eq!(built.harnesses, ["opencode", "claude"]);
     assert_eq!(built.skipped.len(), 1);
     assert!(built.skipped[0].starts_with("claude: No Claude model mapped"));
     assert_eq!(fs::read(&claude_agent).unwrap(), before);
@@ -473,7 +721,6 @@ fn effort_agent(model: crate::AgentModel, effort: Option<&str>) -> crate::AgentE
         tools: vec![],
         mcps: vec![],
         mcp_servers: Default::default(),
-        main: true,
         subagent: true,
     }
 }
@@ -568,7 +815,7 @@ fn claude_renders_effort() {
     ] {
         let agent = effort_agent(AgentModel::Alias("smart".into()), effort);
         claude::Claude
-            .build_project(root, &[("workflow".into(), vec![agent])].into(), true)
+            .build_project(root, &[("workflow".into(), vec![agent])].into(), &[], true)
             .unwrap();
         let text = fs::read_to_string(root.join(".claude/agents/unelos-effort.md")).unwrap();
         let front: serde_json::Value =
@@ -581,7 +828,7 @@ fn claude_renders_effort() {
     let agent = effort_agent(AgentModel::Alias("smart".into()), Some("none"));
     assert_eq!(
         claude::Claude
-            .build_project(root, &[("workflow".into(), vec![agent])].into(), true)
+            .build_project(root, &[("workflow".into(), vec![agent])].into(), &[], true)
             .unwrap_err()
             .code,
         "invalid_effort"

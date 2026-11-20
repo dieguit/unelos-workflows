@@ -31,23 +31,28 @@ fn fixture_has_exact_topology_and_serialization() {
         vec![
             GraphNode {
                 id: "approve-plan".into(),
-                kind: NodeKind::HumanGate
+                kind: NodeKind::HumanGate,
+                workflow: None,
             },
             GraphNode {
                 id: "done".into(),
-                kind: NodeKind::End
+                kind: NodeKind::End,
+                workflow: None,
             },
             GraphNode {
                 id: "implement".into(),
-                kind: NodeKind::Task
+                kind: NodeKind::Task,
+                workflow: None,
             },
             GraphNode {
                 id: "plan".into(),
-                kind: NodeKind::Task
+                kind: NodeKind::Task,
+                workflow: None,
             },
             GraphNode {
                 id: "review".into(),
-                kind: NodeKind::Task
+                kind: NodeKind::Task,
+                workflow: None,
             },
         ]
     );
@@ -122,7 +127,8 @@ fn artifacts_do_not_create_edges_and_all_declared_nodes_survive() {
     assert!(graph.edges.contains(&edge("plan", "plan", None)));
     assert!(graph.nodes.contains(&GraphNode {
         id: "unreachable".into(),
-        kind: NodeKind::End
+        kind: NodeKind::End,
+        workflow: None,
     }));
 }
 
@@ -161,7 +167,8 @@ fn parallel_stays_one_node_for_single_and_labeled_routes() {
     let single_route_nodes = graph.nodes.clone();
     assert!(graph.nodes.contains(&GraphNode {
         id: "implement".into(),
-        kind: NodeKind::Parallel
+        kind: NodeKind::Parallel,
+        workflow: None,
     }));
     assert!(graph.edges.contains(&edge("implement", "review", None)));
     assert_eq!(

@@ -10,13 +10,16 @@ pub enum Version {
 }
 
 pub fn check_agents(root: &Utf8Path, agents: &[AgentExport]) -> Result<(), InstallError> {
-    for agent in agents {
+    for agent in agents.iter().filter(|agent| agent.subagent) {
         if let Some(model) = &agent.model {
             crate::harness::opencode::resolve_agent_model(model, agent.effort.as_deref())?;
         }
         crate::check_install_path(
             root,
-            &Utf8PathBuf::from(format!(".opencode/agents/unelos-{}.md", agent.id)),
+            &Utf8PathBuf::from(format!(
+                ".opencode/agents/{}.md",
+                crate::install::native_agent_id(&agent.id)
+            )),
         )?;
     }
     Ok(())
@@ -27,13 +30,8 @@ pub fn render_agents(
     agents: &[AgentExport],
 ) -> Result<Vec<(Utf8PathBuf, String)>, InstallError> {
     let mut rendered = Vec::new();
-    for agent in agents {
-        let mode = match (agent.main, agent.subagent) {
-            (true, true) => "all",
-            (true, false) => "primary",
-            _ => "subagent",
-        };
-        let mut front = json!({"description":format!("Unelos {} role",agent.id),"mode":mode});
+    for agent in agents.iter().filter(|agent| agent.subagent) {
+        let mut front = json!({"description":format!("Unelos {} role",agent.id),"mode":"subagent"});
         for id in &agent.mcps {
             let id = id.strip_prefix("global/").unwrap_or(id);
             if front.get("tools").is_none() {
@@ -76,7 +74,10 @@ pub fn render_agents(
         })?;
         let text = format!("---\n{yaml}---\n{}{}\n", agent.instructions, requirements);
         rendered.push((
-            Utf8PathBuf::from(format!(".opencode/agents/unelos-{}.md", agent.id)),
+            Utf8PathBuf::from(format!(
+                ".opencode/agents/{}.md",
+                crate::install::native_agent_id(&agent.id)
+            )),
             text,
         ));
     }

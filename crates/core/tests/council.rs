@@ -55,6 +55,7 @@ fn parallel_packet(root: &Utf8Path) -> WorkPacket {
         &project,
         WorkRuntimeInput::Parallel {
             input: TaskRuntimeInput {
+                missing_inputs: vec![],
                 run_id: state.run_id.clone(),
                 task_id: record.execution_id.clone(),
                 node_id: record.node_id.clone(),

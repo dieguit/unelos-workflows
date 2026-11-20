@@ -1,0 +1,5 @@
+name: mid
+start: T
+nodes:
+  T: {type: workflow, workflow: leaf, outputs: {y.md: e1.md}, next: done}
+  done: {type: end}

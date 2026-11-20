@@ -1,0 +1,17 @@
+description: Write the approved workflows, tasks, agents, skills and MCPs as Unelos definitions.
+skills:
+- global/unelos-workflow-design
+instructions: |
+  Write exactly what proposal.md describes, using the skill's
+  references/definitions.md for every field and references/building-blocks.md
+  for how to phrase instructions. Write project definitions under the project's
+  .unelos/ unless the proposal says global. Reuse existing definitions the
+  proposal marks as existing; never overwrite one it does not mention.
+
+  Project knowledge (how to run the app, check commands, pitfalls) goes into a
+  project skill, not copied into each task. Put exact commands in check tasks.
+
+  Append a section to the bound written.md: every file created or changed, and
+  any deviation from the proposal with the reason. On re-entry, transition
+  feedback carries validation.md or gate feedback: fix what it reports and
+  append a new section. Do not commit.

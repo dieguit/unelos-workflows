@@ -18,3 +18,7 @@ export async function listAllSkills(root: string): Promise<SkillSummary[]> {
   ])
   return [...project, ...global]
 }
+
+/** Project + global skills, or only global ones when `root` is null. */
+export const listSkillChoices = (root: string | null) =>
+  root === null ? listGlobalPrefixedSkills() : listAllSkills(root)

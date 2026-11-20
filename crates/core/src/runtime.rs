@@ -16,12 +16,16 @@ mod rename;
 mod resume;
 mod runs_ui;
 mod store;
-pub use runs_ui::{delete_run, get_run, list_runs, read_run_artifact, RunDetails, RunListItem};
+pub use runs_ui::{
+    delete_run, get_run, get_run_workflow, list_runs, read_run_artifact, RunDetails, RunListItem,
+};
 
 pub use commands::{approve_node, complete_node, reject_node};
 pub use completion::complete;
 pub use execution::{execution_mutate, execution_next, execution_start};
+mod inline;
 pub use gates::{approve, reject};
+pub use inline::{execution_start_inline, InlineStep};
 pub use rename::rename_run;
 pub use resume::{execution_new, execution_resume, execution_runs};
 
@@ -35,6 +39,8 @@ pub struct RunState {
     pub run_id: String,
     pub name: String,
     pub workflow_name: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub inline: bool,
     pub request: String,
     #[serde(default)]
     pub naming_pending: bool,
@@ -265,14 +271,19 @@ fn prepare_start_state(
     naming_pending: bool,
 ) -> Result<RunState, RuntimeError> {
     let node_id = &project.workflow.start;
-    check_component(node_id, "Node")?;
+    check_node_id(node_id, "Node")?;
     let state = RunState {
         started_at: None,
         updated_at: None,
         run_id: run_id.into(),
         name: name.into(),
-        workflow_name: project.workflow.name.clone(),
+        workflow_name: if project.authoring_root != project.project_root.join(".unelos") {
+            format!("global/{}", project.workflow.name)
+        } else {
+            project.workflow.name.clone()
+        },
         request: request.into(),
+        inline: false,
         naming_pending,
         current: CurrentWork::Finished {
             node_id: node_id.clone(),
@@ -299,9 +310,21 @@ pub(crate) fn stored_runs(project_root: &Utf8Path) -> Result<Vec<RunState>, Runt
 }
 
 pub fn status(project_root: &Utf8Path, run_id: &str) -> Result<RunState, RuntimeError> {
-    store::RunStore::open(project_root)?.run(run_id)
+    let store = store::RunStore::open(project_root)?;
+    let state = store.run(run_id)?;
+    if state.inline {
+        load_run_project(store.root(), &state)?;
+    }
+    Ok(state)
 }
 
+fn load_run_project(root: &Utf8Path, state: &RunState) -> Result<LoadedProject, RuntimeError> {
+    Ok(if state.inline {
+        crate::project::load_inline_project(root, &state.run_id, None)?
+    } else {
+        crate::load_project(root, &state.workflow_name)?
+    })
+}
 pub fn confirm_outputs(
     project_root: &Utf8Path,
     run_id: &str,
@@ -385,7 +408,7 @@ pub fn verify_work_outputs(
 pub fn next(project_root: &Utf8Path, run_id: &str) -> Result<WorkPacket, RuntimeError> {
     let store = store::RunStore::open(project_root)?;
     let state = store.run(run_id)?;
-    let project = crate::load_project(project_root, &state.workflow_name)?;
+    let project = load_run_project(store.root(), &state)?;
     crate::validate_project(&project)?;
     packet_for_state(&project, &state)
 }
@@ -431,11 +454,12 @@ fn packet_for_snapshot(
         .join("ledger.md");
     let input = match (&state.current, node) {
         (CurrentWork::Task(_), NodeDefinition::Task(task)) => {
-            if !same_input_names(&task.inputs, &record.inputs) {
+            if !same_input_names(&task.inputs, &record.inputs, &project.workflow.inputs) {
                 return Err(mismatch(&record.node_id, "task input declarations changed"));
             }
             WorkRuntimeInput::Task {
                 input: task_input(
+                    project,
                     state,
                     &record.node_id,
                     &record.execution_id,
@@ -447,7 +471,7 @@ fn packet_for_snapshot(
             }
         }
         (CurrentWork::Parallel(_), NodeDefinition::Parallel(parallel)) => {
-            if !same_input_names(&parallel.inputs, &record.inputs) {
+            if !same_input_names(&parallel.inputs, &record.inputs, &project.workflow.inputs) {
                 return Err(mismatch(
                     &record.node_id,
                     "parallel input declarations changed",
@@ -471,6 +495,7 @@ fn packet_for_snapshot(
             }
             WorkRuntimeInput::Parallel {
                 input: task_input(
+                    project,
                     state,
                     &record.node_id,
                     &record.execution_id,
@@ -483,7 +508,7 @@ fn packet_for_snapshot(
             }
         }
         (CurrentWork::HumanGate(_), NodeDefinition::HumanGate(gate)) => {
-            if !same_input_names(&gate.inputs, &record.inputs) {
+            if !same_input_names(&gate.inputs, &record.inputs, &project.workflow.inputs) {
                 return Err(mismatch(&record.node_id, "gate input declarations changed"));
             }
             WorkRuntimeInput::HumanGate {
@@ -521,14 +546,35 @@ fn mismatch(node: &str, cause: &str) -> RuntimeError {
         "saved work for Node {node:?} is incompatible with live Workflow: {cause}"
     ))
 }
-fn same_input_names(names: &[String], bindings: &[ArtifactReference]) -> bool {
-    names.len() == bindings.len()
-        && names
-            .iter()
-            .zip(bindings)
-            .all(|(name, binding)| name == &binding.name)
+fn same_input_names(names: &[String], bindings: &[ArtifactReference], declared: &[String]) -> bool {
+    names
+        .iter()
+        .filter(|name| {
+            !declared.contains(name) || bindings.iter().any(|binding| &binding.name == *name)
+        })
+        .map(String::as_str)
+        .eq(bindings.iter().map(|binding| binding.name.as_str()))
+}
+
+pub(crate) fn missing_inputs(
+    project: &LoadedProject,
+    node_id: &str,
+    bindings: &[ArtifactReference],
+) -> Vec<String> {
+    let names = match project.workflow.nodes.get(node_id) {
+        Some(NodeDefinition::Task(node)) => &node.inputs,
+        Some(NodeDefinition::Parallel(node)) => &node.inputs,
+        Some(NodeDefinition::HumanGate(node)) => &node.inputs,
+        _ => return vec![],
+    };
+    names
+        .iter()
+        .filter(|name| !bindings.iter().any(|binding| &binding.name == *name))
+        .cloned()
+        .collect()
 }
 fn task_input(
+    project: &LoadedProject,
     state: &RunState,
     node: &str,
     task_id: &str,
@@ -541,6 +587,7 @@ fn task_input(
         task_id: task_id.into(),
         node_id: node.into(),
         request: state.request.clone(),
+        missing_inputs: missing_inputs(project, node, &inputs),
         inputs,
         outputs,
         feedback,
@@ -548,6 +595,7 @@ fn task_input(
 }
 fn allocate_outputs(
     dir: &Utf8Path,
+    node_id: &str,
     names: &[String],
 ) -> Result<Vec<ArtifactReference>, RuntimeError> {
     names
@@ -558,7 +606,7 @@ fn allocate_outputs(
             }
             Ok(ArtifactReference {
                 name: name.clone(),
-                path: dir.join(name),
+                path: dir.join(crate::compose::artifact_file_name(node_id, name)),
             })
         })
         .collect::<Result<Vec<_>, RuntimeError>>()
@@ -567,6 +615,17 @@ fn allocate_outputs(
             Ok(outputs)
         })
 }
+pub(crate) fn check_node_id(id: &str, source: &str) -> Result<(), RuntimeError> {
+    id.split('/')
+        .try_for_each(|part| check_component(part, source))
+}
+
+pub(crate) fn node_dir(run_dir: &Utf8Path, node_id: &str) -> Utf8PathBuf {
+    node_id
+        .split('/')
+        .fold(run_dir.to_owned(), |dir, part| dir.join(part))
+}
+
 fn check_component(component: &str, source: &str) -> Result<(), RuntimeError> {
     let upper = component
         .split('.')
@@ -635,6 +694,14 @@ fn output_directories(base: &Utf8Path, outputs: &[ArtifactReference]) -> Vec<Utf
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn node_ids_reject_unsafe_segments() {
+        for id in ["a/..", "a//b", "/a", "a/", "a/CON", "a/b\\c"] {
+            assert!(super::check_node_id(id, "Node").is_err(), "{id}");
+        }
+        assert!(super::check_node_id("a/b", "Node").is_ok());
+    }
+
     use super::*;
 
     fn state() -> RunState {
@@ -644,6 +711,7 @@ mod tests {
             run_id: "qa-run".into(),
             name: "qa-run".into(),
             workflow_name: "implement-feature".into(),
+            inline: false,
             request: "Change color".into(),
             naming_pending: false,
             current: CurrentWork::Finished {

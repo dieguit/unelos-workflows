@@ -2,7 +2,8 @@ use assert_fs::{fixture::PathCopy, TempDir};
 use camino::{Utf8Path, Utf8PathBuf};
 use std::fs;
 use unelos_core::{
-    get_workflow, save_workflow, validate_workflow, WorkflowDocument, WorkflowDraft,
+    get_workflow, save_workflow, start_workflow, validate_workflow, Execution, IssueSeverity,
+    WorkflowDocument, WorkflowDraft,
 };
 
 fn fixture() -> (TempDir, Utf8PathBuf) {
@@ -38,7 +39,11 @@ fn creates_workflows_with_free_ids_and_requires_an_agent_before_save() {
         .find(|step| step.id == "new-task")
         .unwrap()
         .agent = Some("engineer".into());
-    assert!(save_workflow(&root, &id, &value).unwrap().issues.is_empty());
+    assert!(save_workflow(&root, &id, &value)
+        .unwrap()
+        .issues
+        .iter()
+        .all(|issue| issue.severity == IssueSeverity::Warning));
     assert_eq!(
         unelos_core::create_workflow(&root).unwrap(),
         "new-workflow-2"
@@ -201,6 +206,10 @@ fn rich_steps_preserve_authored_order_through_save() {
         .unwrap()
         .replace("\r\n", "\n")
         .replace(
+            "    type: human-gate\n",
+            "    type: human-gate\n    description: Approve the plan?\n",
+        )
+        .replace(
             "      approved: implement\n      rejected: plan",
             "      rejected: plan\n      approved: implement",
         )
@@ -226,6 +235,7 @@ fn rich_steps_preserve_authored_order_through_save() {
     assert_eq!(loaded.steps[0].title.as_deref(), Some("create-plan"));
     assert_eq!(loaded.steps[0].routes[0].outcome, None);
     assert_eq!(loaded.steps[0].routes[0].target, "approve-plan");
+    assert_eq!(loaded.steps[1].title.as_deref(), Some("Approve the plan?"));
     assert_eq!(
         loaded.steps[1].routes[0].outcome.as_deref(),
         Some("rejected")
@@ -461,6 +471,195 @@ fn draft(doc: WorkflowDocument) -> WorkflowDraft {
         settings: doc.settings,
         steps: doc.steps,
     }
+}
+
+#[test]
+fn main_agent_settings_warn_without_blocking_save_or_start() {
+    let (_temp, root) = fixture();
+    let id = "implement-feature";
+    let initial = get_workflow(&root, id).unwrap();
+    assert!(initial.issues.is_empty());
+    let step = initial
+        .steps
+        .iter()
+        .find(|step| step.kind == "task")
+        .unwrap();
+    let agent = root
+        .join(".unelos")
+        .join("agents")
+        .join(step.agent.as_ref().unwrap())
+        .join("agent.yaml");
+    let original = fs::read_to_string(&agent).unwrap();
+    let mut yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&original).unwrap();
+    yaml["model"] = "smart".into();
+    fs::write(agent, serde_yaml_ng::to_string(&yaml).unwrap()).unwrap();
+    let mut draft = draft(initial);
+    let first = draft
+        .steps
+        .iter_mut()
+        .find(|step| step.kind == "task")
+        .unwrap();
+    first.execution = Some(Execution::Main);
+    let step_id = first.id.clone();
+    let issues = validate_workflow(&root, id, &draft).unwrap();
+    assert!(issues
+        .iter()
+        .any(|issue| issue.severity == IssueSeverity::Warning
+            && issue.step.as_deref() == Some(&step_id)
+            && issue.message.contains("sets model")));
+    assert!(save_workflow(&root, id, &draft)
+        .unwrap()
+        .issues
+        .iter()
+        .any(|issue| issue.severity == IssueSeverity::Warning));
+    start_workflow(&root, id, Some("warning-run")).unwrap();
+}
+
+fn workflow_call_fixture() -> (TempDir, Utf8PathBuf) {
+    let (temp, root) = fixture();
+    fs::write(
+        root.join(".unelos/workflows/react-component.yaml"),
+        r#"name: react-component
+start: build
+inputs: [brief.md]
+nodes:
+  build:
+    agent: engineer
+    taskDefinition: {instructions: Build it.}
+    inputs: [brief.md]
+    outputs: [report.md]
+    next: done
+  done: {type: end}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join(".unelos/workflows/composite.yaml"),
+        r#"name: composite
+start: frontend
+inputs: [plan.md]
+nodes:
+  frontend:
+    type: workflow
+    workflow: react-component
+    inputs: {brief.md: plan.md}
+    outputs: {report.md: frontend-report.md}
+    next: done
+  done: {type: end}
+"#,
+    )
+    .unwrap();
+    (temp, root)
+}
+
+#[test]
+fn workflow_step_round_trips() {
+    let (_temp, root) = workflow_call_fixture();
+    let doc = get_workflow(&root, "composite").unwrap();
+    let json = serde_json::to_value(&doc).unwrap();
+    assert_eq!(json["inputs"], serde_json::json!(["plan.md"]));
+    assert_eq!(
+        json["steps"][0]["call"],
+        serde_json::json!({
+            "workflow": "react-component",
+            "inputs": {"brief.md": "plan.md"},
+            "outputs": {"report.md": "frontend-report.md"}
+        })
+    );
+    assert_eq!(doc.steps[0].kind, "workflow");
+    assert_eq!(doc.steps[0].inputs, ["plan.md"]);
+    assert_eq!(doc.steps[0].outputs, ["frontend-report.md"]);
+    let mut json = serde_json::to_value(draft(doc)).unwrap();
+    json["inputs"] = serde_json::json!(["brief.md"]);
+    json["steps"][0]["call"]["inputs"]["brief.md"] = "brief.md".into();
+    let value: WorkflowDraft = serde_json::from_value(json).unwrap();
+    let saved = save_workflow(&root, "composite", &value).unwrap();
+    assert!(saved
+        .issues
+        .iter()
+        .all(|issue| issue.severity == IssueSeverity::Warning));
+    let text = fs::read_to_string(root.join(".unelos/workflows/composite.yaml")).unwrap();
+    let parsed = unelos_core::parse_workflow_definition("composite", &text).unwrap();
+    assert_eq!(parsed.inputs, ["brief.md"]);
+    let unelos_core::NodeDefinition::Workflow(call) = &parsed.nodes["frontend"] else {
+        panic!("expected workflow call");
+    };
+    assert_eq!(call.workflow, "react-component");
+    assert_eq!(call.inputs["brief.md"], "brief.md");
+    assert_eq!(call.outputs["report.md"], "frontend-report.md");
+    assert_eq!(call.next, unelos_core::Transition::Single("done".into()));
+    let loaded = get_workflow(&root, "composite").unwrap();
+    assert_eq!(loaded.steps[0].inputs, ["brief.md"]);
+    assert_eq!(loaded.steps[0].outputs, ["frontend-report.md"]);
+
+    let mut json = serde_json::to_value(draft(loaded)).unwrap();
+    json["steps"][0]["routes"] = serde_json::json!([{"outcome":"done","target":"done"}]);
+    json["steps"][0]["call"]["outputs"] = serde_json::json!({});
+    save_workflow(&root, "composite", &serde_json::from_value(json).unwrap()).unwrap();
+    let text = fs::read_to_string(root.join(".unelos/workflows/composite.yaml")).unwrap();
+    let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&text).unwrap();
+    assert!(yaml["nodes"]["frontend"].get("outputs").is_none());
+    assert_eq!(yaml["nodes"]["frontend"]["next"]["done"], "done");
+}
+
+#[test]
+fn workflow_step_issue_attached() {
+    let (_temp, root) = workflow_call_fixture();
+    let mut json = serde_json::to_value(draft(get_workflow(&root, "composite").unwrap())).unwrap();
+    json["steps"][0]["call"] = serde_json::json!({
+        "workflow": "unknown-child", "inputs": {}, "outputs": {}
+    });
+    let issues =
+        validate_workflow(&root, "composite", &serde_json::from_value(json).unwrap()).unwrap();
+    assert_eq!(issues.len(), 1);
+    assert_eq!(issues[0].step.as_deref(), Some("frontend"));
+    assert!(issues[0].message.contains("unknown-child"));
+}
+
+#[test]
+fn workflow_document_preserves_authored_edges_into_calls() {
+    let (_temp, root) = workflow_call_fixture();
+    let path = root.join(".unelos/workflows/composite.yaml");
+    let text = fs::read_to_string(&path).unwrap().replace(
+        "start: frontend",
+        "start: review",
+    ).replace(
+        "nodes:\n",
+        "nodes:\n  review:\n    type: human-gate\n    next: {approved: frontend, rejected: frontend}\n",
+    );
+    fs::write(&path, text).unwrap();
+    let doc = get_workflow(&root, "composite").unwrap();
+    assert_eq!(doc.steps[0].routes[0].target, "frontend");
+    save_workflow(&root, "composite", &draft(doc)).unwrap();
+    let parsed =
+        unelos_core::parse_workflow_definition("composite", &fs::read_to_string(path).unwrap())
+            .unwrap();
+    let unelos_core::NodeDefinition::HumanGate(gate) = &parsed.nodes["review"] else {
+        panic!("expected gate");
+    };
+    assert_eq!(gate.next["approved"], "frontend");
+}
+
+#[test]
+fn existing_workflow_unchanged() {
+    let (_temp, root) = fixture();
+    let example = Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/superpowers-dev");
+    let target = assert_fs::fixture::ChildPath::new(root.join(".unelos"));
+    target.copy_from(&example, &["**/*"]).unwrap();
+    let path = root.join(".unelos/workflows/superpowers-dev.yaml");
+    let before = unelos_core::parse_workflow_definition(
+        "superpowers-dev",
+        &fs::read_to_string(&path).unwrap(),
+    )
+    .unwrap();
+    let doc = get_workflow(&root, "superpowers-dev").unwrap();
+    save_workflow(&root, "superpowers-dev", &draft(doc)).unwrap();
+    let after = unelos_core::parse_workflow_definition(
+        "superpowers-dev",
+        &fs::read_to_string(path).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(before, after);
 }
 
 #[test]

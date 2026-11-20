@@ -1,0 +1,145 @@
+name: ui-feature
+description: Build a UI feature from a Pencil design (or the closest existing screens) with backend and UI lanes, checks, browser verification and visual QA. Ends with summary.md; run pr-and-ci to deliver.
+start: intake
+inputs: [request.md]
+nodes:
+  intake:
+    taskDefinition:
+      instructions: |
+        If request.md is bound, start from it and ask only for what it lacks.
+        Agree the feature with the user: what it does, the screen it lives on,
+        the existing screen it should behave like, backend data or commands it
+        needs, and its acceptance criteria. Ask whether the UI is already designed
+        in Pencil: which frames (or a selected frame), or that no design exists.
+        Write the bound brief.md. On re-entry, read the feedback and update
+        brief.md in place.
+    agent: dev-lead
+    execution: main
+    inputs: [request.md]
+    outputs: [brief.md]
+    next: recon
+  recon:
+    task: pencil-recon
+    agent: design-recon
+    execution: subagent
+    inputs: [brief.md]
+    outputs: [design.md]
+    next:
+      found: contract
+      missing: design-gate
+      blocked: design-gate
+  # Approve to build from the closest existing screens; reject to design or select frames first.
+  design-gate:
+    type: human-gate
+    inputs: [brief.md, design.md]
+    next:
+      approved: contract
+      rejected: intake
+  contract:
+    taskDefinition:
+      instructions: |
+        From brief.md, design.md and the code, draft the contract both lanes
+        build against; the user agrees it at the next gate. Write the bound
+        contract.md:
+        - Backend: Tauri commands with argument and result types, core changes,
+          the src/lib/projects.ts function names, mock fixture data.
+        - UI: route and files, existing components to reuse, new components,
+          states to handle, reference screen.
+        - Lanes: the files each lane may write (no overlap). Write "no changes"
+          for a lane with nothing to do.
+        - Acceptance criteria the browser check will verify.
+        On re-entry, revise contract.md in place from the feedback.
+    agent: planner
+    execution: subagent
+    inputs: [brief.md, design.md]
+    outputs: [contract.md]
+    next: approve-contract
+  approve-contract:
+    type: human-gate
+    inputs: [brief.md, design.md, contract.md]
+    next:
+      approved: build
+      rejected: contract
+  build:
+    type: parallel
+    inputs: [brief.md, design.md, contract.md]
+    tasks:
+      - taskDefinition:
+          description: Backend lane
+          instructions: |
+            Build the Backend part of contract.md within the backend lane's
+            files. If the contract says no changes, change nothing. Write your
+            report: files changed, commands added, tests and what you ran.
+        agent: backend-builder
+      - taskDefinition:
+          description: UI lane
+          instructions: |
+            Build the UI part of contract.md within the UI lane's files, matching
+            design.md. Write your report: files changed, components reused vs new,
+            states handled, and what you looked at in the browser.
+        agent: ui-builder
+    outputs: [build-report.md]
+    next: rust-checks
+  rust-checks:
+    task: rust-checks
+    agent: check-runner
+    execution: subagent
+    outputs: [rust-checks.md]
+    next:
+      pass: frontend-checks
+      fail: fix
+  frontend-checks:
+    task: frontend-checks
+    agent: check-runner
+    execution: subagent
+    outputs: [frontend-checks.md]
+    next:
+      pass: verify
+      fail: fix
+  verify:
+    task: ui-verify
+    agent: ui-qa
+    execution: subagent
+    inputs: [contract.md, design.md]
+    outputs: [ui-verification.md]
+    next:
+      pass: visual-qa
+      fail: fix
+      blocked: visual-qa
+  fix:
+    taskDefinition:
+      outcomes: [ui-only, rust-touched]
+      instructions: |
+        Transition feedback carries the failing report (checks, verification or
+        visual QA feedback). Fix what it reports within contract.md, in shared
+        code where the problem is shared. Append a section to the bound fix.md:
+        problem, root cause, files changed, what you ran. Choose rust-touched if
+        any .rs file changed in this fix, else ui-only.
+    agent: ui-fixer
+    execution: subagent
+    inputs: [contract.md, design.md]
+    outputs: [fix.md]
+    next:
+      ui-only: frontend-checks
+      rust-touched: rust-checks
+  visual-qa:
+    type: human-gate
+    inputs: [contract.md, design.md, ui-verification.md]
+    next:
+      approved: summarize
+      rejected: fix
+  summarize:
+    taskDefinition:
+      instructions: |
+        Write the bound summary.md: what the feature does, the main files
+        changed, how it was verified (checks and browser verification), and
+        anything left out.
+        End with "Next: run pr-and-ci with this summary.md to open or update
+        the PR, if one is wanted."
+    agent: coordinator
+    execution: subagent
+    inputs: [brief.md, contract.md, ui-verification.md]
+    outputs: [summary.md]
+    next: done
+  done:
+    type: end

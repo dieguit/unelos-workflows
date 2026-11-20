@@ -1,0 +1,21 @@
+name: react-component
+start: design
+inputs: [brief.md]
+nodes:
+  design:
+    taskDefinition: {instructions: Design the component.}
+    inputs: [brief.md]
+    outputs: [design.md]
+    next: approve
+  approve:
+    type: human-gate
+    inputs: [design.md]
+    next: {approved: build, rejected: design}
+  build:
+    taskDefinition:
+      instructions: Build the component.
+      outcomes: [all_done, give_up]
+    outputs: [report.md]
+    next: {all_done: done, give_up: abandoned}
+  done: {type: end}
+  abandoned: {type: end}

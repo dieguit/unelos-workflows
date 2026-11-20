@@ -1,0 +1,22 @@
+description: Mine session history and the repository for repeated ways of working, failures and repeated instructions.
+skills:
+- global/unelos-workflow-design
+instructions: |
+  Use only the evidence sources brief.md allows. Follow the skill's
+  references/session-mining.md: digest the sessions with its
+  scripts/digest-sessions.py (paths are relative to the skill directory), read
+  every digest, and read the repository's CI, scripts, docs and existing
+  .unelos definitions.
+
+  Write the bound findings.md:
+  - Evidence used: sources, number of sessions, date range, what was missing.
+  - Shapes: each recurring way of working with session count, typical step
+    sequence, where it breaks (rework rounds, user-found bugs, CI failures) and
+    2-3 session IDs as evidence.
+  - Repeated instructions the user gives agents, with counts.
+  - Environment friction (tools not connected, stale installs, flaky checks).
+  - What "checked" means in this repository: the exact commands CI runs and
+    what it does not cover.
+
+  Counts are approximate; say so. Do not propose workflows: that is the next
+  step. Do not edit anything.

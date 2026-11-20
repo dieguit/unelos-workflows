@@ -1,0 +1,20 @@
+{
+  "unelos-backend-builder.md": "47789cacaa6406dd2b09ad86f7ff78cb3e3309edb170dd2404310ae61afb5dfa",
+  "unelos-check-runner.md": "82a47eb83a9b38f80d8cad0d38c02b1d06a93747b7e663b044e5e63b8e82fc90",
+  "unelos-ci-fixer.md": "4b410b0cc5263e9269fc849d5891957ddbfd1620abb35bc45ab3025c039eb45f",
+  "unelos-coordinator.md": "f23a36adf43bbe847d2192b2ff1bf350078ad7cf4d9fe48c04ebc0b694a64636",
+  "unelos-councillor-alpha.md": "52834d6fea568e1b34b525b01fd1a26f7c5c5b37ce89b02c28dcc90de9ef25f1",
+  "unelos-councillor-beta.md": "45717d6db33fe79272dd1ba3be7608a7dd279531e9110e994ed2c7435b98a3e2",
+  "unelos-councillor-gamma.md": "30741ec3a163d265affc39fa7e360529f4f9e4386cc056c06db7d9c17c958685",
+  "unelos-design-recon.md": "70000efbfb4f35faeffdcbcf732a3b6cd6c26c6c36a6d3cdebb01f8c0db401bb",
+  "unelos-planner.md": "2b10de8bdf5262302e371d075cfbe43c49d6901367fef3ff04decaf9d10edb61",
+  "unelos-releaser.md": "c1492689da82debbf34e27c90598a122c88075bf8f687f9d3776626823fe8bda",
+  "unelos-sp-builder-check.md": "7059c00c0fd700ffcc36ccefb6d2e0f2552b18e3a1bcd2747783b201ddb202ef",
+  "unelos-sp-final-reviewer.md": "409e6572d789ac91f7bcf2dde6324fc31a165afe0c64a8a096fade4efa363ad7",
+  "unelos-sp-implementer-escalation.md": "1e9a5a2c86e0762782102dfb5f5e04b688c3d04b066b0e8cd532f10e0eccf33b",
+  "unelos-sp-implementer.md": "e88ccdc6750c4bb90faf47a3f9d7060aacdb313941591a10550f127c613fc6f6",
+  "unelos-sp-task-reviewer.md": "39796b05ffaf57169b13bdff6fee4b4a9e4a2bfe587361c689baae1d464f5601",
+  "unelos-ui-builder.md": "0ac9d8ed92034c3ee77a8fc08390066e04d100ae6c03c569640ec239c0461a17",
+  "unelos-ui-fixer.md": "7c34026ce11579c6efae492095db871bc04959cd728371d8a13d73429eed9162",
+  "unelos-ui-qa.md": "0d697c8b778692b9a14019891033b5ceec0e78cbef2f0f3a1bfbc68906f9a39b"
+}

@@ -6,29 +6,23 @@ import { Button } from "@/components/ui/button"
 import { ListSearch } from "@/components/list-search"
 import { PageHeader } from "@/components/page-header"
 import { ListActions } from "@/components/list-actions"
-import {
-  duplicateWorkflow,
-  createWorkflow,
-  listWorkflows,
-  removeWorkflow,
-  requireProject,
-} from "@/lib/projects"
-import { filterWorkflows } from "./-lib/filter"
-import { workflowSettingsSchema } from "./-lib/workflow-settings-schema"
+import { duplicateWorkflow, createWorkflow, listWorkflows, removeWorkflow, requireProject } from "@/lib/projects"
+import { filterWorkflows } from "@/lib/workflow-filter"
+import { workflowSettingsSchema } from "@/lib/workflow-settings-schema"
 import {
   ImportWorkflowButton,
   NewWorkflowButton,
   WorkflowsTable,
-} from "./-components/workflows-table"
+} from "@/components/workflows-table"
 import { ImportDialog } from "./-components/import-dialog"
-import { NoResults, NoWorkflows } from "./-components/workflows-empty"
-import { WorkflowEditor } from "./-components/workflow-editor"
+import { NoResults, NoWorkflows } from "@/components/workflows-empty"
+import { WorkflowEditor } from "@/components/workflow-editor/workflow-editor"
 
 export const Route = createFileRoute("/workflows/")({
   beforeLoad: requireProject,
   loader: async ({ context }) => ({
     root: context.project.path,
-    workflows: await listWorkflows(context.project.path),
+    workflows: (await listWorkflows(context.project.path)).filter((w) => !w.global),
   }),
   component: WorkflowsHome,
   errorComponent: WorkflowsError,
@@ -154,9 +148,7 @@ function WorkflowsHome() {
         <WorkflowsTable
           workflows={shown}
           highlight={highlight}
-          onOpen={(file) =>
-            setSelected({ root: data.root, id: file.replace(/\.ya?ml$/i, "") })
-          }
+          onOpen={(file) => setSelected({ root: data.root, id: file.replace(/\.ya?ml$/i, "") })}
           actions={(workflow) => {
             const id = workflow.file.replace(/\.ya?ml$/i, "")
             return (

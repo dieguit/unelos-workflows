@@ -13,8 +13,7 @@ fn agent(id: &str) -> AgentExport {
         effort: None,
         tools: vec![],
         mcps: vec![id.into()],
-        main: true,
-        subagent: false,
+        subagent: true,
         mcp_servers: BTreeMap::from([(
             id.into(),
             McpServer::Local {

@@ -1,10 +1,163 @@
 use crate::{AgentExport, InstallError};
 use camino::{Utf8Path, Utf8PathBuf};
 use serde_json::{json, Value};
-use std::{collections::BTreeMap, fs};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+};
 
 const STATE: &str = ".unelos/opencode-mcps.json";
+const GLOBAL_STATE: &str = "opencode-mcps.json";
 type Workflows = BTreeMap<String, BTreeMap<String, crate::McpServer>>;
+type McpKeys = BTreeMap<String, BTreeMap<String, Value>>;
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct GlobalOwnership {
+    config: Utf8PathBuf,
+    keys: McpKeys,
+    released: BTreeSet<(String, String)>,
+}
+
+pub(crate) fn sync_global(
+    path: &Utf8Path,
+    original: &str,
+    agents: &mut [AgentExport],
+    prune: bool,
+    uninstall: bool,
+) -> Result<crate::HarnessBuild, InstallError> {
+    let mut result = crate::HarnessBuild::default();
+    let root = crate::global_config::config_dir()?;
+    let state = root.join(GLOBAL_STATE);
+    let relative = path.file_name().unwrap();
+    check_uninstall_file(path.parent().unwrap(), relative)?;
+    check_uninstall_file(&root, GLOBAL_STATE)?;
+    let receipt = match fs::read(&state) {
+        Ok(bytes) => Some(bytes),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(error("install_io_failed", e)),
+    };
+    let desired = projection(&BTreeMap::from([(
+        "global".into(),
+        agents.iter().flat_map(|a| a.mcp_servers.clone()).collect(),
+    )]))?;
+    let current = crate::harness::jsonc::config_value(original)?;
+    if receipt.is_none() && desired["mcp"].as_object().unwrap().is_empty() {
+        return Ok(result);
+    }
+    let (mut previous, mut released) = match &receipt {
+        Some(bytes) => {
+            let owned: GlobalOwnership =
+                serde_json::from_slice(bytes).map_err(|e| error("invalid_mcp_state", e))?;
+            if owned.config != path {
+                return Err(error(
+                    "invalid_mcp_state",
+                    format!("OpenCode MCP ownership belongs to {}", owned.config),
+                ));
+            }
+            (owned.keys, owned.released)
+        }
+        None => (BTreeMap::new(), BTreeSet::new()),
+    };
+    for section in ["mcp", "tools"] {
+        previous
+            .entry(section.into())
+            .or_default()
+            .retain(|key, value| {
+                if current[section].get(key) == Some(value) {
+                    return true;
+                }
+                result.skipped.push(format!(
+                    "Managed OpenCode {section}.{key} was modified or removed; released ownership"
+                ));
+                released.insert((section.to_owned(), key.clone()));
+                false
+            });
+    }
+    let mut next = previous.clone();
+    if prune {
+        released.retain(|(section, key)| desired[section].get(key).is_some());
+        next.get_mut("mcp")
+            .unwrap()
+            .retain(|id, _| desired["mcp"].get(id).is_some());
+        next.get_mut("tools")
+            .unwrap()
+            .retain(|key, _| desired["tools"].get(key).is_some());
+    }
+    let mut blocked = BTreeSet::new();
+    for (id, value) in desired["mcp"].as_object().unwrap() {
+        let tool = format!("{id}_*");
+        let keys = [
+            ("mcp", id.as_str(), value),
+            ("tools", tool.as_str(), &Value::Bool(false)),
+        ];
+        let mut conflict = current["mcp"]["servers"].get(id).is_some()
+            || matches!(id.as_str(), "servers" | "timeout");
+        if conflict {
+            result.skipped.push(format!(
+                "OpenCode MCP {id:?} conflicts with native mcp configuration"
+            ));
+        }
+        for (section, key, desired) in keys {
+            if released.contains(&(section.to_owned(), key.to_owned())) {
+                conflict = true;
+            } else if !previous[section].contains_key(key)
+                && current[section]
+                    .get(key)
+                    .is_some_and(|existing| existing != desired)
+            {
+                result.skipped.push(format!(
+                    "OpenCode {section}.{key} already exists with a different value"
+                ));
+                conflict = true;
+            }
+        }
+        if conflict {
+            blocked.insert(id.clone());
+            continue;
+        }
+        for (section, key, value) in keys {
+            if previous[section].contains_key(key) || current[section].get(key).is_none() {
+                next.get_mut(section)
+                    .unwrap()
+                    .insert(key.into(), value.clone());
+            }
+        }
+    }
+    let edited = crate::harness::jsonc::mcp_text(original, &json!(previous), &json!(next))?;
+    let updated = (!uninstall && (!next.values().all(BTreeMap::is_empty) || !released.is_empty()))
+        .then(|| {
+            serde_json::to_vec_pretty(&GlobalOwnership {
+                config: path.to_owned(),
+                keys: next,
+                released,
+            })
+        })
+        .transpose()
+        .map_err(|e| error("invalid_mcp_state", e))?;
+    let store = |bytes: Option<&[u8]>| match bytes {
+        Some(bytes) => crate::global_config::atomic_write(&state, bytes),
+        None => fs::remove_file(&state).map_err(|e| error("install_io_failed", e)),
+    };
+    if updated != receipt {
+        store(updated.as_deref())?;
+    }
+    if edited != original {
+        if let Err(failure) = crate::global_config::atomic_write(path, edited.as_bytes()) {
+            if updated != receipt {
+                store(receipt.as_deref())
+                    .map_err(|e| error("install_io_failed", format!("{failure}; rollback: {e}")))?;
+            }
+            return Err(failure);
+        }
+        result.written.push(path.to_owned());
+    }
+    for agent in agents {
+        agent
+            .mcps
+            .retain(|id| !blocked.contains(id.strip_prefix("global/").unwrap_or(id)));
+    }
+    Ok(result)
+}
 
 fn error(code: &'static str, message: impl ToString) -> InstallError {
     InstallError {
@@ -119,7 +272,7 @@ pub(crate) fn plan_project_uninstall(
     Ok((edited != text).then_some((path, edited)))
 }
 
-fn check_uninstall_file(root: &Utf8Path, relative: &str) -> Result<(), InstallError> {
+pub(crate) fn check_uninstall_file(root: &Utf8Path, relative: &str) -> Result<(), InstallError> {
     crate::check_install_path(root, Utf8Path::new(relative))?;
     let path = root.join(relative);
     match fs::symlink_metadata(&path) {

@@ -1,0 +1,7 @@
+instructionsFile: instructions.md
+skills:
+- app-dev
+- systematic-debugging
+- cross-platform-rust
+model: balanced
+effort: medium

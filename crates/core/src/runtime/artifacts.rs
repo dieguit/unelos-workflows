@@ -16,7 +16,7 @@ pub(super) fn prepare_work(
     let node = project.workflow.nodes.get(node_id).ok_or_else(|| {
         RuntimeError::InvalidState(format!("Workflow Node {node_id:?} is missing"))
     })?;
-    super::check_component(node_id, "Node")?;
+    super::check_node_id(node_id, "Node")?;
     let run_dir = project
         .project_root
         .join(".unelos/runs")
@@ -25,8 +25,18 @@ pub(super) fn prepare_work(
     let mut candidate = state.clone();
     candidate.current = match node {
         NodeDefinition::Task(task) => {
-            let inputs = bind_inputs(state, &producers, node_id, &task.inputs)?;
-            let outputs = super::allocate_outputs(&run_dir.join(node_id), &task.outputs)?;
+            let inputs = bind_inputs(
+                state,
+                &producers,
+                node_id,
+                &task.inputs,
+                &project.workflow.inputs,
+            )?;
+            let outputs = super::allocate_outputs(
+                &super::node_dir(&run_dir, node_id),
+                node_id,
+                &task.outputs,
+            )?;
             let execution_id = candidate.allocate_execution_id(false)?;
             CurrentWork::Task(ExecutionRecord {
                 node_id: node_id.into(),
@@ -42,9 +52,15 @@ pub(super) fn prepare_work(
             })
         }
         NodeDefinition::Parallel(parallel) => {
-            let inputs = bind_inputs(state, &producers, node_id, &parallel.inputs)?;
-            let node_dir = run_dir.join(node_id);
-            let outputs = super::allocate_outputs(&node_dir, &parallel.outputs)?;
+            let inputs = bind_inputs(
+                state,
+                &producers,
+                node_id,
+                &parallel.inputs,
+                &project.workflow.inputs,
+            )?;
+            let node_dir = super::node_dir(&run_dir, node_id);
+            let outputs = super::allocate_outputs(&node_dir, node_id, &parallel.outputs)?;
             let mut paths = outputs.clone();
             let mut counts = BTreeMap::new();
             for worker in &parallel.tasks {
@@ -85,7 +101,13 @@ pub(super) fn prepare_work(
             })
         }
         NodeDefinition::HumanGate(gate) => {
-            let inputs = bind_inputs(state, &producers, node_id, &gate.inputs)?;
+            let inputs = bind_inputs(
+                state,
+                &producers,
+                node_id,
+                &gate.inputs,
+                &project.workflow.inputs,
+            )?;
             let execution_id = candidate.allocate_execution_id(true)?;
             CurrentWork::HumanGate(ExecutionRecord {
                 node_id: node_id.into(),
@@ -99,6 +121,11 @@ pub(super) fn prepare_work(
                 feedback,
                 confirmed_execution_id: None,
             })
+        }
+        NodeDefinition::Workflow(_) => {
+            return Err(RuntimeError::InvalidState(
+                "workflow steps must be expanded before execution".into(),
+            ))
         }
         NodeDefinition::End => CurrentWork::Finished {
             node_id: node_id.into(),
@@ -123,9 +150,20 @@ fn bind_inputs(
     producers: &BTreeMap<String, String>,
     node: &str,
     names: &[String],
+    declared: &[String],
 ) -> Result<Vec<ArtifactReference>, RuntimeError> {
     names
         .iter()
+        .filter(|name| {
+            !declared.contains(name)
+                || producers.get(*name).is_some_and(|producer| {
+                    state.history.iter().any(|entry| {
+                        matches!(&entry.work,
+                        CurrentWork::Task(record) | CurrentWork::Parallel(record)
+                            if &record.node_id == producer)
+                    })
+                })
+        })
         .map(|name| {
             let producer = producers.get(name).ok_or_else(|| {
                 invalid_binding(node, name, "producer", "no output producer was found")
@@ -206,7 +244,7 @@ pub(super) fn prepare_work_directories(
         ),
         CurrentWork::HumanGate(_) | CurrentWork::Finished { .. } => return Ok(()),
     };
-    let node_dir = run_dir.join(node);
+    let node_dir = super::node_dir(run_dir, node);
     for dir in output_directories(&node_dir, &outputs) {
         let relative = dir.strip_prefix(run_dir).map_err(|_| {
             RuntimeError::InvalidState(format!("artifact directory escapes run: {dir}"))
@@ -231,11 +269,11 @@ pub(super) fn runtime_input(
         .join("ledger.md");
     match &state.current {
         CurrentWork::Task(record) => Ok(WorkRuntimeInput::Task {
-            input: task_input(state, record),
+            input: task_input(state, record, project),
             ledger_path,
         }),
         CurrentWork::Parallel(record) => Ok(WorkRuntimeInput::Parallel {
-            input: task_input(state, record),
+            input: task_input(state, record, project),
             worker_reports: record.worker_reports.clone(),
             ledger_path,
         }),
@@ -254,13 +292,18 @@ pub(super) fn runtime_input(
     }
 }
 
-fn task_input(state: &RunState, record: &ExecutionRecord) -> TaskRuntimeInput {
+fn task_input(
+    state: &RunState,
+    record: &ExecutionRecord,
+    project: &LoadedProject,
+) -> TaskRuntimeInput {
     TaskRuntimeInput {
         run_id: state.run_id.clone(),
         task_id: record.execution_id.clone(),
         node_id: record.node_id.clone(),
         request: state.request.clone(),
         inputs: record.inputs.clone(),
+        missing_inputs: super::missing_inputs(project, &record.node_id, &record.inputs),
         outputs: record.outputs.clone(),
         feedback: record.feedback.clone(),
     }

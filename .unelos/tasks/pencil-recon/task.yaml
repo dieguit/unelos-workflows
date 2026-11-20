@@ -1,0 +1,28 @@
+description: Find the Pencil frames for a UI change and map them to existing components; write a design brief.
+skills:
+- app-dev
+outcomes:
+- found
+- missing
+- blocked
+instructions: |
+  Read the request from your inputs or transition feedback, including any frame
+  names the user gave or a frame selected in Pencil.
+
+  Connect to Pencil (see the app-dev skill). Use the named or selected frames;
+  otherwise search frame names for the feature and list the candidates you
+  considered.
+
+  Write the bound design.md:
+  - Frames: exact names and what each shows.
+  - States covered (empty, error, loading, hover, selected, inspector open) and
+    states the feature needs that no frame covers.
+  - Layout and content per frame: regions, components, copy, notable tokens or
+    spacing.
+  - Mapping: for each region, the existing component or screen to reuse (paths)
+    or "new"; the closest existing screen to use as reference.
+  - Open questions for the user.
+
+  Choose found when frames for the feature exist. Choose missing when Pencil is
+  reachable but nothing covers the feature; still fill the Mapping section from
+  the closest existing screens. Choose blocked when Pencil is unreachable.

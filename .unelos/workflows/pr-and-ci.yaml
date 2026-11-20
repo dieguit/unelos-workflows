@@ -1,0 +1,52 @@
+name: pr-and-ci
+description: Commit, push and open a PR, then wait for CI and fix code failures until it is green.
+start: open-pr
+inputs: [summary.md]
+nodes:
+  open-pr:
+    task: open-pr
+    agent: releaser
+    execution: subagent
+    inputs: [summary.md]
+    outputs: [pr.md]
+    next:
+      opened: wait-ci
+      blocked: unblock
+  unblock:
+    type: human-gate
+    inputs: [pr.md]
+    next:
+      approved: open-pr
+      rejected: abandoned
+  wait-ci:
+    task: wait-ci
+    agent: check-runner
+    execution: subagent
+    inputs: [pr.md]
+    outputs: [ci.md]
+    next:
+      pass: green
+      fail: fix-ci
+      infra: infra-gate
+  fix-ci:
+    taskDefinition:
+      instructions: |
+        Fix the code failures in ci.md on the PR branch from pr.md, then commit
+        and push. Append a section to the bound ci-fix.md: failure, root cause,
+        fix, local check run, new HEAD sha.
+    agent: ci-fixer
+    execution: subagent
+    inputs: [pr.md, ci.md]
+    outputs: [ci-fix.md]
+    next: wait-ci
+  # Approve to accept the infrastructure failure; reject after re-running jobs to wait again.
+  infra-gate:
+    type: human-gate
+    inputs: [ci.md]
+    next:
+      approved: green
+      rejected: wait-ci
+  green:
+    type: end
+  abandoned:
+    type: end

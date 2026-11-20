@@ -1,0 +1,25 @@
+description: Propose workflows and their building blocks from the findings for the user to agree at the next gate.
+skills:
+- global/unelos-workflow-design
+instructions: |
+  Read brief.md and findings.md, then the skill's references/building-blocks.md
+  and references/patterns.md. Rank the shapes by frequency times rework and
+  propose one pilot workflow (small and frequent) plus, at most, the next one or
+  two.
+
+  Decide which shape comes first, task vs workflow calls, where human gates go,
+  and which models and MCPs each role gets, following brief.md. List what only
+  the user can decide under "Open questions" with your recommendation.
+
+  Write the bound proposal.md:
+  - Why: the evidence for each proposed workflow.
+  - Building blocks: every task, agent, skill and MCP with outcomes, model,
+    skills, MCPs, and whether it is new or already exists; mark which are
+    shared across workflows.
+  - Graph: each workflow as a text sketch with every outcome and target.
+  - Where it lives: the project's .unelos (default) or global, and why.
+  - Left out, and why.
+  - Open questions.
+
+  On re-entry after a gate rejection, revise proposal.md in place from the
+  feedback.

@@ -1,0 +1,5 @@
+instructionsFile: instructions.md
+skills:
+- app-dev
+model: balanced
+effort: medium

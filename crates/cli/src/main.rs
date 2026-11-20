@@ -6,10 +6,10 @@ use std::{
 };
 use unelos_core::{
     approve_node, build_graph, complete_node, execution_mutate, execution_new, execution_next,
-    execution_resume, execution_runs, execution_start, inspect_node, list_workflows, load_project,
-    next, reject_node, rename_run, start_workflow, status, validate_project, CompletionControl,
-    ContextError, ExecutionError, ExecutionOperation, ProjectLoadError, ProjectValidationError,
-    RuntimeError, Settings, SettingsError,
+    execution_resume, execution_runs, execution_start, execution_start_inline, inspect_node,
+    list_workflow_descriptions, load_project, next, reject_node, rename_run, start_workflow,
+    status, validate_project, CompletionControl, ContextError, ExecutionError, ExecutionOperation,
+    ProjectLoadError, ProjectValidationError, RuntimeError, Settings, SettingsError,
 };
 
 mod import;
@@ -93,13 +93,8 @@ enum Command {
         #[arg(long)]
         node: Option<String>,
     },
-    /// List available Workflows, or start one and return its summary.
-    Start {
-        workflow: Option<String>,
-        /// Set a descriptive run name at creation.
-        #[arg(long, requires = "workflow")]
-        name: Option<String>,
-    },
+    /// List available Workflows, or start a run.
+    Start(StartArgs),
     /// Show selected run status and history.
     Status {
         #[command(flatten)]
@@ -175,11 +170,7 @@ enum ExecutionCommand {
         #[command(flatten)]
         target: RunSelector,
     },
-    Start {
-        workflow: String,
-        #[arg(long)]
-        name: Option<String>,
-    },
+    Start(StartArgs),
     Complete {
         #[command(flatten)]
         target: RunSelector,
@@ -192,6 +183,42 @@ enum ExecutionCommand {
         #[command(flatten)]
         target: RunSelector,
     },
+}
+
+#[derive(clap::Args)]
+#[group(skip)]
+#[command(group(clap::ArgGroup::new("start_target").args(["workflows", "steps_file"])))]
+struct StartArgs {
+    workflows: Vec<String>,
+    /// YAML file containing workflow and human-gate steps.
+    #[arg(long)]
+    steps_file: Option<Utf8PathBuf>,
+    /// Set a descriptive run name at creation.
+    #[arg(long, requires = "start_target")]
+    name: Option<String>,
+}
+
+impl StartArgs {
+    fn inline_steps(&self) -> Result<Option<Vec<unelos_core::InlineStep>>, Error> {
+        if let Some(path) = &self.steps_file {
+            #[derive(serde::Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct StepsFile {
+                steps: Vec<unelos_core::InlineStep>,
+            }
+            let text =
+                std::fs::read_to_string(path).map_err(|e| Error::Start(format!("{path}: {e}")))?;
+            let file: StepsFile =
+                serde_yaml_ng::from_str(&text).map_err(|e| Error::Start(format!("{path}: {e}")))?;
+            return Ok(Some(file.steps));
+        }
+        Ok((self.workflows.len() > 1).then(|| {
+            self.workflows
+                .iter()
+                .map(unelos_core::InlineStep::workflow)
+                .collect()
+        }))
+    }
 }
 
 #[derive(clap::Args)]
@@ -226,6 +253,8 @@ async fn main() -> ExitCode {
 
 #[derive(Debug, thiserror::Error)]
 enum Error {
+    #[error("{0}")]
+    Start(String),
     #[error(transparent)]
     Install(#[from] unelos_core::InstallError),
     #[error(transparent)]
@@ -275,6 +304,7 @@ impl Error {
                 RuntimeError::StaleExecution { .. } => "wrong_run",
             },
             Self::RuntimeOutput(_) => "runtime_io_failed",
+            Self::Start(_) => "invalid_steps",
             _ => "operational_failure",
         }
     }
@@ -287,7 +317,8 @@ impl Error {
             return ExitCode::from(4);
         }
         match self {
-            Self::Settings(_)
+            Self::Start(_)
+            | Self::Settings(_)
             | Self::ProjectLoad(_)
             | Self::ProjectValidation(_)
             | Self::Context(_) => ExitCode::from(2),
@@ -393,7 +424,7 @@ fn run(cli: &Cli) -> Result<(), Error> {
             }
             let mutating = matches!(
                 command,
-                ExecutionCommand::Start { .. }
+                ExecutionCommand::Start(_)
                     | ExecutionCommand::Complete { .. }
                     | ExecutionCommand::Approve { .. }
                     | ExecutionCommand::Reject { .. }
@@ -404,8 +435,16 @@ fn run(cli: &Cli) -> Result<(), Error> {
                     execution_resume(&cli.project, &target.run_id)?
                 }
                 ExecutionCommand::Next { target } => execution_next(&cli.project, &target.run_id)?,
-                ExecutionCommand::Start { workflow, name } => {
-                    execution_start(&cli.project, workflow, name.as_deref())?
+                ExecutionCommand::Start(args) => {
+                    let name = args.name.as_deref();
+                    if let Some(steps) = args.inline_steps()? {
+                        execution_start_inline(&cli.project, &steps, name)?
+                    } else {
+                        let workflow = args.workflows.first().ok_or_else(|| {
+                            Error::Start("Provide a workflow or --steps-file".into())
+                        })?;
+                        execution_start(&cli.project, workflow, name)?
+                    }
                 }
                 operation => {
                     let (operation, target) = match operation {
@@ -455,12 +494,12 @@ fn run(cli: &Cli) -> Result<(), Error> {
         Command::Inspect { workflow, node } => {
             let project = load_project(&cli.project, workflow)?;
             validate_project(&project)?;
-            let result = if let Some(node) = node {
+            let mut result = if let Some(node) = node {
                 serde_json::to_value(inspect_node(&project, node)?)?
             } else {
-                let graph = build_graph(&project.workflow);
+                let graph = build_graph(&project.authoring_workflow);
                 let nodes = project
-                    .workflow
+                    .authoring_workflow
                     .nodes
                     .iter()
                     .map(|(id, node)| {
@@ -479,6 +518,10 @@ fn run(cli: &Cli) -> Result<(), Error> {
                     "edges": graph.edges,
                 })
             };
+            let warnings = unelos_core::workflow_warnings(&project);
+            if !warnings.is_empty() {
+                result["issues"] = serde_json::to_value(warnings)?;
+            }
             let output = if cli.json {
                 serde_json::to_string(&result)?
             } else {
@@ -486,14 +529,30 @@ fn run(cli: &Cli) -> Result<(), Error> {
             };
             writeln!(io::stdout().lock(), "{output}")?;
         }
-        Command::Start { workflow, name } => {
-            let value = match workflow {
-                None => serde_json::json!({"workflows": list_workflows(&cli.project)?}),
-                Some(workflow) => runtime_output::summary(
+        Command::Start(args) => {
+            let name = args.name.as_deref();
+            let value = if let Some(steps) = args.inline_steps()? {
+                let package = execution_start_inline(&cli.project, &steps, name)?;
+                let run_id = package.run_id.as_deref().expect("start selects a run");
+                let state = status(&cli.project, run_id)
+                    .map_err(|_| mutation_response_error(Some(run_id)))?;
+                runtime_output::summary(&cli.project, &state)
+                    .map_err(|_| mutation_response_error(Some(run_id)))?
+            } else if let Some(workflow) = args.workflows.first() {
+                runtime_output::summary(
                     &cli.project,
-                    &start_workflow(&cli.project, workflow, name.as_deref())?,
+                    &start_workflow(&cli.project, workflow, name)?,
                 )
-                .map_err(Error::RuntimeOutput)?,
+                .map_err(Error::RuntimeOutput)?
+            } else {
+                let descriptions = list_workflow_descriptions(&cli.project)?;
+                let mut workflows = descriptions.keys().collect::<Vec<_>>();
+                workflows.sort_by_key(|name| name.starts_with("global/"));
+                let descriptions = descriptions
+                    .iter()
+                    .filter_map(|(name, text)| text.as_ref().map(|text| (name, text)))
+                    .collect::<std::collections::BTreeMap<_, _>>();
+                serde_json::json!({"workflows": workflows, "workflowDescriptions": descriptions})
             };
             emit(&value, cli.json, runtime_output::readable(&value))?;
         }

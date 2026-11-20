@@ -19,9 +19,7 @@ fn paths(root: &Utf8Path, id: &str) -> Result<(Utf8PathBuf, Utf8PathBuf), String
     if !crate::project::safe_id(id) {
         return Err(format!("Invalid Agent ID {id:?}"));
     }
-    let root = crate::project::absolute_root(root)
-        .map_err(|e| e.to_string())?
-        .join(".unelos");
+    let root = root.to_owned();
     let source = crate::project::bounded_path(
         &root,
         &Utf8PathBuf::from(format!("agents/{id}/agent.yaml")),
@@ -59,6 +57,19 @@ fn load(
 }
 
 pub fn get_agent(root: &Utf8Path, id: &str) -> Result<AgentDocument, String> {
+    get_at(
+        &crate::project::absolute_root(root)
+            .map_err(|e| e.to_string())?
+            .join(".unelos"),
+        id,
+    )
+}
+
+pub fn get_global_agent(id: &str) -> Result<AgentDocument, String> {
+    get_at(&crate::task_document::global_root()?, id)
+}
+
+fn get_at(root: &Utf8Path, id: &str) -> Result<AgentDocument, String> {
     let (root, source) = paths(root, id)?;
     let (mut agent, _) = load(&root, &source)?;
     if agent.effort.is_none() {
@@ -83,6 +94,36 @@ pub fn get_agent(root: &Utf8Path, id: &str) -> Result<AgentDocument, String> {
 }
 
 pub fn save_agent(
+    root: &Utf8Path,
+    original_id: Option<&str>,
+    agent: AgentDocument,
+) -> Result<AgentDocument, String> {
+    save_at(
+        &crate::project::absolute_root(root)
+            .map_err(|e| e.to_string())?
+            .join(".unelos"),
+        original_id,
+        agent,
+    )
+}
+
+pub fn save_global_agent(
+    original_id: Option<&str>,
+    agent: AgentDocument,
+) -> Result<AgentDocument, String> {
+    for (field, ids) in [("skills", &agent.skills), ("mcps", &agent.mcps)] {
+        for (index, id) in ids.iter().enumerate() {
+            if !id.strip_prefix("global/").is_some_and(|id| !id.is_empty()) {
+                return Err(format!(
+                    "{field}[{index}]: Global agents can only reference global definitions"
+                ));
+            }
+        }
+    }
+    save_at(&crate::task_document::global_root()?, original_id, agent)
+}
+
+fn save_at(
     root: &Utf8Path,
     original_id: Option<&str>,
     mut agent: AgentDocument,
@@ -136,7 +177,7 @@ pub fn save_agent(
         }
         return Err(error);
     }
-    get_agent(root, &agent.id)
+    get_at(root, &agent.id)
 }
 
 #[derive(Serialize)]

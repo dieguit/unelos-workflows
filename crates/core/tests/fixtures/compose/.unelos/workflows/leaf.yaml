@@ -1,0 +1,5 @@
+name: leaf
+start: m
+nodes:
+  m: {taskDefinition: {instructions: Produce the report.}, outputs: [y.md], next: done}
+  done: {type: end}

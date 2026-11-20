@@ -1,0 +1,4 @@
+# No model alias: aliases start unmapped, and an unmapped alias fails every project's harness build.
+instructionsFile: instructions.md
+skills:
+- global/unelos-workflow-design

@@ -40,7 +40,7 @@ export function FlowPane({
   onSelectWorker?: (stepIndex: number, workerIndex: number) => void
   onAddTask?: (stepIndex: number) => void
   /** `index` is the row of the step the new one follows. */
-  onAdd?: (index: number, kind: "task" | "human-gate") => void
+  onAdd?: (index: number, kind: "task" | "human-gate" | "workflow") => void
   /** No add affordances; cards only select. */
   readOnly?: boolean
   /** Run progress per step id. */

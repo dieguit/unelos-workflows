@@ -7,7 +7,7 @@ use crate::{
 use camino::Utf8Path;
 
 fn project_for(root: &Utf8Path, state: &RunState) -> Result<LoadedProject, ExecutionError> {
-    let project = crate::load_project(root, &state.workflow_name).map_err(RuntimeError::from)?;
+    let project = super::load_run_project(root, state)?;
     crate::validate_project(&project).map_err(RuntimeError::from)?;
     Ok(project)
 }
@@ -96,22 +96,39 @@ pub fn execution_start(
     workflow: &str,
     name: Option<&str>,
 ) -> Result<ExecutionPackage, ExecutionError> {
-    let name = name.map(super::slugify_run_name).transpose()?;
     let project = crate::load_project(root, workflow).map_err(RuntimeError::from)?;
-    crate::validate_project(&project).map_err(RuntimeError::from)?;
+    start_project(root, name, |_| Ok((project, None)))
+}
+
+pub(super) fn start_project(
+    root: &Utf8Path,
+    name: Option<&str>,
+    load: impl FnOnce(&str) -> Result<(LoadedProject, Option<(String, String)>), ExecutionError>,
+) -> Result<ExecutionPackage, ExecutionError> {
+    let name = name.map(super::slugify_run_name).transpose()?;
     let store = store::RunStore::open(root)?;
     store.ensure_start_available(name.as_deref())?;
     let run_id = store.allocate_run_id()?;
-    let state = super::prepare_start_state(
+    let (project, inline) = load(&run_id)?;
+    crate::validate_project(&project).map_err(RuntimeError::from)?;
+    let mut state = super::prepare_start_state(
         &project,
         &run_id,
         name.as_deref().unwrap_or(&run_id),
         "",
         name.is_none(),
     )?;
+    if let Some((label, _)) = &inline {
+        state.inline = true;
+        state.workflow_name.clone_from(label);
+    }
     let package = package_from_state(&project, &state)?;
     store
         .publish(&state, |run| {
+            if let Some((_, text)) = inline {
+                let path = run.join("workflow.yaml");
+                store::atomic_write(&path, text.as_bytes())?;
+            }
             artifacts::prepare_work_directories(&state, run)
         })
         .map_err(|error| ExecutionError::after_commit(error.into()))?;

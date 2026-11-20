@@ -33,6 +33,75 @@ fn result(root: &std::path::Path, args: &[&str]) -> Value {
 }
 
 #[test]
+fn starts_inline_from_names_or_steps_file() {
+    let temp = project_copy();
+    let root = temp.path();
+    let state = result(root, &["start", "implement-feature", "implement-feature"]);
+    assert_eq!(
+        state["workflowName"],
+        "implement-feature → implement-feature"
+    );
+    let run_id = state["runId"].as_str().unwrap();
+    assert_eq!(
+        result(root, &["next", "--run", run_id])["nodeId"],
+        "implement-feature/plan"
+    );
+    assert!(root
+        .join(".unelos/runs")
+        .join(run_id)
+        .join("workflow.yaml")
+        .is_file());
+    let file = root.join("steps.yaml");
+    fs::write(
+        &file,
+        "steps:\n  - gate: Start now?\n  - workflow: implement-feature\n",
+    )
+    .unwrap();
+    let started = result(
+        root,
+        &["execution", "start", "--steps-file", file.to_str().unwrap()],
+    );
+    assert_eq!(started["packet"]["description"], "Start now?");
+}
+
+#[test]
+fn start_lists_and_starts_global_workflows() {
+    let temp = project_copy();
+    let global = TempDir::new().unwrap();
+    fs::create_dir_all(global.path().join("workflows")).unwrap();
+    fs::create_dir_all(global.path().join("agents").join("shared")).unwrap();
+    fs::write(
+        global
+            .path()
+            .join("agents")
+            .join("shared")
+            .join("agent.yaml"),
+        "instructions: shared\n",
+    )
+    .unwrap();
+    fs::write(global.path().join("workflows").join("shared.yaml"), "name: shared\nstart: work\nnodes:\n  work:\n    agent: global/shared\n    taskDefinition:\n      instructions: global task\n    next: end\n  end:\n    type: end\n").unwrap();
+    let output = command(temp.path())
+        .env("UNELOS_CONFIG_DIR", global.path())
+        .arg("start")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let list: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(list["workflows"]
+        .as_array()
+        .unwrap()
+        .contains(&Value::String("global/shared".into())));
+    let output = command(temp.path())
+        .env("UNELOS_CONFIG_DIR", global.path())
+        .args(["start", "global/shared"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let run: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(run["workflowName"], "global/shared");
+}
+
+#[test]
 fn execution_packages_and_guarded_stdin_controls_work_without_external_next() {
     let temp = project_copy();
     let root = temp.path();

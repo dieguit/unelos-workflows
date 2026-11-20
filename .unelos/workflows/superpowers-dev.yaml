@@ -45,8 +45,8 @@ nodes:
         writing-plans skill to write the bound plan.md and self-review it against
         the spec. On re-entry after gate rejection, revise plan.md in place from
         the feedback. Do not implement.
-    agent: sp-controller
-    execution: main
+    agent: planner
+    execution: subagent
     inputs: [spec.md]
     outputs: [plan.md]
     next: approve-plan
@@ -62,8 +62,8 @@ nodes:
       instructions: |
         Create or verify the isolated worktree with a green baseline, run the
         preflight scan of plan.md, and write worktree.md as the skills describe.
-    agent: sp-controller
-    execution: main
+    agent: coordinator
+    execution: subagent
     inputs: [spec.md, plan.md]
     outputs: [worktree.md]
     next: implement-task
@@ -100,8 +100,8 @@ nodes:
       instructions: |
         Apply the sdd-controller node map for advance: update the bound
         progress.md from the latest review section and choose exactly one outcome.
-    agent: sp-controller
-    execution: main
+    agent: coordinator
+    execution: subagent
     inputs: [spec.md, plan.md, worktree.md, implementation-report.md, review.md]
     outputs: [progress.md]
     next:
@@ -139,8 +139,8 @@ nodes:
       instructions: |
         Apply the sdd-controller node map for advance-final: choose final_fix or
         finish from final-review.md and write residual rulings to final-rulings.md.
-    agent: sp-controller
-    execution: main
+    agent: coordinator
+    execution: subagent
     inputs: [progress.md, final-review.md]
     outputs: [final-rulings.md]
     next:

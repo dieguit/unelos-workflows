@@ -1,0 +1,23 @@
+description: Run frontend typecheck, lint, tests and build locally (CI does not) and write a pass/fail report.
+outcomes:
+- pass
+- fail
+instructions: |
+  Run, in order, from the repository root:
+
+  1. pnpm typecheck
+  2. pnpm lint
+  3. pnpm test
+  4. pnpm build
+
+  Lint has pre-existing errors on main. Split lint errors into files changed on
+  this branch (git diff --name-only main...HEAD plus uncommitted changes) and
+  other files. Only errors in changed files count against this check; list the
+  rest as pre-existing.
+
+  Write the bound frontend-checks.md: a table of the steps with command, exit
+  status and failure excerpt (file:line, first error); then pre-existing lint
+  errors as one line per file with the count.
+
+  Choose pass only if typecheck, test and build exit 0 and no lint error is in a
+  changed file. Otherwise choose fail. Do not fix.

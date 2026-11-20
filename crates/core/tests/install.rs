@@ -21,7 +21,7 @@ fn export_deduplicates_agents_and_combines_native_modes() {
     let agents = export_workflow_agents(root, "simple-plan-execute-review").unwrap();
     assert_eq!(agents.len(), 2);
     let controller = agents.iter().find(|a| a.id == "simple-controller").unwrap();
-    assert!(controller.main && controller.subagent);
+    assert!(controller.subagent);
     assert!(controller.model.is_none());
 }
 

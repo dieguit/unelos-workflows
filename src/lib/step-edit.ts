@@ -1,4 +1,23 @@
-import type { WorkflowStep, WorkflowWorker } from "@/lib/projects"
+import type { WorkflowDocument, WorkflowStep, WorkflowSummary, WorkflowWorker } from "@/lib/projects"
+
+export function callableWorkflows(current: string, summaries: WorkflowSummary[]): string[] {
+  const calls = new Map(summaries.map((s) => [s.name, s.calls]))
+  const reachesCurrent = (name: string, seen = new Set<string>()): boolean => {
+    if (name === current) return true
+    if (seen.has(name)) return false
+    seen.add(name)
+    return (calls.get(name) ?? []).some((child) => reachesCurrent(child, seen))
+  }
+  return summaries.filter((s) => !reachesCurrent(s.name)).map((s) => s.name)
+}
+
+export function childContract(child: WorkflowDocument): { inputs: string[]; ends: string[]; artifacts: string[] } {
+  return {
+    inputs: child.inputs,
+    ends: child.steps.filter((s) => s.kind === "end").map((s) => s.id),
+    artifacts: [...new Set(child.steps.flatMap((s) => s.outputs))],
+  }
+}
 
 export const humanize = (id: string) => {
   const text = id.replace(/[-_]+/g, " ").trim()
@@ -46,11 +65,13 @@ const blank = (id: string, kind: WorkflowStep["kind"]): WorkflowStep => ({
 export function insertStep(
   steps: WorkflowStep[],
   index: number,
-  kind: "task" | "human-gate"
+  kind: "task" | "human-gate" | "workflow"
 ) {
   const next = steps[index + 1]?.id ?? ""
-  const step = blank(uniqueId(steps, kind === "task" ? "new-task" : "approval"), kind)
-  if (kind === "task") {
+  const step = blank(uniqueId(steps, kind === "human-gate" ? "approval" : `new-${kind}`), kind)
+  if (kind === "workflow") {
+    step.call = { workflow: "", inputs: {}, outputs: {} }
+  } else if (kind === "task") {
     step.task = { source: "inline", id: null, description: null, instructions: "", skills: [], outcomes: [] }
     step.routes = [{ outcome: null, target: next }]
   } else {

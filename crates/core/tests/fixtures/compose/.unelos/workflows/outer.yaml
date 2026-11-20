@@ -1,0 +1,5 @@
+name: outer
+start: S
+nodes:
+  S: {type: workflow, workflow: mid, outputs: {e1.md: top.md}, next: done}
+  done: {type: end}

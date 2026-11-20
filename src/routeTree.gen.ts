@@ -11,9 +11,11 @@
 import { Route as rootRouteImport } from "./routes/__root"
 import { Route as IndexRouteImport } from "./routes/index"
 import { Route as AgentsIndexRouteImport } from "./routes/agents/index"
+import { Route as GlobalAgentsIndexRouteImport } from "./routes/global-agents/index"
 import { Route as GlobalMcpsIndexRouteImport } from "./routes/global-mcps/index"
 import { Route as GlobalSkillsIndexRouteImport } from "./routes/global-skills/index"
 import { Route as GlobalTasksIndexRouteImport } from "./routes/global-tasks/index"
+import { Route as GlobalWorkflowsIndexRouteImport } from "./routes/global-workflows/index"
 import { Route as HarnessesIndexRouteImport } from "./routes/harnesses/index"
 import { Route as McpsIndexRouteImport } from "./routes/mcps/index"
 import { Route as ModelMappingsIndexRouteImport } from "./routes/model-mappings/index"
@@ -34,6 +36,11 @@ const AgentsIndexRoute = AgentsIndexRouteImport.update({
   path: "/agents/",
   getParentRoute: () => rootRouteImport,
 } as any)
+const GlobalAgentsIndexRoute = GlobalAgentsIndexRouteImport.update({
+  id: "/global-agents/",
+  path: "/global-agents/",
+  getParentRoute: () => rootRouteImport,
+} as any)
 const GlobalMcpsIndexRoute = GlobalMcpsIndexRouteImport.update({
   id: "/global-mcps/",
   path: "/global-mcps/",
@@ -47,6 +54,11 @@ const GlobalSkillsIndexRoute = GlobalSkillsIndexRouteImport.update({
 const GlobalTasksIndexRoute = GlobalTasksIndexRouteImport.update({
   id: "/global-tasks/",
   path: "/global-tasks/",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GlobalWorkflowsIndexRoute = GlobalWorkflowsIndexRouteImport.update({
+  id: "/global-workflows/",
+  path: "/global-workflows/",
   getParentRoute: () => rootRouteImport,
 } as any)
 const HarnessesIndexRoute = HarnessesIndexRouteImport.update({
@@ -98,9 +110,11 @@ const RunsRunIdIndexRoute = RunsRunIdIndexRouteImport.update({
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
   "/agents/": typeof AgentsIndexRoute
+  "/global-agents/": typeof GlobalAgentsIndexRoute
   "/global-mcps/": typeof GlobalMcpsIndexRoute
   "/global-skills/": typeof GlobalSkillsIndexRoute
   "/global-tasks/": typeof GlobalTasksIndexRoute
+  "/global-workflows/": typeof GlobalWorkflowsIndexRoute
   "/harnesses/": typeof HarnessesIndexRoute
   "/mcps/": typeof McpsIndexRoute
   "/model-mappings/": typeof ModelMappingsIndexRoute
@@ -114,9 +128,11 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
   "/agents": typeof AgentsIndexRoute
+  "/global-agents": typeof GlobalAgentsIndexRoute
   "/global-mcps": typeof GlobalMcpsIndexRoute
   "/global-skills": typeof GlobalSkillsIndexRoute
   "/global-tasks": typeof GlobalTasksIndexRoute
+  "/global-workflows": typeof GlobalWorkflowsIndexRoute
   "/harnesses": typeof HarnessesIndexRoute
   "/mcps": typeof McpsIndexRoute
   "/model-mappings": typeof ModelMappingsIndexRoute
@@ -131,9 +147,11 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   "/": typeof IndexRoute
   "/agents/": typeof AgentsIndexRoute
+  "/global-agents/": typeof GlobalAgentsIndexRoute
   "/global-mcps/": typeof GlobalMcpsIndexRoute
   "/global-skills/": typeof GlobalSkillsIndexRoute
   "/global-tasks/": typeof GlobalTasksIndexRoute
+  "/global-workflows/": typeof GlobalWorkflowsIndexRoute
   "/harnesses/": typeof HarnessesIndexRoute
   "/mcps/": typeof McpsIndexRoute
   "/model-mappings/": typeof ModelMappingsIndexRoute
@@ -149,9 +167,11 @@ export interface FileRouteTypes {
   fullPaths:
     | "/"
     | "/agents/"
+    | "/global-agents/"
     | "/global-mcps/"
     | "/global-skills/"
     | "/global-tasks/"
+    | "/global-workflows/"
     | "/harnesses/"
     | "/mcps/"
     | "/model-mappings/"
@@ -165,9 +185,11 @@ export interface FileRouteTypes {
   to:
     | "/"
     | "/agents"
+    | "/global-agents"
     | "/global-mcps"
     | "/global-skills"
     | "/global-tasks"
+    | "/global-workflows"
     | "/harnesses"
     | "/mcps"
     | "/model-mappings"
@@ -181,9 +203,11 @@ export interface FileRouteTypes {
     | "__root__"
     | "/"
     | "/agents/"
+    | "/global-agents/"
     | "/global-mcps/"
     | "/global-skills/"
     | "/global-tasks/"
+    | "/global-workflows/"
     | "/harnesses/"
     | "/mcps/"
     | "/model-mappings/"
@@ -198,9 +222,11 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AgentsIndexRoute: typeof AgentsIndexRoute
+  GlobalAgentsIndexRoute: typeof GlobalAgentsIndexRoute
   GlobalMcpsIndexRoute: typeof GlobalMcpsIndexRoute
   GlobalSkillsIndexRoute: typeof GlobalSkillsIndexRoute
   GlobalTasksIndexRoute: typeof GlobalTasksIndexRoute
+  GlobalWorkflowsIndexRoute: typeof GlobalWorkflowsIndexRoute
   HarnessesIndexRoute: typeof HarnessesIndexRoute
   McpsIndexRoute: typeof McpsIndexRoute
   ModelMappingsIndexRoute: typeof ModelMappingsIndexRoute
@@ -228,6 +254,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AgentsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    "/global-agents/": {
+      id: "/global-agents/"
+      path: "/global-agents"
+      fullPath: "/global-agents/"
+      preLoaderRoute: typeof GlobalAgentsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     "/global-mcps/": {
       id: "/global-mcps/"
       path: "/global-mcps"
@@ -247,6 +280,13 @@ declare module "@tanstack/react-router" {
       path: "/global-tasks"
       fullPath: "/global-tasks/"
       preLoaderRoute: typeof GlobalTasksIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/global-workflows/": {
+      id: "/global-workflows/"
+      path: "/global-workflows"
+      fullPath: "/global-workflows/"
+      preLoaderRoute: typeof GlobalWorkflowsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/harnesses/": {
@@ -318,9 +358,11 @@ declare module "@tanstack/react-router" {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgentsIndexRoute: AgentsIndexRoute,
+  GlobalAgentsIndexRoute: GlobalAgentsIndexRoute,
   GlobalMcpsIndexRoute: GlobalMcpsIndexRoute,
   GlobalSkillsIndexRoute: GlobalSkillsIndexRoute,
   GlobalTasksIndexRoute: GlobalTasksIndexRoute,
+  GlobalWorkflowsIndexRoute: GlobalWorkflowsIndexRoute,
   HarnessesIndexRoute: HarnessesIndexRoute,
   McpsIndexRoute: McpsIndexRoute,
   ModelMappingsIndexRoute: ModelMappingsIndexRoute,

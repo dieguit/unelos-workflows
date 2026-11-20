@@ -77,6 +77,36 @@ pub fn get_run(root: &Utf8Path, run_id: &str) -> Result<RunDetails, RuntimeError
     })
 }
 
+pub fn get_run_workflow(root: &Utf8Path, run_id: &str) -> Result<crate::WorkflowDocument, String> {
+    let store = RunStore::open(root).map_err(|e| e.to_string())?;
+    let state = store.run(run_id).map_err(|e| e.to_string())?;
+    if !state.inline {
+        return crate::get_workflow(store.root(), &state.workflow_name);
+    }
+
+    let path = store
+        .root()
+        .join(".unelos/runs")
+        .join(run_id)
+        .join("workflow.yaml");
+    super::store::reject_symlink(&path).map_err(|e| e.to_string())?;
+    if !std::fs::metadata(&path)
+        .map_err(|e| path_error(&path, e).to_string())?
+        .is_file()
+    {
+        return Err(format!("workflow is not a regular file: {path}"));
+    }
+    let text = std::fs::read_to_string(&path).map_err(|e| path_error(&path, e).to_string())?;
+    let workflow =
+        crate::parse_workflow_definition(path.as_str(), &text).map_err(|e| e.to_string())?;
+    Ok(crate::workflow_document::graph_document(
+        run_id,
+        workflow,
+        None,
+        vec![],
+    ))
+}
+
 pub fn delete_run(root: &Utf8Path, run_id: &str) -> Result<(), RuntimeError> {
     let store = RunStore::open(root)?;
     store.run(run_id)?;

@@ -171,7 +171,12 @@ fn workflow_install_generates_native_agents_and_reinstall_overwrites_edits() {
     assert!(front.get("model").is_none());
     assert!(front.get("permissions").is_none());
     assert!(body.contains("Follow existing project conventions"));
-    assert_eq!(profile(&target, "simple-controller").0["mode"], "primary");
+    assert!(!target
+        .path()
+        .join(".opencode")
+        .join("agents")
+        .join("unelos-simple-controller.md")
+        .exists());
     assert!(!target.path().join(".unelos/active-run").exists());
     fs::write(
         target
@@ -296,10 +301,12 @@ fn mcps_project_with_scoped_tools_and_cleanup_without_clobbering_user_config() {
     let front = profile(&target, "simple-implementer").0;
     assert_eq!(front["tools"]["browser_*"], true);
     assert_eq!(front["tools"]["web_*"], true);
-    assert!(profile(&target, "simple-controller")
-        .0
-        .get("tools")
-        .is_none());
+    assert!(!target
+        .path()
+        .join(".opencode")
+        .join("agents")
+        .join("unelos-simple-controller.md")
+        .exists());
     let read_config = || {
         let text = fs::read_to_string(&config).unwrap();
         assert!(text.contains("// preserve me"));

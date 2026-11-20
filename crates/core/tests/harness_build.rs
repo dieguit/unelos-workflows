@@ -82,6 +82,14 @@ fn rebuild_merges_prunes_preserves_and_replaces_mcp_ownership() {
     let cli = root.join("cli");
     fs::write(&cli, "test executable").unwrap();
     harness::install_harness("opencode", &cli).unwrap();
+    fs::rename(&second, second.with_extension("bak")).unwrap();
+    build_harness_config(root).unwrap();
+    let controller = root
+        .join(".opencode")
+        .join("agents")
+        .join("unelos-simple-controller.md");
+    assert!(!controller.exists());
+    fs::rename(second.with_extension("bak"), &second).unwrap();
     fs::create_dir_all(root.join(".opencode/agents")).unwrap();
     let foreign = root.join(".opencode/agents/custom.md");
     fs::write(&foreign, "keep").unwrap();
@@ -93,12 +101,12 @@ fn rebuild_merges_prunes_preserves_and_replaces_mcp_ownership() {
             .iter()
             .filter(|p| p.extension() == Some("md"))
             .count(),
-        3
+        1
     );
     let controller = root.join(".opencode/agents/unelos-simple-controller.md");
     assert!(fs::read_to_string(&controller)
         .unwrap()
-        .contains("mode: all"));
+        .contains("mode: subagent"));
     let before = fs::metadata(&controller).unwrap().modified().unwrap();
     assert!(build_harness_config(root).unwrap().written.is_empty());
     assert_eq!(
@@ -131,14 +139,15 @@ fn rebuild_merges_prunes_preserves_and_replaces_mcp_ownership() {
     fs::write(&stale, "keep").unwrap();
     fs::write(&controller, "outdated").unwrap();
     let built = build_harness_config(root).unwrap();
-    assert_eq!(built.skipped.len(), 1);
+    assert_eq!(built.skipped.len(), 2);
     assert!(built.skipped[0].starts_with("broken: "));
-    assert!(built.written.contains(&controller));
+    assert!(built.skipped[1].starts_with("Modified or unowned agent: "));
+    assert!(!built.written.contains(&controller));
+    assert_eq!(fs::read_to_string(&controller).unwrap(), "outdated");
     assert!(built.removed.is_empty());
     assert_eq!(fs::read_to_string(&stale).unwrap(), "keep");
-    assert!(fs::read_to_string(&controller)
-        .unwrap()
-        .contains("mode: all"));
+    fs::remove_file(&controller).unwrap();
+    build_harness_config(root).unwrap();
     fs::remove_file(stale).unwrap();
     fs::remove_file(root.join(".unelos/workflows/broken.yaml")).unwrap();
     fs::remove_file(&second).unwrap();
@@ -150,7 +159,10 @@ fn rebuild_merges_prunes_preserves_and_replaces_mcp_ownership() {
     let built = build_harness_config(root).unwrap();
     assert_eq!(
         built.removed,
-        [root.join(".opencode/agents/unelos-simple-reviewer.md")]
+        [
+            controller,
+            root.join(".opencode/agents/unelos-simple-reviewer.md")
+        ]
     );
     assert_eq!(fs::read_to_string(&foreign).unwrap(), "keep");
     let state: serde_json::Value =

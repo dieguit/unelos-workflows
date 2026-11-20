@@ -46,6 +46,10 @@ pub(crate) fn readable(value: &Value) -> String {
                 workflows
                     .iter()
                     .filter_map(Value::as_str)
+                    .map(|name| match value["workflowDescriptions"][name].as_str() {
+                        Some(description) => format!("{name} — {description}"),
+                        None => name.to_owned(),
+                    })
                     .collect::<Vec<_>>()
                     .join("\n")
             )

@@ -134,9 +134,10 @@ fn listed(args: &[&str], id: &str) -> Result<bool> {
 fn render_agents(agents: &[crate::AgentExport]) -> Result<Vec<(Utf8PathBuf, String)>> {
     agents
         .iter()
+        .filter(|agent| agent.subagent)
         .map(|agent| {
             let mut front = json!({
-                "name": format!("unelos-{}", agent.id),
+                "name": crate::install::native_agent_id(&agent.id),
                 "description": format!("Unelos {} role", agent.id),
             });
             if let Some(model) = agent
@@ -198,7 +199,10 @@ fn render_agents(agents: &[crate::AgentExport]) -> Result<Vec<(Utf8PathBuf, Stri
                 )
             };
             Ok((
-                Utf8PathBuf::from(format!(".claude/agents/unelos-{}.md", agent.id)),
+                Utf8PathBuf::from(format!(
+                    ".claude/agents/{}.md",
+                    crate::install::native_agent_id(&agent.id)
+                )),
                 format!("---\n{yaml}---\n{}{}\n", agent.instructions, requirements),
             ))
         })
@@ -332,14 +336,27 @@ impl HarnessAdapter for Claude {
         &self,
         root: &Utf8Path,
         workflows: &BTreeMap<String, Vec<crate::AgentExport>>,
+        legacy_globals: &[crate::AgentExport],
         prune: bool,
     ) -> Result<crate::HarnessBuild> {
-        let agents = crate::harness_build::merge_agents(workflows)?;
+        let mut agents = crate::harness_build::merge_agents(workflows)?;
+        agents.retain(|a| !a.id.starts_with("global/"));
         let rendered = render_agents(&agents)?;
+        let legacy = render_agents(legacy_globals).unwrap_or_default();
         let mut result =
-            crate::harness_build::write_agents(root, ".claude/agents", rendered, prune)?;
+            crate::harness_build::write_agents(root, ".claude/agents", rendered, legacy, prune)?;
         result.harnesses.push(self.id().into());
         Ok(result)
+    }
+    fn build_global_agents(
+        &self,
+        agents: &[crate::AgentExport],
+        prune: bool,
+    ) -> Result<crate::HarnessBuild> {
+        let root = self
+            .config_dir()
+            .ok_or_else(|| error("config_dir_missing", "Set CLAUDE_CONFIG_DIR or HOME"))?;
+        crate::harness_build::write_global_agents(&root, self.id(), render_agents(agents)?, prune)
     }
 }
 

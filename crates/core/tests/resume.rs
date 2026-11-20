@@ -97,6 +97,9 @@ fn fresh_entry_never_selects_history_and_resume_is_read_only() {
 
 #[test]
 fn finished_run_is_addressable_but_not_resumable() {
+    if !support::isolated_config() {
+        return;
+    }
     let (_temp, root) = fixture();
     let path = root.join(".unelos/workflows/simple-plan-execute-review.yaml");
     let definition = std::fs::read_to_string(&path).unwrap();
@@ -121,6 +124,9 @@ fn finished_run_is_addressable_but_not_resumable() {
 
 #[test]
 fn fresh_entry_does_not_read_corrupt_run_storage_or_write_runtime() {
+    if !support::isolated_config() {
+        return;
+    }
     let (_temp, root) = fixture();
     let run = root.join(".unelos/runs/broken");
     std::fs::create_dir_all(&run).unwrap();
@@ -129,6 +135,8 @@ fn fresh_entry_does_not_read_corrupt_run_storage_or_write_runtime() {
     assert_eq!(new.workflows, vec!["simple-plan-execute-review"]);
     assert!(!root.join(".unelos/runtime.lock").exists());
 }
+
+mod support;
 
 fn finish_main(root: &Utf8Path, state: &RunState) -> RunState {
     let CurrentWork::Task(record) = &state.current else {

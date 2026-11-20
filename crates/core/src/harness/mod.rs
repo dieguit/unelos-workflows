@@ -1,3 +1,4 @@
+mod bundled;
 mod claude;
 pub(crate) mod jsonc;
 pub(crate) mod opencode;
@@ -35,6 +36,14 @@ pub trait HarnessAdapter {
         &self,
         _root: &Utf8Path,
         _workflows: &std::collections::BTreeMap<String, Vec<crate::AgentExport>>,
+        _legacy_globals: &[crate::AgentExport],
+        _prune: bool,
+    ) -> Result<crate::HarnessBuild> {
+        Err(error("harness_not_installable", self.id()))
+    }
+    fn build_global_agents(
+        &self,
+        _agents: &[crate::AgentExport],
         _prune: bool,
     ) -> Result<crate::HarnessBuild> {
         Err(error("harness_not_installable", self.id()))
@@ -290,10 +299,19 @@ pub fn install_harness(id: &str, cli_src: &Utf8Path) -> Result<Vec<HarnessStatus
     adapter.validate()?;
     let binary = provision_cli(cli_src)?;
     adapter.install(&Ctx { binary })?;
+    bundled::install()?;
+    for skipped in crate::harness_build::build_globals_for(adapter.as_ref())?.skipped {
+        eprintln!("Global agents skipped: {skipped}");
+    }
     Ok(list_harnesses())
 }
 pub fn uninstall_harness(id: &str) -> Result<Vec<HarnessStatus>> {
-    adapter(id)?.uninstall(&context()?)?;
+    let adapter = adapter(id)?;
+    adapter.uninstall(&context()?)?;
+    adapter.build_global_agents(&[], true)?;
+    if global_config::read_state()?.is_empty() {
+        bundled::uninstall()?;
+    }
     Ok(list_harnesses())
 }
 pub fn harness_models(id: &str) -> Result<Vec<ModelInfo>> {

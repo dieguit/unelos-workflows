@@ -389,17 +389,43 @@ fn parse<T: DeserializeOwned>(context: &str, yaml: &str) -> Result<T, Definition
 /// A Workflow's author-authored name, entry node, and nodes keyed by identity.
 /// Map keys are the node IDs; parsing does not load files, resolve agent
 /// references, or validate graph edges.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkflowDefinition {
     #[serde(deserialize_with = "strict_string")]
     pub name: String,
-    #[serde(default, deserialize_with = "strict_option_string")]
+    #[serde(
+        default,
+        deserialize_with = "strict_option_string",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub description: Option<String>,
     #[serde(deserialize_with = "strict_string")]
     pub start: String,
-    #[serde(deserialize_with = "strict_map")]
+    #[serde(default, deserialize_with = "strict_strings")]
+    pub inputs: Vec<String>,
+    #[serde(
+        deserialize_with = "strict_map",
+        serialize_with = "serialize_workflow_nodes"
+    )]
     pub nodes: IndexMap<String, NodeDefinition>,
+}
+
+fn serialize_workflow_nodes<S: serde::Serializer>(
+    nodes: &IndexMap<String, NodeDefinition>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let nodes = nodes
+        .iter()
+        .map(|(id, node)| {
+            let mut value = serde_yaml_ng::to_value(node).map_err(serde::ser::Error::custom)?;
+            let fields = value.as_mapping_mut().expect("nodes serialize as maps");
+            let kind = fields.remove("kind").expect("nodes serialize with kind");
+            fields.insert("type".into(), kind);
+            Ok((id, value))
+        })
+        .collect::<Result<IndexMap<_, _>, S::Error>>()?;
+    nodes.serialize(serializer)
 }
 
 /// How a task node runs. Parallel workers are implicitly subagents.
@@ -596,6 +622,12 @@ pub struct ParallelNode {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct HumanGateNode {
+    #[serde(
+        default,
+        deserialize_with = "present_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub description: Option<String>,
     #[serde(default, deserialize_with = "strict_strings")]
     pub inputs: Vec<String>,
     #[serde(deserialize_with = "strict_outcome_map")]
@@ -609,6 +641,7 @@ pub enum NodeDefinition {
     Task(TaskNode),
     Parallel(ParallelNode),
     HumanGate(HumanGateNode),
+    Workflow(WorkflowNode),
     End,
 }
 
@@ -650,6 +683,9 @@ impl<'de> Deserialize<'de> for NodeDefinition {
             "human-gate" => HumanGateNode::deserialize(value)
                 .map(Self::HumanGate)
                 .map_err(D::Error::custom),
+            "workflow" => WorkflowNode::deserialize(value)
+                .map(Self::Workflow)
+                .map_err(D::Error::custom),
             "end" => {
                 let Value::Mapping(fields) = value else {
                     unreachable!()
@@ -663,8 +699,40 @@ impl<'de> Deserialize<'de> for NodeDefinition {
             }
             other => Err(D::Error::unknown_variant(
                 other,
-                &["task", "parallel", "human-gate", "end"],
+                &["task", "parallel", "human-gate", "workflow", "end"],
             )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(from = "WorkflowNodeWire")]
+pub struct WorkflowNode {
+    pub workflow: String,
+    pub inputs: IndexMap<String, String>,
+    pub outputs: IndexMap<String, String>,
+    pub next: Transition,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkflowNodeWire {
+    #[serde(deserialize_with = "strict_string")]
+    workflow: String,
+    #[serde(default, deserialize_with = "strict_string_map")]
+    inputs: IndexMap<String, String>,
+    #[serde(default, deserialize_with = "strict_string_map")]
+    outputs: IndexMap<String, String>,
+    next: Transition,
+}
+
+impl From<WorkflowNodeWire> for WorkflowNode {
+    fn from(raw: WorkflowNodeWire) -> Self {
+        Self {
+            workflow: raw.workflow,
+            inputs: raw.inputs,
+            outputs: raw.outputs,
+            next: raw.next,
         }
     }
 }

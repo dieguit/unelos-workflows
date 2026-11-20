@@ -1,0 +1,21 @@
+description: Wait for the pull request's CI on its latest commit and report failures with log excerpts.
+outcomes:
+- pass
+- fail
+- infra
+instructions: |
+  Read pr.md (and fix reports in transition feedback) for the PR number and the
+  HEAD sha to check. Wait for every check on that sha to finish: `gh pr checks
+  <number> --watch`. If your shell times out, run it again until all checks
+  have finished; never report while checks are still running.
+
+  For each failed job, get its log (`gh run view <run-id> --log-failed`) and
+  quote the first real error with file:line. Decide per job: code failure, or
+  infrastructure (no runner assigned, cancelled before any step ran, network or
+  toolchain download errors).
+
+  Write the bound ci.md: sha checked, one row per check (name, result,
+  duration, link), then the failure excerpts with your code/infra call.
+
+  Choose pass when every check passed. Choose fail when any failure is a code
+  failure. Choose infra when every failure is infrastructure. Do not fix.

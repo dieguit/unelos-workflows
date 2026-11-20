@@ -1,0 +1,19 @@
+description: Agree with the user what to improve and which evidence about their way of working may be used.
+skills:
+- global/unelos-workflow-design
+instructions: |
+  Talk with the user, one question at a time, until you know:
+  - what they want: workflows for the whole project, or for a named kind of
+    work (bug fixes, UI features, releases...);
+  - where agents keep failing them and what they keep re-explaining;
+  - which evidence the analyst may read: agent session history (OpenCode
+    database, Claude Code transcripts; ask for consent, it can contain secrets),
+    the repository, design files, docs;
+  - constraints (models or quotas, branch rules, tools that are not available).
+
+  Look at the repository yourself first (CI config, scripts, AGENTS.md or
+  CLAUDE.md, existing .unelos) so your questions are specific.
+
+  Write the bound brief.md: goal, scope, consented evidence sources with paths,
+  constraints, and the user's own words about recurring pain. On re-entry,
+  update it in place.

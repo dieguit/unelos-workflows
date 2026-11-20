@@ -1,4 +1,5 @@
 import { trackedInvoke } from "@/lib/tauri"
+import type { WorkflowDocument } from "@/lib/projects"
 
 export type ArtifactReference = { name: string; path: string }
 export type WorkerReportBinding = { key: string; report: ArtifactReference }
@@ -52,6 +53,8 @@ export const listRuns = (root: string) =>
   trackedInvoke<RunListItem[]>("list_runs", { root })
 export const getRun = (root: string, runId: string) =>
   trackedInvoke<RunState>("get_run", { root, runId })
+export const getRunWorkflow = (root: string, runId: string) =>
+  trackedInvoke<WorkflowDocument>("get_run_workflow", { root, runId })
 export const deleteRun = (root: string, runId: string) =>
   trackedInvoke<void>("delete_run", { root, runId })
 /** Only paths referenced by the run's own state are readable. */

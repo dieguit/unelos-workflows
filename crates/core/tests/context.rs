@@ -46,6 +46,7 @@ fn runtime_project() -> (TempDir, unelos_core::LoadedProject) {
 
 fn runtime_input(root: &Utf8Path) -> TaskRuntimeInput {
     TaskRuntimeInput {
+        missing_inputs: vec![],
         run_id: "run-1".into(),
         task_id: "task-3".into(),
         node_id: "implement".into(),

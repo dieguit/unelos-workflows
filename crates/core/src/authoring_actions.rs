@@ -222,14 +222,19 @@ fn references(root: &Utf8Path, kind: &str, id: &str, removed: &Utf8Path) -> Resu
     let authoring = crate::project::absolute_root(root)
         .map_err(|e| e.to_string())?
         .join(".unelos");
+    references_at(&authoring, kind, id, removed)
+}
+
+fn references_at(
+    authoring: &Utf8Path,
+    kind: &str,
+    id: &str,
+    removed: &Utf8Path,
+) -> Result<(), String> {
     for directory in ["agents", "tasks", "workflows"] {
-        let folder = crate::project::bounded_path(
-            &authoring,
-            Utf8Path::new(directory),
-            &authoring,
-            directory,
-        )
-        .map_err(|e| e.to_string())?;
+        let folder =
+            crate::project::bounded_path(authoring, Utf8Path::new(directory), authoring, directory)
+                .map_err(|e| e.to_string())?;
         if !folder.try_exists().map_err(|e| e.to_string())? {
             continue;
         }
@@ -257,10 +262,10 @@ fn references(root: &Utf8Path, kind: &str, id: &str, removed: &Utf8Path) -> Resu
                             "Cannot remove Skill {id:?}: referenced by {source}"
                         ));
                     }
-                    instruction_reference(&authoring, &source, &agent.instructions_file, removed)?;
+                    instruction_reference(authoring, &source, &agent.instructions_file, removed)?;
                 }
                 "tasks" => task_reference(
-                    &authoring,
+                    authoring,
                     &source,
                     &crate::parse_task_definition(source.as_str(), &text)
                         .map_err(|e| e.to_string())?,
@@ -273,6 +278,13 @@ fn references(root: &Utf8Path, kind: &str, id: &str, removed: &Utf8Path) -> Resu
                         .map_err(|e| e.to_string())?;
                     for node in workflow.nodes.values() {
                         let workers: Vec<_> = match node {
+                            NodeDefinition::Workflow(call)
+                                if kind == "workflows" && call.workflow == id =>
+                            {
+                                return Err(format!(
+                                    "Cannot remove Workflow {id:?}: referenced by {source}"
+                                ));
+                            }
                             NodeDefinition::Task(task) => vec![(&task.agent, &task.task)],
                             NodeDefinition::Parallel(parallel) => parallel
                                 .tasks
@@ -295,7 +307,7 @@ fn references(root: &Utf8Path, kind: &str, id: &str, removed: &Utf8Path) -> Resu
                                 ));
                             }
                             if let TaskSelection::Inline(task) = task {
-                                task_reference(&authoring, &source, task, kind, id, removed)?;
+                                task_reference(authoring, &source, task, kind, id, removed)?;
                             }
                         }
                     }
@@ -357,6 +369,40 @@ pub fn remove_task(root: &Utf8Path, id: &str) -> Result<(), String> {
 
 pub fn duplicate_global_task(id: &str, new_id: &str) -> Result<(), String> {
     duplicate_at(&crate::task_document::global_root()?, "tasks", id, new_id)
+}
+pub fn duplicate_global_agent(id: &str, new_id: &str) -> Result<(), String> {
+    duplicate_at(&crate::task_document::global_root()?, "agents", id, new_id)
+}
+pub fn duplicate_global_workflow(id: &str, new_id: &str) -> Result<(), String> {
+    if !crate::project::safe_id(id) || !crate::project::safe_id(new_id) {
+        return Err("Invalid global Workflow ID".into());
+    }
+    duplicate_at(
+        &crate::task_document::global_root()?,
+        "workflows",
+        id,
+        new_id,
+    )
+}
+pub fn remove_global_agent(id: &str) -> Result<(), String> {
+    remove_global("agents", id)
+}
+pub fn remove_global_workflow(id: &str) -> Result<(), String> {
+    remove_global("workflows", id)
+}
+fn remove_global(kind: &str, id: &str) -> Result<(), String> {
+    if !crate::project::safe_id(id) {
+        return Err(format!("Invalid global {kind} ID"));
+    }
+    let root = crate::task_document::global_root()?;
+    let source = authoring_path(&root, kind, id)?;
+    check_tree(&source)?;
+    references_at(&root, kind, &format!("global/{id}"), &source)?;
+    if kind == "workflows" {
+        fs::remove_file(source).map_err(|e| e.to_string())
+    } else {
+        remove_directory(&source)
+    }
 }
 pub fn duplicate_global_skill(id: &str, new_id: &str) -> Result<(), String> {
     duplicate_at(&crate::task_document::global_root()?, "skills", id, new_id)

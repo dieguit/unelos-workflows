@@ -5,13 +5,28 @@ use std::fs;
 use std::io::Write;
 
 pub fn create_workflow(root: &Utf8Path) -> Result<String, String> {
+    create_workflow_at(root, false)
+}
+
+pub fn create_global_workflow() -> Result<String, String> {
+    create_workflow_at(&crate::task_document::global_root()?, true)
+}
+
+fn create_workflow_at(root: &Utf8Path, global: bool) -> Result<String, String> {
     for number in 1u64.. {
         let id = if number == 1 {
             "new-workflow".to_owned()
         } else {
             format!("new-workflow-{number}")
         };
-        let path = source(root, &id)?;
+        let path = source(
+            root,
+            &if global {
+                format!("global/{id}")
+            } else {
+                id.clone()
+            },
+        )?;
         fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
         if path.with_extension("yml").exists() {
             continue;
@@ -37,6 +52,16 @@ pub struct WorkflowSettings {
     pub name: String,
     pub description: Option<String>,
     pub start: String,
+    #[serde(default)]
+    pub inputs: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StepCall {
+    pub workflow: String,
+    pub inputs: indexmap::IndexMap<String, String>,
+    pub outputs: indexmap::IndexMap<String, String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -56,6 +81,36 @@ pub struct WorkflowWorker {
 pub struct WorkflowIssue {
     pub message: String,
     pub step: Option<String>,
+    pub severity: IssueSeverity,
+}
+
+#[derive(Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum IssueSeverity {
+    #[default]
+    Error,
+    Warning,
+}
+
+pub fn workflow_warnings(project: &crate::LoadedProject) -> Vec<WorkflowIssue> {
+    project.workflow.nodes.iter().filter_map(|(node, definition)| {
+        let crate::NodeDefinition::Task(step) = definition else { return None };
+        if step.execution != crate::Execution::Main {
+            return None;
+        }
+        let agent = project.definitions.agents.get(&step.agent)?;
+        let fields: Vec<_> = [
+            ("model", agent.model.is_some()),
+            ("effort", agent.effort.is_some()),
+            ("MCPs", !agent.mcps.is_empty()),
+            ("tools", !agent.tools.is_empty()),
+        ].into_iter().filter_map(|(field, set)| set.then_some(field)).collect();
+        (!fields.is_empty()).then(|| WorkflowIssue {
+            message: format!("Agent {:?} sets {}, which are ignored for main step {node:?}: main steps run in the orchestrator's session.", step.agent, fields.join("/")),
+            step: Some(node.clone()),
+            severity: IssueSeverity::Warning,
+        })
+    }).collect()
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -66,6 +121,8 @@ pub struct WorkflowStep {
     pub original_id: Option<String>,
     #[serde(default)]
     pub task: Option<StepTask>,
+    #[serde(default)]
+    pub call: Option<StepCall>,
     #[serde(default)]
     pub label: String,
     pub kind: String,
@@ -108,6 +165,19 @@ pub struct WorkflowDocument {
 }
 
 fn source(root: &Utf8Path, id: &str) -> Result<Utf8PathBuf, String> {
+    if let Some(id) = id.strip_prefix("global/") {
+        if !crate::project::safe_id(id) {
+            return Err(format!("Invalid global Workflow ID {id:?}"));
+        }
+        let authoring = crate::task_document::global_root()?;
+        return crate::project::bounded_path(
+            &authoring,
+            &Utf8PathBuf::from(format!("workflows/{id}.yaml")),
+            &authoring,
+            "workflow",
+        )
+        .map_err(|e| e.to_string());
+    }
     if id.is_empty()
         || matches!(id, "." | "..")
         || id.contains(['/', '\\'])
@@ -127,19 +197,31 @@ fn source(root: &Utf8Path, id: &str) -> Result<Utf8PathBuf, String> {
     .map_err(|e| e.to_string())
 }
 
+fn load_candidate(
+    root: &Utf8Path,
+    id: &str,
+    text: Option<&str>,
+) -> Result<crate::LoadedProject, String> {
+    if id.starts_with("global/") {
+        crate::project::load_authoring_candidate(&crate::task_document::global_root()?, id, text)
+            .map_err(|e| e.to_string())
+    } else {
+        crate::project::load_project_candidate(root, id, text).map_err(|e| e.to_string())
+    }
+}
+
 fn issues(root: &Utf8Path, id: &str, text: Option<&str>) -> Vec<WorkflowIssue> {
-    let result = crate::project::load_project_candidate(root, id, text)
+    let result = load_candidate(root, id, text)
         .map_err(|e| e.to_string())
         .and_then(|project| {
             crate::validate_project(&project)
-                .map(|_| ())
+                .map(|_| workflow_warnings(&project))
                 .map_err(|e| e.to_string())
         });
     let workflow = text.and_then(|text| crate::parse_workflow_definition(id, text).ok());
-    result
-        .err()
-        .into_iter()
-        .map(|message| {
+    match result {
+        Ok(warnings) => warnings,
+        Err(message) => {
             let step = workflow.as_ref().and_then(|workflow| {
                 message.split(": ").find_map(|field| {
                     let field = field.strip_prefix("nodes.")?;
@@ -156,12 +238,13 @@ fn issues(root: &Utf8Path, id: &str, text: Option<&str>) -> Vec<WorkflowIssue> {
                         .cloned()
                 })
             });
-            WorkflowIssue {
+            vec![WorkflowIssue {
                 message: user_message(&message),
                 step,
-            }
-        })
-        .collect()
+                severity: IssueSeverity::Error,
+            }]
+        }
+    }
 }
 
 /// Drops the file path and YAML position from loader errors and capitalizes the rest.
@@ -237,19 +320,33 @@ fn outcome_routes(outcomes: &indexmap::IndexMap<String, String>) -> Vec<Workflow
 
 fn document(root: &Utf8Path, id: &str, text: &str) -> Result<WorkflowDocument, String> {
     let workflow = crate::parse_workflow_definition(id, text).map_err(|e| e.to_string())?;
-    let project = crate::project::load_project_candidate(root, id, Some(text)).ok();
+    let project = load_candidate(root, id, Some(text)).ok();
+    Ok(graph_document(
+        id,
+        workflow,
+        project.as_ref(),
+        issues(root, id, Some(text)),
+    ))
+}
+
+pub(crate) fn graph_document(
+    id: &str,
+    workflow: crate::WorkflowDefinition,
+    project: Option<&crate::LoadedProject>,
+    issues: Vec<WorkflowIssue>,
+) -> WorkflowDocument {
     let steps = workflow
         .nodes
         .iter()
         .map(|(id, node)| {
-            let node = project
-                .as_ref()
+            let resolved = project
                 .and_then(|p| p.workflow.nodes.get(id))
                 .unwrap_or(node);
             let mut step = WorkflowStep {
                 id: id.clone(),
                 original_id: Some(id.clone()),
                 task: None,
+                call: None,
                 label: id.clone(),
                 kind: String::new(),
                 title: None,
@@ -262,10 +359,11 @@ fn document(root: &Utf8Path, id: &str, text: &str) -> Result<WorkflowDocument, S
             };
             step.kind = match node {
                 crate::NodeDefinition::Task(task) => {
-                    step.task = Some(step_task(
-                        &task.task,
-                        project.as_ref().map(|p| &p.definitions),
-                    ));
+                    let selection = match resolved {
+                        crate::NodeDefinition::Task(resolved) => &resolved.task,
+                        _ => &task.task,
+                    };
+                    step.task = Some(step_task(selection, project.map(|p| &p.definitions)));
                     step.title = Some(title(&task.task));
                     step.agent = Some(task.agent.clone());
                     step.execution = Some(task.execution);
@@ -278,8 +376,17 @@ fn document(root: &Utf8Path, id: &str, text: &str) -> Result<WorkflowDocument, S
                     step.workers = parallel
                         .tasks
                         .iter()
-                        .map(|worker| WorkflowWorker {
-                            task: step_task(&worker.task, project.as_ref().map(|p| &p.definitions)),
+                        .enumerate()
+                        .map(|(index, worker)| WorkflowWorker {
+                            task: step_task(
+                                match resolved {
+                                    crate::NodeDefinition::Parallel(resolved) => {
+                                        &resolved.tasks[index].task
+                                    }
+                                    _ => &worker.task,
+                                },
+                                project.map(|p| &p.definitions),
+                            ),
                             agent: worker.agent.clone(),
                         })
                         .collect();
@@ -289,9 +396,21 @@ fn document(root: &Utf8Path, id: &str, text: &str) -> Result<WorkflowDocument, S
                     "parallel"
                 }
                 crate::NodeDefinition::HumanGate(gate) => {
+                    step.title = gate.description.clone();
                     step.routes = outcome_routes(&gate.next);
                     step.inputs = gate.inputs.clone();
                     "human-gate"
+                }
+                crate::NodeDefinition::Workflow(call) => {
+                    step.routes = routes(&call.next);
+                    step.inputs = call.inputs.values().cloned().collect();
+                    step.outputs = call.outputs.values().cloned().collect();
+                    step.call = Some(StepCall {
+                        workflow: call.workflow.clone(),
+                        inputs: call.inputs.clone(),
+                        outputs: call.outputs.clone(),
+                    });
+                    "workflow"
                 }
                 crate::NodeDefinition::End => "end",
             }
@@ -299,16 +418,17 @@ fn document(root: &Utf8Path, id: &str, text: &str) -> Result<WorkflowDocument, S
             step
         })
         .collect();
-    Ok(WorkflowDocument {
+    WorkflowDocument {
         id: id.into(),
         settings: WorkflowSettings {
             name: workflow.name,
             description: workflow.description,
             start: workflow.start,
+            inputs: workflow.inputs,
         },
         steps,
-        issues: issues(root, id, Some(text)),
-    })
+        issues,
+    }
 }
 
 pub fn get_workflow(root: &Utf8Path, id: &str) -> Result<WorkflowDocument, String> {
@@ -403,6 +523,19 @@ fn candidate(
                 .collect();
             node.insert("tasks".into(), Value::Sequence(tasks));
         }
+        if step.kind == "workflow" {
+            let call = step.call.as_ref().ok_or("Workflow step requires a call")?;
+            node.clear();
+            node.insert("type".into(), Value::String("workflow".into()));
+            node.insert("workflow".into(), Value::String(call.workflow.clone()));
+            for (key, map) in [("inputs", &call.inputs), ("outputs", &call.outputs)] {
+                set_optional(
+                    &mut node,
+                    key,
+                    (!map.is_empty()).then(|| serde_yaml_ng::to_value(map).unwrap()),
+                );
+            }
+        }
         if step.kind != "end" {
             let next = if step.routes.is_empty() {
                 None
@@ -429,6 +562,7 @@ fn candidate(
         nodes.insert(Value::String(step.id.clone()), Value::Mapping(node));
     }
     fields.insert("nodes".into(), Value::Mapping(nodes));
+    set_list(fields, "inputs", &settings.inputs);
     fields.insert(
         Value::String("name".into()),
         Value::String(settings.name.clone()),
@@ -520,6 +654,9 @@ fn set_list(fields: &mut serde_yaml_ng::Mapping, key: &str, values: &[String]) {
 }
 
 fn step_rename_issue(root: &Utf8Path, id: &str, draft: &WorkflowDraft) -> Option<WorkflowIssue> {
+    if id.starts_with("global/") {
+        return None;
+    }
     let step = draft
         .steps
         .iter()
@@ -543,6 +680,7 @@ fn step_rename_issue(root: &Utf8Path, id: &str, draft: &WorkflowDraft) -> Option
     result.err().map(|message| WorkflowIssue {
         message,
         step: Some(step.id.clone()),
+        severity: IssueSeverity::Error,
     })
 }
 
@@ -560,25 +698,39 @@ pub fn validate_workflow(
         return Ok(vec![WorkflowIssue {
             message,
             step: None,
+            severity: IssueSeverity::Error,
         }]);
     }
-    Ok(issues(root, &settings.name, Some(&text)))
+    let target = scoped_name(id, &settings.name);
+    Ok(issues(root, &target, Some(&text)))
+}
+
+fn scoped_name(id: &str, name: &str) -> String {
+    if id.starts_with("global/") {
+        format!("global/{name}")
+    } else {
+        name.into()
+    }
 }
 
 fn rename_target(root: &Utf8Path, id: &str, name: &str) -> Result<Utf8PathBuf, String> {
-    if name != id {
+    if name != id.strip_prefix("global/").unwrap_or(id) {
         if !crate::project::safe_id(name) {
             return Err(
                 "Name must contain 1–128 ASCII letters, digits, underscores or hyphens".into(),
             );
         }
-        let target = source(root, name)?;
+        let target = source(root, &scoped_name(id, name))?;
         if target.try_exists().map_err(|e| e.to_string())? {
             return Err(format!("Workflow {name:?} already exists"));
         }
         // shortcut: run creation is not locked with authoring, add a shared lock before supporting concurrent edits/execution.
-        let runs = crate::runtime::stored_runs(root)
-            .map_err(|e| format!("Cannot safely rename: could not inspect stored runs: {e}"))?;
+        let runs = if id.starts_with("global/") {
+            Vec::new()
+        } else {
+            crate::runtime::stored_runs(root)
+                .map_err(|e| format!("Cannot safely rename: could not inspect stored runs: {e}"))?
+        };
         // Finished runs keep the old workflow name; only in-progress runs need the file to stay put.
         if runs
             .iter()
@@ -605,11 +757,16 @@ pub fn save_workflow(
         return Err(issue.message);
     }
     let target = rename_target(root, id, &settings.name)?;
-    let document = document(root, &settings.name, &text)?;
-    if !document.issues.is_empty() {
+    let document = document(root, &scoped_name(id, &settings.name), &text)?;
+    if document
+        .issues
+        .iter()
+        .any(|issue| issue.severity == IssueSeverity::Error)
+    {
         return Err(document
             .issues
             .iter()
+            .filter(|issue| issue.severity == IssueSeverity::Error)
             .map(|issue| issue.message.as_str())
             .collect::<Vec<_>>()
             .join("\n"));
@@ -638,6 +795,36 @@ pub fn save_workflow(
         let _ = fs::remove_file(staging);
         result?;
     }
+    Ok(document)
+}
+
+pub fn get_global_workflow(id: &str) -> Result<WorkflowDocument, String> {
+    let mut document = get_workflow(
+        &crate::task_document::global_root()?,
+        &format!("global/{id}"),
+    )?;
+    document.id = id.into();
+    Ok(document)
+}
+
+pub fn validate_global_workflow(
+    id: &str,
+    draft: &WorkflowDraft,
+) -> Result<Vec<WorkflowIssue>, String> {
+    validate_workflow(
+        &crate::task_document::global_root()?,
+        &format!("global/{id}"),
+        draft,
+    )
+}
+
+pub fn save_global_workflow(id: &str, draft: &WorkflowDraft) -> Result<WorkflowDocument, String> {
+    let mut document = save_workflow(
+        &crate::task_document::global_root()?,
+        &format!("global/{id}"),
+        draft,
+    )?;
+    document.id = draft.settings.name.clone();
     Ok(document)
 }
 

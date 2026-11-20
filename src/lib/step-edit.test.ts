@@ -1,7 +1,45 @@
 import { expect, test } from "vitest"
 import { humanize, insertStep, producers, removeStep, renameStep, routesForOutcomes, slugify, stepNameError, taskLabel, taskRef, withDerivedOutcomes } from "@/lib/step-edit.ts"
 
-import type { WorkflowStep } from "./projects"
+import type { WorkflowDocument, WorkflowStep, WorkflowSummary } from "./projects"
+import { callableWorkflows, childContract } from "./step-edit"
+
+test("callableWorkflows excludes self and cycles", () => {
+  const summaries = [
+    { name: "a", calls: ["b"] }, { name: "b", calls: ["c"] },
+    { name: "c", calls: [] }, { name: "d", calls: ["a"] },
+  ] as WorkflowSummary[]
+  expect(callableWorkflows("a", summaries)).toEqual(["b", "c"])
+  expect(callableWorkflows("c", summaries)).toEqual([])
+  expect(callableWorkflows("x", [
+    { name: "y", calls: ["z"] }, { name: "z", calls: ["y"] },
+  ] as WorkflowSummary[])).toEqual(["y", "z"])
+})
+
+test("childContract derives inputs ends artifacts", () => {
+  expect(childContract({
+    inputs: ["brief.md"],
+    steps: [
+      step("build", "task", [], { outputs: ["report.md", "shared.md"] }),
+      step("nested", "workflow", [], { outputs: ["shared.md", "nested.md"] }),
+      step("done", "end"), step("abandoned", "end"),
+    ],
+  } as WorkflowDocument)).toEqual({
+    inputs: ["brief.md"], ends: ["done", "abandoned"],
+    artifacts: ["report.md", "shared.md", "nested.md"],
+  })
+})
+
+test("insertStep adds a workflow step", () => {
+  const result = insertStep(flow, 0, "workflow")
+  expect(result.index).toBe(1)
+  expect(result.steps[1]).toMatchObject({
+    id: "new-workflow", kind: "workflow",
+    call: { workflow: "", inputs: {}, outputs: {} }, routes: [], inputs: [], outputs: [],
+  })
+  expect(result.steps[0].routes[0].target).toBe("new-workflow")
+  expect(flow[0].routes[0].target).toBe("implement")
+})
 
 const step = (id: string, kind: WorkflowStep["kind"], routes: [string | null, string][] = [], extra: Partial<WorkflowStep> = {}): WorkflowStep => ({
   id, originalId: id, label: id, kind, title: null, agent: "engineer", execution: "main",

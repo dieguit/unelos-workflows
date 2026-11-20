@@ -1,4 +1,1 @@
 instructionsFile: instructions.md
-model:
-  harness: opencode
-  model: anthropic/claude-opus-5-5
