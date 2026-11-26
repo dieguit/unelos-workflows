@@ -59,7 +59,7 @@ In the Workflows screen you will find a button, you can import from local files 
 
 To try importing from a URL, paste the [Superpowers Dev example URL](https://github.com/dieguit/unelos-workflows/tree/main/examples/superpowers-dev) into the import dialog.
 
-After importing, check if the agents need model aliases mapped, then use **Project settings → Build now**. Importing doesn't build the harness files. If your harness doesn't see the new agents, try reopening the session after building.
+Importing alone doesn't build the harness files. Saving model mappings or workflow changes does if auto-build is on. If you want to run the workflow without changing anything, or if auto-build is off, use **Project settings → Build now**. If your harness doesn't see the new agents, try reopening the session after building.
 
 Always read the skills, MCPs, etc. before importing a workflow from someone else.
 
