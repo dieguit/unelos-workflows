@@ -65,12 +65,15 @@ const blank = (id: string, kind: WorkflowStep["kind"]): WorkflowStep => ({
 export function insertStep(
   steps: WorkflowStep[],
   index: number,
-  kind: "task" | "human-gate" | "workflow"
+  kind: "task" | "human-gate" | "workflow" | "parallel"
 ) {
   const next = steps[index + 1]?.id ?? ""
-  const step = blank(uniqueId(steps, kind === "human-gate" ? "approval" : `new-${kind}`), kind)
+  let step = blank(uniqueId(steps, kind === "human-gate" ? "approval" : `new-${kind}`), kind)
   if (kind === "workflow") {
     step.call = { workflow: "", inputs: {}, outputs: {} }
+  } else if (kind === "parallel") {
+    step = addWorker(addWorker(step))
+    step.routes = [{ outcome: null, target: next }]
   } else if (kind === "task") {
     step.task = { source: "inline", id: null, description: null, instructions: "", skills: [], outcomes: [] }
     step.routes = [{ outcome: null, target: next }]

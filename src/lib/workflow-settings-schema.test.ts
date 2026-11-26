@@ -53,6 +53,22 @@ test("schema flags new task fields by path", () => {
   expect(workflowSettingsSchema("x").safeParse({ name: "x", description: null, start: "plan", inputs: [], steps: flow }).success).toBe(true)
 })
 
+test("schema flags incomplete new parallel step", () => {
+  const { steps } = insertStep(flow, 1, "parallel")
+  steps[2].routes[0].target = ""
+  steps[2].workers[1] = { agent: "researcher", task: { ...steps[2].workers[1].task, description: "B", instructions: "Research B." } }
+  const issues = workflowSettingsSchema("x").safeParse({ name: "x", description: null, start: "plan", inputs: [], steps }).error!.issues
+  expect(issues.map((i) => i.path.join("."))).toEqual([
+    "steps.2.workers.0.agent",
+    "steps.2.workers.0.task.description",
+    "steps.2.workers.0.task.instructions",
+    "steps.2.routes.0.target",
+  ])
+  steps[2].workers = []
+  const empty = workflowSettingsSchema("x").safeParse({ name: "x", description: null, start: "plan", inputs: [], steps }).error!.issues
+  expect(empty.map((i) => i.path.join("."))).toContain("steps.2.workers")
+})
+
 test("draft conversion and schema preserve workflow contracts", () => {
   const draft = {
     name: "x", description: null, start: "frontend", inputs: ["brief.md"],

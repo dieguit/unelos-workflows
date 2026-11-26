@@ -87,6 +87,14 @@ test("insert gate keeps approved on the split edge and leaves rejected unset", (
   expect(steps[1].routes).toEqual([{ outcome: "approved", target: "implement" }, { outcome: "rejected", target: "" }])
 })
 
+test("insert parallel starts with two blank inline workers and a single next", () => {
+  const { steps, index } = insertStep(flow, 0, "parallel")
+  expect(steps[0].routes).toEqual([{ outcome: null, target: "new-parallel" }])
+  expect(steps[index]).toMatchObject({ id: "new-parallel", kind: "parallel", originalId: null, routes: [{ outcome: null, target: "implement" }] })
+  expect(steps[index].workers).toHaveLength(2)
+  expect(steps[index].workers[0]).toMatchObject({ agent: "", task: { source: "inline", instructions: "" } })
+})
+
 test("rename updates references and start", () => {
   const r = renameStep(flow, "implement", "implement", "build")
   expect(r.start).toBe("build")

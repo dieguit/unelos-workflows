@@ -55,7 +55,8 @@ export function ParallelPanel({ form, index, showErrors, disabled, nameDraft, on
         >
           {step.workers.map((worker, i) => {
             const title = workerTitle(worker)
-            const incomplete = showErrors && (!title.trim() || !worker.agent.trim())
+            const incomplete = showErrors && (!title.trim() || !worker.agent.trim() ||
+              (worker.task.source === "inline" && !worker.task.instructions.trim()))
             return (
               <div key={i} className="flex flex-col gap-1.5">
                 <div className={cn(rowFrame, incomplete && "border-destructive")}>
@@ -75,11 +76,12 @@ export function ParallelPanel({ form, index, showErrors, disabled, nameDraft, on
                   />
                 </div>
                 {incomplete && (
-                  <ErrorText errors={[{ message: `Task ${i + 1} needs a name and an Agent. Select it to fix, or remove it.` }]} />
+                  <ErrorText errors={[{ message: `Task ${i + 1} needs a name, an Agent and instructions. Select it to fix, or remove it.` }]} />
                 )}
               </div>
             )
           })}
+          {showErrors && !step.workers.length && <ErrorText errors={[{ message: "Add at least one task." }]} />}
           <InlineAdd
             label="Add task"
             onClick={() => {
@@ -185,6 +187,7 @@ export function WorkerPanel({ root, form, index, worker: at, showErrors, disable
             <p className="line-clamp-4 rounded-md bg-muted px-2.5 py-2 text-sm whitespace-pre-wrap text-foreground-dim">
               {task.instructions.trim() || <span className="text-muted-foreground">No instructions yet.</span>}
             </p>
+            {showErrors && !named && !task.instructions.trim() && <ErrorText errors={[{ message: "Add instructions." }]} />}
           </Section>
           <form.Field name={`steps[${index}].workers[${at}].task.skills`} mode="array">
             {(field) => {

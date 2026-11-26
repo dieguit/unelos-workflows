@@ -22,7 +22,7 @@ export function FlowArrow() {
   )
 }
 
-type AddKind = "task" | "human-gate" | "workflow"
+type AddKind = "task" | "human-gate" | "workflow" | "parallel"
 
 /** "Add step" pill; the type picker opens beside it so the transition stays visible. */
 function AddStep({ onAdd }: { onAdd?: (kind: AddKind) => void }) {
@@ -60,14 +60,11 @@ function AddStep({ onAdd }: { onAdd?: (kind: AddKind) => void }) {
       >
         {(["task", "human-gate", "workflow", "parallel"] as const).map((kind) => {
           const Icon = stepIcons[kind]
-          const soon = kind === "parallel"
           return (
             <DropdownMenuItem
               key={kind}
               ref={kind === "task" ? first : undefined}
-              disabled={soon}
               onClick={() => {
-                if (soon) return
                 picked.current = true
                 onAdd?.(kind)
               }}
@@ -77,7 +74,6 @@ function AddStep({ onAdd }: { onAdd?: (kind: AddKind) => void }) {
                 <Icon aria-hidden="true" className={cn("size-3.5", stepIconColors[kind])} />
               </span>
               {stepKindLabels[kind]}
-              {soon && <span className="ml-auto pl-3 text-xs whitespace-nowrap text-muted-foreground">Coming soon</span>}
             </DropdownMenuItem>
           )
         })}

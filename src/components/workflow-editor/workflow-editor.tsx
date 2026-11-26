@@ -209,7 +209,7 @@ function WorkflowEditorForm({
     select(selected)
   }
   const editInstructions = () => setInstructions(selectedTask?.instructions ?? "")
-  const addStep = (index: number, kind: "task" | "human-gate" | "workflow") => {
+  const addStep = (index: number, kind: "task" | "human-gate" | "workflow" | "parallel") => {
     const result = insertStep(form.state.values.steps, index, kind)
     form.setFieldValue("steps", result.steps)
     select(result.index)

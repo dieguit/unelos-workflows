@@ -199,6 +199,64 @@ fn parallel_workers_can_switch_to_named_and_be_added_or_removed() {
 }
 
 #[test]
+fn new_parallel_step_saves_with_type_and_runs() {
+    let (_temp, root) = fixture();
+    let id = "implement-feature";
+    let mut value = draft(get_workflow(&root, id).unwrap());
+    let first = value.settings.start.clone();
+    let worker = |instructions: &str| unelos_core::WorkflowWorker {
+        task: unelos_core::StepTask {
+            source: "inline".into(),
+            id: None,
+            description: Some(instructions.into()),
+            instructions: instructions.into(),
+            skills: vec![],
+            outcomes: vec![],
+        },
+        agent: "engineer".into(),
+    };
+    value.steps.insert(
+        0,
+        unelos_core::WorkflowStep {
+            id: "research".into(),
+            original_id: None,
+            task: None,
+            call: None,
+            label: "research".into(),
+            kind: "parallel".into(),
+            title: None,
+            agent: None,
+            execution: None,
+            routes: vec![unelos_core::WorkflowRoute {
+                outcome: None,
+                target: first,
+            }],
+            workers: vec![worker("Research A."), worker("Research B.")],
+            inputs: vec![],
+            outputs: vec!["summary.md".into()],
+        },
+    );
+    value.settings.start = "research".into();
+    save_workflow(&root, id, &value).unwrap();
+    let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(
+        &fs::read_to_string(root.join(".unelos/workflows/implement-feature.yaml")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(yaml["nodes"]["research"]["type"], "parallel");
+    let loaded = get_workflow(&root, id).unwrap();
+    assert_eq!(
+        serde_json::to_value(&loaded.steps[0].workers).unwrap(),
+        serde_json::to_value(&value.steps[0].workers).unwrap()
+    );
+    let run = start_workflow(&root, id, None).unwrap();
+    let unelos_core::WorkPacket::Parallel(packet) = unelos_core::next(&root, &run.run_id).unwrap()
+    else {
+        panic!("parallel packet");
+    };
+    assert_eq!(packet.workers.len(), 2);
+}
+
+#[test]
 fn rich_steps_preserve_authored_order_through_save() {
     let (_temp, root) = fixture();
     let path = root.join(".unelos/workflows/implement-feature.yaml");

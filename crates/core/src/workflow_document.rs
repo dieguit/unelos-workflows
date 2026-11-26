@@ -461,8 +461,10 @@ fn candidate(
             .and_then(Value::as_mapping)
             .cloned()
             .unwrap_or_default();
-        if matches!(step.kind.as_str(), "task" | "human-gate") {
+        if matches!(step.kind.as_str(), "task" | "human-gate" | "parallel") {
             node.insert("type".into(), Value::String(step.kind.clone()));
+        }
+        if matches!(step.kind.as_str(), "task" | "human-gate") {
             set_list(&mut node, "inputs", &step.inputs);
         }
         if step.kind == "parallel"

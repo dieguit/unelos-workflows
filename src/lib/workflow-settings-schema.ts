@@ -13,7 +13,7 @@ const step = z
     routes: z.array(route),
     task: z.object({ source: z.enum(["inline", "named"]) }).nullable(),
     workers: z.array(z.object({
-      task: z.object({ source: z.enum(["inline", "named"]), description: z.string().nullable() }),
+      task: z.object({ source: z.enum(["inline", "named"]), description: z.string().nullable(), instructions: z.string() }),
       agent: z.string(),
     })),
   })
@@ -34,9 +34,11 @@ const step = z
         else if (names.has(name))
           ctx.addIssue({ code: "custom", path: ["workers", i, "task", "description"], message: `Names must be unique within ${humanize(s.id)}.` })
         names.add(name)
+        if (!worker.task.instructions.trim())
+          ctx.addIssue({ code: "custom", path: ["workers", i, "task", "instructions"], message: "Add instructions." })
       })
     }
-    if (s.kind !== "task" && s.kind !== "human-gate") return
+    if (s.kind === "workflow" || s.kind === "end") return
     if (s.kind === "task") {
       if (!s.agent) ctx.addIssue({ code: "custom", path: ["agent"], message: "Choose an agent." })
       if (!s.execution)
