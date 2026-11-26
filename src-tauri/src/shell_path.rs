@@ -74,7 +74,11 @@ mod tests {
 
     #[test]
     fn merge_puts_shell_dirs_first_and_keeps_inherited_extras_once() {
-        let merged = merge("/home/u/.local/bin:/usr/bin", &OsString::from("/usr/bin:/bin")).unwrap();
+        let merged = merge(
+            "/home/u/.local/bin:/usr/bin",
+            &OsString::from("/usr/bin:/bin"),
+        )
+        .unwrap();
         assert_eq!(merged, OsString::from("/home/u/.local/bin:/usr/bin:/bin"));
     }
 
