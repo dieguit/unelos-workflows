@@ -4,24 +4,36 @@ Unelos is a builder and runtime for agentic workflows.
 It manages the steps needed to complete mid+ sized tasks, including the agents that perform those tasks, dependencies, required input/outputs, loops, skills and MCPs.
 It helps you build Agentic Software Factories and configure your harness.
 
+- [Getting started](#getting-started)
+  - [Setting things up](#setting-things-up)
+  - [Running a workflow](#running-a-workflow)
+  - [Importing workflows](#importing-workflows)
+- [Motivation](#motivation)
+- [How it works](#how-it-works)
+- [Concepts](#concepts)
+- [Contributing and running dev locally](#contributing-and-running-dev-locally)
+
 ## Getting started
 
 ### Setting things up
 
-1. Download the latest build from Releases.
-   Note for Windows WSL users: I suggest you download the Linux version and install it in WSL, since Unelos needs to be able access harness executables and configs to detect and configure them.
+1. Download the latest build from [Releases](https://github.com/dieguit/unelos-workflows/releases).
+   - **macOS:** Pick the `aarch64.dmg` for Apple Silicon or the `x64.dmg` for Intel.
+   - **Windows:** Pick the setup `.exe`, or the portable `.zip` if you don't want to install it. For the portable build, extract both `.exe` files together and make sure Microsoft Edge WebView2 Runtime is installed.
+   - **Linux:** Pick the `.deb` for Debian or Ubuntu, or the `.AppImage` if you want to run it without installing.
+
+   If your harness runs inside WSL, I suggest running the Linux build inside WSL too, so Unelos can find your harness and its config.
 
 1. Open the GUI and configure your harness(es). Installing Unelos to a harness will:
-   1. Add the Unelos plugin and MCP in it's global config
-   2. Create some default agents and model mappings
-      ...
+   1. Add the Unelos plugin and MCP to its global config.
+   2. Add the agents used by the built-in workflow-design tool. Model aliases start empty; you map them in the next step.
 
 1. Setup the model aliases: Agents can reference a specific model in a harness, or a model alias. This allows to have multiple harnesses, and use their models when workflows run on each of them. An example for the default model aliases could be fast (codex uses luna, claude code uses haiku), balanced (codex uses terra, claude code uses sonnet), smart (codex uses sol, claude code uses opus).
 
 1. Create some agents, start with generic ones, you can make them more specific when needed.
 
 1. Create your first workflow. Grab a task that you find yourself repeating too much, skills that require steering due to edge cases, etc. Split them in smaller tasks, and think what artifacts need to be validated or iterated.
-   You can also import some example workflows to get started, they are mostly adaptations of existing stuff (like Superpowers), and adapt them to your needs. (see Importing workflows)
+   You can also import some [example workflows](examples/) to get started, they are mostly adaptations of existing stuff (like Superpowers), and adapt them to your needs. (see [Importing workflows](#importing-workflows))
    Also, you can use the workflow-design tool (a built-in global workflow) to go through your past sessions, get repeated patterns and suggest workflows. It also has the required skills to create an initial version of the workflow for you.
 
 ### Running a workflow
@@ -35,13 +47,15 @@ You can also start with the thing you need to accomplish (like `/unelos I want t
 
 There's also an "inline workflows" feature, which I found quite useful. If no single workflow covers the whole request, the coordinator can suggest a chain of existing workflows and ask you before starting it.
 
-To pick up a run or turn off Unelos for the session, use `/unelos resume` or `/unelos off` in OpenCode, and `/unelos-resume` or `/unelos-off` in Claude Code. The **Runs** screen shows progress and artifacts; you still answer gates in the harness chat.
+To pick up a run or turn off Unelos for the session, use `/unelos resume` or `/unelos off` in OpenCode, and `/unelos-resume` or `/unelos-off` in Claude Code. The **Runs** screen shows progress and artifacts; you still answer [gates](#human-gates) in the harness chat.
 
 To try the workflow-design tool, type `/unelos` and pick `global/workflow-design`. It needs Python 3 to look through past sessions.
 
 ### Importing workflows
 
 In the Workflows screen you will find a button, you can import from local files (just paste the absolute folder path), and from Github / Gitlab. For the later, make sure you have git installed and have access to the repo.
+
+To try importing from a URL, paste the [Superpowers Dev example URL](https://github.com/dieguit/unelos-workflows/tree/main/examples/superpowers-dev) into the import dialog.
 
 After importing, check if the agents need model aliases mapped, then use **Project settings → Build now**. Importing doesn't build the harness files. If your harness doesn't see the new agents, try reopening the session after building.
 
@@ -196,4 +210,4 @@ Global definitions live in `~/.config/unelos/`. Only global agents are built int
 
 ## Contributing and running dev locally
 
-See [Contributing](/CONTRIBUTING.md)
+See [Contributing](CONTRIBUTING.md)
