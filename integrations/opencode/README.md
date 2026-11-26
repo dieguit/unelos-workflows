@@ -110,8 +110,3 @@ main sessions can use controller tools; ordinary sessions produce no automatic r
 Session bindings live in core, not OpenCode metadata. Existing metadata bindings
 are ignored: use `/unelos resume` to rebind. Restart OpenCode after upgrading the
 binary/plugin; running MCP processes do not hot-reload.
-
-Historical evidence: [T15](../../docs/opencode-delivery-verification.md),
-[T16](../../docs/opencode-execution-verification.md). Those reports describe earlier
-architecture, not current acceptance. The thin-adapter verification report records
-installed results separately; the user's interactive frontend run remains distinct.
