@@ -33,7 +33,9 @@ It helps you build Agentic Software Factories and configure your harness.
 1. Create some agents, start with generic ones, you can make them more specific when needed.
 
 1. Create your first workflow. Grab a task that you find yourself repeating too much, skills that require steering due to edge cases, etc. Split them in smaller tasks, and think what artifacts need to be validated or iterated.
+   
    You can also import some [example workflows](examples/) to get started, they are mostly adaptations of existing stuff (like Superpowers), and adapt them to your needs. (see [Importing workflows](#importing-workflows))
+   
    Also, you can use the workflow-design tool (a built-in global workflow) to go through your past sessions, get repeated patterns and suggest workflows. It also has the required skills to create an initial version of the workflow for you.
 
 ### Running a workflow
