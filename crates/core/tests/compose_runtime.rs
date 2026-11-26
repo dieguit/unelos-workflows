@@ -112,7 +112,7 @@ fn run_workflow_uses_the_saved_inline_graph_or_the_named_document() {
     );
 
     let steps = inline_steps("- workflow: a\n- gate: Continue?\n- workflow: a\n");
-    execution_start_inline(&root, &steps, None).unwrap();
+    execution_start_inline(&root, &steps, None, "").unwrap();
     let run_id = list_runs(&root)
         .unwrap()
         .into_iter()
@@ -144,7 +144,7 @@ fn inline_synthesizes_routes_and_binds_latest_outputs_across_a_gate() {
     let steps = inline_steps(
         "- workflow: a\n  stopOn: [abandoned]\n- workflow: a\n- gate: Open the PR?\n- workflow: b\n  inputs: {extra.md: a/notes.md}\n",
     );
-    let first = execution_start_inline(&root, &steps, None).unwrap();
+    let first = execution_start_inline(&root, &steps, None, "").unwrap();
     let path = runs(&root).join("r-000001/workflow.yaml");
     let saved = std::fs::read_to_string(path).unwrap();
     let definition = parse_workflow_definition("workflow.yaml", &saved).unwrap();
@@ -209,7 +209,7 @@ fn inline_synthesizes_routes_and_binds_latest_outputs_across_a_gate() {
 fn inline_gate_can_be_first_and_rejection_stops() {
     let (_temp, root) = inline_fixture();
     let steps = inline_steps("- gate: Start?\n- workflow: a");
-    let gate = execution_start_inline(&root, &steps, None).unwrap();
+    let gate = execution_start_inline(&root, &steps, None, "").unwrap();
     assert_eq!(packet(&gate)["nodeId"], "gate-1");
     let stopped = act(&root, &gate, ExecutionOperation::Reject, None);
     assert_eq!(packet(&stopped)["nodeId"], "stopped");
@@ -231,13 +231,15 @@ fn inline_validates_step_references_before_starting() {
             "no earlier output",
         ),
     ] {
-        let error = execution_start_inline(&root, &inline_steps(yaml), None).unwrap_err();
+        let error = execution_start_inline(&root, &inline_steps(yaml), None, "").unwrap_err();
         assert!(error.to_string().contains(diagnostic), "{error}");
     }
-    let run = execution_start_inline(&root, &[InlineStep::workflow("a")], None).unwrap();
+    let run =
+        execution_start_inline(&root, &[InlineStep::workflow("a")], None, "Summarize X").unwrap();
     assert_eq!(packet(&run)["nodeId"], "a/write");
+    assert_eq!(packet(&run)["request"], "Summarize X");
     let (_temp, root) = inline_fixture();
-    execution_start(&root, "a", None).unwrap();
+    execution_start(&root, "a", None, "").unwrap();
     let state = runs(&root).join("r-000001/state.json");
     let mut json: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&state).unwrap()).unwrap();
@@ -248,7 +250,7 @@ fn inline_validates_step_references_before_starting() {
 #[test]
 fn runs_parent_through_child_gate_and_back() {
     let (_temp, root) = fixture();
-    let plan = execution_start(&root, "fullstack", Some("composition")).unwrap();
+    let plan = execution_start(&root, "fullstack", Some("composition"), "").unwrap();
     let design = act(&root, &plan, ExecutionOperation::Complete, None);
     let run = runs(&root).join("r-000001");
     assert_eq!(packet(&design)["nodeId"], "frontend/design");
@@ -287,7 +289,7 @@ fn runs_parent_through_child_gate_and_back() {
 #[test]
 fn nested_output_lands_in_scoped_folder() {
     let (_temp, root) = fixture();
-    let work = execution_start(&root, "outer", Some("nested")).unwrap();
+    let work = execution_start(&root, "outer", Some("nested"), "").unwrap();
     assert_eq!(
         packet(&work)["outputs"][0]["path"],
         at(&runs(&root), "r-000001/S/T/m/top.md").as_str()
@@ -299,7 +301,7 @@ fn nested_output_lands_in_scoped_folder() {
 #[test]
 fn child_edit_mid_run_is_incompatible_error() {
     let (_temp, root) = fixture();
-    let plan = execution_start(&root, "fullstack", Some("edit")).unwrap();
+    let plan = execution_start(&root, "fullstack", Some("edit"), "").unwrap();
     let design = act(&root, &plan, ExecutionOperation::Complete, None);
     act(&root, &design, ExecutionOperation::Complete, None);
     let path = root.join(".unelos/workflows/react-component.yaml");
@@ -329,13 +331,14 @@ fn standalone_child_marks_missing_input() {
         .unwrap()
         .replace("execution: main", "execution: subagent");
     std::fs::write(path, text).unwrap();
-    let work = execution_start(&root, "react-component", None).unwrap();
+    let work = execution_start(&root, "react-component", None, "Build a login form").unwrap();
     assert_eq!(
         packet(&work)["missingInputs"],
         serde_json::json!(["brief.md"])
     );
     assert_eq!(packet(&work)["inputs"], serde_json::json!([]));
     let prompt = work.worker_prompt.as_ref().unwrap();
+    assert!(prompt.contains("Build a login form"));
     assert!(prompt.contains("Missing inputs (ask the coordinator for this content)"));
     assert!(prompt.contains("- brief.md"));
     assert!(!root.join(".unelos/runs/r-000001/design/brief.md").exists());
@@ -354,7 +357,7 @@ fn missing_input_reaches_gate_packet() {
         .unwrap()
         .replace("inputs: [design.md]", "inputs: [design.md, brief.md]");
     std::fs::write(path, text).unwrap();
-    let work = execution_start(&root, "react-component", None).unwrap();
+    let work = execution_start(&root, "react-component", None, "").unwrap();
     let gate = act(&root, &work, ExecutionOperation::Complete, None);
     assert_eq!(
         packet(&gate)["missingInputs"],
@@ -374,7 +377,7 @@ fn parent_declared_input_propagates_into_child() {
         .replace("start: plan", "start: frontend\ninputs: [brief.md]")
         .replace("brief.md: plan.md", "brief.md: brief.md");
     std::fs::write(path, text).unwrap();
-    let work = execution_start(&root, "fullstack", None).unwrap();
+    let work = execution_start(&root, "fullstack", None, "").unwrap();
     assert_eq!(packet(&work)["nodeId"], "frontend/design");
     assert_eq!(
         packet(&work)["missingInputs"],
@@ -386,7 +389,7 @@ fn parent_declared_input_propagates_into_child() {
 #[test]
 fn embedded_input_still_binds() {
     let (_temp, root) = fixture();
-    let plan = execution_start(&root, "fullstack", None).unwrap();
+    let plan = execution_start(&root, "fullstack", None, "").unwrap();
     let design = act(&root, &plan, ExecutionOperation::Complete, None);
     assert!(packet(&design).get("missingInputs").is_none());
     assert_eq!(packet(&design)["inputs"][0]["name"], "plan.md");
@@ -408,7 +411,7 @@ fn many_to_one_inputs_bind_once_for_every_consumer() {
             root.join(".unelos/workflows/parent.yaml"),
             "name: parent\nstart: produce\nnodes:\n  produce:\n    agent: worker\n    execution: main\n    taskDefinition: {instructions: Produce}\n    outputs: [x.md, y.md]\n    next: call\n  call:\n    type: workflow\n    workflow: child\n    inputs: {a.md: x.md, b.md: x.md, c.md: y.md}\n    next: done\n  done: {type: end}\n",
         ).unwrap();
-        let producer = execution_start(&root, "parent", None).unwrap();
+        let producer = execution_start(&root, "parent", None, "").unwrap();
         let consumer = act(&root, &producer, ExecutionOperation::Complete, None);
         let value = packet(&consumer);
         let inputs = value.get("inputs").or_else(|| value.get("artifacts")).unwrap();
@@ -426,7 +429,7 @@ fn many_to_one_inputs_bind_once_for_every_consumer() {
 #[test]
 fn referenced_child_cannot_be_removed_during_parent_run() {
     let (_temp, root) = fixture();
-    execution_start(&root, "fullstack", None).unwrap();
+    execution_start(&root, "fullstack", None, "").unwrap();
     let error = remove_workflow(&root, "react-component").unwrap_err();
     assert!(
         error.contains("Cannot remove Workflow \"react-component\": referenced by"),
@@ -459,7 +462,7 @@ nodes:
 "#,
     )
     .unwrap();
-    let work = execution_start(&root, "parallel", None).unwrap();
+    let work = execution_start(&root, "parallel", None, "").unwrap();
     assert_eq!(
         packet(&work)["missingInputs"],
         serde_json::json!(["brief.md"])

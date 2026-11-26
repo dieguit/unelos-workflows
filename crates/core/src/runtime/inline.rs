@@ -38,11 +38,12 @@ pub fn execution_start_inline(
     root: &Utf8Path,
     steps: &[InlineStep],
     name: Option<&str>,
+    request: &str,
 ) -> Result<ExecutionPackage, ExecutionError> {
     let (definition, label) = synthesize(root, steps)?;
     let text = serde_yaml_ng::to_string(&definition)
         .map_err(|e| invalid(format!("cannot serialize inline workflow: {e}")))?;
-    super::execution::start_project(root, name, |run_id| {
+    super::execution::start_project(root, name, request, |run_id| {
         let project = crate::project::load_inline_project(root, run_id, Some(&text))
             .map_err(RuntimeError::from)?;
         Ok((project, Some((label, text))))

@@ -438,12 +438,12 @@ fn run(cli: &Cli) -> Result<(), Error> {
                 ExecutionCommand::Start(args) => {
                     let name = args.name.as_deref();
                     if let Some(steps) = args.inline_steps()? {
-                        execution_start_inline(&cli.project, &steps, name)?
+                        execution_start_inline(&cli.project, &steps, name, "")?
                     } else {
                         let workflow = args.workflows.first().ok_or_else(|| {
                             Error::Start("Provide a workflow or --steps-file".into())
                         })?;
-                        execution_start(&cli.project, workflow, name)?
+                        execution_start(&cli.project, workflow, name, "")?
                     }
                 }
                 operation => {
@@ -532,7 +532,7 @@ fn run(cli: &Cli) -> Result<(), Error> {
         Command::Start(args) => {
             let name = args.name.as_deref();
             let value = if let Some(steps) = args.inline_steps()? {
-                let package = execution_start_inline(&cli.project, &steps, name)?;
+                let package = execution_start_inline(&cli.project, &steps, name, "")?;
                 let run_id = package.run_id.as_deref().expect("start selects a run");
                 let state = status(&cli.project, run_id)
                     .map_err(|_| mutation_response_error(Some(run_id)))?;

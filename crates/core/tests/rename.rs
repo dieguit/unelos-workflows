@@ -46,7 +46,7 @@ fn rename_keeps_rendered_delegated_prompt_paths_valid() {
             "    task: create-plan\n    execution: subagent\n",
         );
     fs::write(workflow, yaml).unwrap();
-    let package = unelos_core::execution_start(&root, "implement-feature", None).unwrap();
+    let package = unelos_core::execution_start(&root, "implement-feature", None, "").unwrap();
     let run_id = package.run_id.as_deref().unwrap();
     let prompt = package.worker_prompt.as_ref().unwrap();
     let before = status(&root, run_id).unwrap();

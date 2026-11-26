@@ -135,6 +135,11 @@ fn mcp_stdio_initialize_list_and_injected_next() {
     assert!(tools
         .iter()
         .all(|t| t["inputSchema"]["properties"]["unelos_context"].is_object()));
+    let start = tools.iter().find(|t| t["name"] == "start").unwrap();
+    assert_eq!(
+        start["inputSchema"]["properties"]["request"]["type"],
+        "string"
+    );
     let called = exchange(
         &mut input,
         &mut output,
@@ -163,23 +168,28 @@ fn mcp_stdio_initialize_list_and_injected_next() {
         role: "controller".into(),
     };
     service.activate(&context, "new").unwrap();
-    let started = service
-        .dispatch(
-            "start",
-            &json!({"unelos_context":context,"workflow":"simple-plan-execute-review"}),
-            None,
-        )
-        .unwrap();
+    let started = exchange(
+        &mut input,
+        &mut output,
+        json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"start","arguments":{
+            "unelos_context":context,"workflow":"simple-plan-execute-review","request":"Build a login form"
+        }}}),
+    );
+    assert_ne!(started["result"]["isError"], true);
+    let started: Value =
+        serde_json::from_str(started["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(started["packet"]["request"], "Build a login form");
     let called = exchange(
         &mut input,
         &mut output,
-        json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"next","arguments":{"unelos_context":context}}}),
+        json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"next","arguments":{"unelos_context":context}}}),
     );
     assert_ne!(called["result"]["isError"], true);
     assert_eq!(called["result"]["content"].as_array().unwrap().len(), 1);
     let package: Value =
         serde_json::from_str(called["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(package["runId"], started["runId"]);
+    assert_eq!(package["packet"]["request"], "Build a login form");
     assert!(package["harnessInstructions"]
         .as_str()
         .unwrap()

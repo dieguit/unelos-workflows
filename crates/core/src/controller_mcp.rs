@@ -34,7 +34,7 @@ pub fn tool_definitions() -> Vec<Tool> {
                     object(json!({"workflow":string,"inputs":{"type":"object","additionalProperties":string},"stopOn":{"type":"array","items":string}}), &["workflow"]),
                     object(json!({"gate":string}), &["gate"])
                 ]});
-                let mut schema = object(json!({"workflow":string,"steps":{"type":"array","minItems":1,"items":step},"name":string}), &[]);
+                let mut schema = object(json!({"workflow":string,"steps":{"type":"array","minItems":1,"items":step},"name":string,"request":{"type":"string","description":"The user's goal in their words; every worker receives it"}}), &[]);
                 schema["oneOf"] = json!([{"required":["workflow"]},{"required":["steps"]}]);
                 schema
             },
@@ -185,12 +185,13 @@ impl SessionService {
                 });
                 lock.write(&binding)?;
                 let name = input["name"].as_str();
+                let request = input["request"].as_str().unwrap_or_default();
                 let result = match target {
                     StartTarget::Workflow(workflow) => {
-                        crate::execution_start(&binding.project, workflow, name)
+                        crate::execution_start(&binding.project, workflow, name, request)
                     }
                     StartTarget::Steps(steps) => {
-                        crate::execution_start_inline(&binding.project, &steps, name)
+                        crate::execution_start_inline(&binding.project, &steps, name, request)
                     }
                 };
                 match result {

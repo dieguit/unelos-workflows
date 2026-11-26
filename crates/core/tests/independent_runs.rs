@@ -81,8 +81,8 @@ fn rename_keeps_identity_and_ignores_obsolete_pointer() {
 #[test]
 fn cross_run_callback_with_same_task_label_never_writes_either_run() {
     let (_temp, root) = fixture();
-    let a = execution_start(&root, "simple-plan-execute-review", Some("first-run")).unwrap();
-    let b = execution_start(&root, "simple-plan-execute-review", Some("second-run")).unwrap();
+    let a = execution_start(&root, "simple-plan-execute-review", Some("first-run"), "").unwrap();
+    let b = execution_start(&root, "simple-plan-execute-review", Some("second-run"), "").unwrap();
     let a_path = root
         .join(".unelos/runs")
         .join(a.run_id.as_deref().unwrap())

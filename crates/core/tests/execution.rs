@@ -57,7 +57,7 @@ fn advance(root: &Utf8Path, package: &ExecutionPackage) -> ExecutionPackage {
 
 fn gate(root: &Utf8Path) -> ExecutionPackage {
     let interview =
-        execution_start(root, "simple-plan-execute-review", Some("guard-check")).unwrap();
+        execution_start(root, "simple-plan-execute-review", Some("guard-check"), "").unwrap();
     let plan = advance(root, &interview);
     let packet = serde_json::to_value(&plan.packet).unwrap();
     std::fs::write(
@@ -72,7 +72,7 @@ fn gate(root: &Utf8Path) -> ExecutionPackage {
 fn unnamed_start_derives_its_name_without_requesting_a_user_name() {
     let (_temp, root) = fixture();
     let fresh = execution_new(&root).unwrap();
-    let package = execution_start(&root, "simple-plan-execute-review", None).unwrap();
+    let package = execution_start(&root, "simple-plan-execute-review", None, "").unwrap();
     assert!(fresh
         .controller_instructions
         .contains("Never ask the user to name the run"));
@@ -202,7 +202,7 @@ fn every_state_delivers_only_its_policy_block() {
 fn guarded_completion_returns_next_package_and_rejects_duplicate() {
     let (_temp, root) = fixture();
     let package =
-        execution_start(&root, "simple-plan-execute-review", Some("guard-check")).unwrap();
+        execution_start(&root, "simple-plan-execute-review", Some("guard-check"), "").unwrap();
     write_outputs(&package);
     let control = finished_control(&package);
     let next_package =
@@ -220,7 +220,7 @@ fn guarded_completion_returns_next_package_and_rejects_duplicate() {
 fn rejected_completion_never_changes_confirmation_or_state() {
     let (_temp, root) = fixture();
     let package =
-        execution_start(&root, "simple-plan-execute-review", Some("guard-check")).unwrap();
+        execution_start(&root, "simple-plan-execute-review", Some("guard-check"), "").unwrap();
     let bytes = state_bytes(&root);
     let control = finished_control(&package);
     assert!(execution_mutate(&root, "r-000001", ExecutionOperation::Complete, &control).is_err());
@@ -384,7 +384,7 @@ fn gate_reentry_rejects_old_activation_and_continuation_preserves_reports() {
 fn concurrent_duplicate_mutations_commit_once() {
     let (_temp, root) = fixture();
     let package =
-        execution_start(&root, "simple-plan-execute-review", Some("guard-check")).unwrap();
+        execution_start(&root, "simple-plan-execute-review", Some("guard-check"), "").unwrap();
     write_outputs(&package);
     let control = finished_control(&package);
     let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
@@ -601,7 +601,7 @@ fn delegated_first_start_renders_worker_prompt_without_brief() {
         root.join(".unelos/workflows/simple-plan-execute-review.yaml"),
         "name: simple-plan-execute-review\nstart: work\nnodes:\n  work:\n    taskDefinition:\n      instructions: Do the work.\n    agent: simple-implementer\n    execution: subagent\n    next: done\n  done:\n    type: end\n",
     ).unwrap();
-    let package = execution_start(&root, "simple-plan-execute-review", None).unwrap();
+    let package = execution_start(&root, "simple-plan-execute-review", None, "").unwrap();
     assert!(package.worker_prompt.is_some());
     assert!(!package
         .worker_prompt

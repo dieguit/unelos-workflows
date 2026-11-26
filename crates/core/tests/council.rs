@@ -110,7 +110,7 @@ fn parallel_first_start_renders_worker_prompts_without_brief() {
         .replace("start: assignment", "start: council")
         .replace("    inputs: [question.md]\n", "");
     std::fs::write(path, yaml).unwrap();
-    let package = execution_start(&root, WORKFLOW, None).unwrap();
+    let package = execution_start(&root, WORKFLOW, None, "").unwrap();
     assert_eq!(package.worker_prompts.len(), 3);
     assert!(package
         .worker_prompts
@@ -303,7 +303,7 @@ fn complete(
 
 /// Starts the run and completes `assignment`, returning the parallel package.
 fn parallel(root: &Utf8Path) -> ExecutionPackage {
-    let scope = execution_start(root, WORKFLOW, Some("research-check")).unwrap();
+    let scope = execution_start(root, WORKFLOW, Some("research-check"), "").unwrap();
     write_outputs(&scope);
     let ledger = packet_json(&scope)["ledgerPath"]
         .as_str()

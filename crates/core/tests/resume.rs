@@ -45,8 +45,8 @@ fn fresh_entry_delivers_descriptions_and_zero_based_opt_out_instructions() {
 #[test]
 fn fresh_entry_never_selects_history_and_resume_is_read_only() {
     let (_temp, root) = fixture();
-    let a = execution_start(&root, "simple-plan-execute-review", Some("first-run")).unwrap();
-    let b = execution_start(&root, "simple-plan-execute-review", Some("second-run")).unwrap();
+    let a = execution_start(&root, "simple-plan-execute-review", Some("first-run"), "").unwrap();
+    let b = execution_start(&root, "simple-plan-execute-review", Some("second-run"), "").unwrap();
     let a_id = a.run_id.as_deref().unwrap();
     let b_id = b.run_id.as_deref().unwrap();
     let ledger = root.join(".unelos/runs").join(a_id).join("ledger.md");
@@ -108,7 +108,7 @@ fn finished_run_is_addressable_but_not_resumable() {
         definition.replace("start: interview", "start: finish"),
     )
     .unwrap();
-    let finished = execution_start(&root, "simple-plan-execute-review", None).unwrap();
+    let finished = execution_start(&root, "simple-plan-execute-review", None, "").unwrap();
     assert_eq!(finished.status, "finished");
     assert!(execution_runs(&root).unwrap().runs.is_empty());
     assert_eq!(

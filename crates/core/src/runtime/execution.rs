@@ -95,14 +95,16 @@ pub fn execution_start(
     root: &Utf8Path,
     workflow: &str,
     name: Option<&str>,
+    request: &str,
 ) -> Result<ExecutionPackage, ExecutionError> {
     let project = crate::load_project(root, workflow).map_err(RuntimeError::from)?;
-    start_project(root, name, |_| Ok((project, None)))
+    start_project(root, name, request, |_| Ok((project, None)))
 }
 
 pub(super) fn start_project(
     root: &Utf8Path,
     name: Option<&str>,
+    request: &str,
     load: impl FnOnce(&str) -> Result<(LoadedProject, Option<(String, String)>), ExecutionError>,
 ) -> Result<ExecutionPackage, ExecutionError> {
     let name = name.map(super::slugify_run_name).transpose()?;
@@ -115,7 +117,7 @@ pub(super) fn start_project(
         &project,
         &run_id,
         name.as_deref().unwrap_or(&run_id),
-        "",
+        request,
         name.is_none(),
     )?;
     if let Some((label, _)) = &inline {
