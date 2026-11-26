@@ -43,7 +43,6 @@ src/                 React frontend (TanStack Router file-based routes)
 integrations/opencode/  OpenCode plugin (TypeScript, embedded into the CLI)
 integrations/shared/    CLI contract types shared by integrations
 examples/            example workflow packages
-docs/                runtime and verification docs
 ```
 
 Business logic belongs in `core`; the CLI and Tauri adapters stay thin and never
@@ -70,8 +69,7 @@ pnpm dev
 `pnpm tauri dev` runs `scripts/build-sidecar.sh`, which builds `unelos-cli` and
 copies it to `src-tauri/binaries/` for the app to bundle.
 
-For manual end-to-end checks of the runtime, see the
-[runtime CLI walkthrough](docs/manual-runtime-cli-qa.md) and the
+For harness setup and runtime behavior, see the
 [OpenCode integration](integrations/opencode/README.md).
 
 ## Checks
