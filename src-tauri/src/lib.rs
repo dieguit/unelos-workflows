@@ -3,6 +3,7 @@ mod imports;
 mod model_mappings;
 mod projects;
 mod runs;
+mod shell_path;
 
 use tauri::webview::PageLoadEvent;
 use tauri_plugin_log::{Target, TargetKind};
@@ -37,6 +38,7 @@ fn external_navigation_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    shell_path::load_login_path();
     tauri::Builder::default()
         .manage(imports::ImportSessions::default())
         .plugin(
