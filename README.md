@@ -1,202 +1,199 @@
-# React + TypeScript + Vite + shadcn/ui
+# Unelos
 
-This is a template for a new Vite project with React, TypeScript, and shadcn/ui.
+Unelos is a builder and runtime for agentic workflows.
+It manages the steps needed to complete mid+ sized tasks, including the agents that perform those tasks, dependencies, required input/outputs, loops, skills and MCPs.
+It helps you build Agentic Software Factories and configure your harness.
 
-## Adding components
+## Motivation
 
-To add components to your app, run the following command:
+As I adopted AI in my day to day work, I tried several tools and popular workflows like Superpowers, OpenSpec, GSD, OMO-Slim, etc. They all work fine, and if you are happy with any of those you should stick to them, but in my case, I found myself trying to improve them to fit my workflows by changing the skills, building plugins, or just constantly steering each session to do what I wanted.
 
-```bash
-npx shadcn@latest add button
+Doing this process for each project became quite time consuming, and as I added more stuff (like MCPs, edge cases, skills), I noticed that context started to get bloated, and results inconsistent.
+
+This project started as a personal tool, a way to manage all that in a simpler way and eventually evolved, by need, to what it is right now.
+
+The main issues this tries to solve are:
+
+- General-purpose workflows (I've used Superpowers and OMO-Slim for a long long time), are okay-ish to customize, but hard to maintain.
+- Having a big MCP and Skill pollutes context and agents derail more frequently.
+- Building skill-based workflows that dictate behavior, decisions and tasks in one place is very time consuming, and having everything as markdown files makes hard to understand.
+- Agents start derailing with skill-based workflows when tasks become longer and more complex.
+
+## How it works
+
+Unelos has two main components: a builder and a runtime.
+
+You will start by building your workflows. There is a built-in tool that suggests workflows from repeated patterns in your sessions, but we will see that later. You can also import workflows, but I suggest you start with something you create by hand and understand.
+
+Workflows in Unelos are basically finite state machines. A task can take inputs and have one or more outcomes. Those outcomes define which step comes next, including whether to go back and try again.
+
+You will define those elements and Unelos will convert them to harness configurations (prompts, agent definitions, etc.).
+
+Second component is the runtime. Once your workflows are in your project and Unelos is set up in your harness, you can run them with `/unelos`.
+
+This will inject the coordinator instructions (similar to `using-superpowers` skill), which will give the coordinator all it needs to run the workflow in the session.
+
+The runtime takes care of navigating the state machine. The coordinator calls the Unelos MCP to start the run, and completing each step returns the next one. The "execution package" contains what the agent needs to work: the task, its instructions and skills, and its inputs and expected outputs. Unelos checks those outputs before moving on.
+
+For me, the main benefit is that the coordinator doesn't have to figure out which step comes next. Unelos follows the routes you defined, while the model still does things like dispatching agents, pulling together their reports and interpreting your answers at gates.
+
+This is not a magic thing that fixes all issues with AI-assisted software development, if you want a workflow that "handles everything", there are good alternatives around. This tool will help you build custom, intentional workflows that fit your reality and project needs.
+
+```mermaid
+%%{init: {"flowchart": {"rankSpacing": 30, "nodeSpacing": 30, "wrappingWidth": 400}}}%%
+flowchart TB
+    subgraph build["Build"]
+        direction LR
+        subgraph defs[".unelos/"]
+            direction LR
+            wf["Workflows"]
+            tk["Tasks"]
+            ag["Agents"]
+            sk["Skills"]
+            mc["MCPs"]
+        end
+        cfg["Harness config<br/>native agents"]
+        defs -- "Build now" --> cfg
+    end
+
+    subgraph example["Example workflow (state machine)"]
+        direction LR
+        s0((Start)) --> s1(["Plan<br/>agent:#nbsp;planner<br/>skills:#nbsp;brainstorming<br/>out:#nbsp;plan.md"])
+        s1 -- "approved" --> s2(["Implement<br/>agent:#nbsp;coder<br/>skills:#nbsp;tdd<br/>MCP:#nbsp;context7<br/>in:#nbsp;plan.md<br/>out:#nbsp;report.md"])
+        s2 -- "done" --> s3(["Review<br/>agent:#nbsp;reviewer<br/>skills:#nbsp;code-review<br/>in:#nbsp;plan.md,#nbsp;report.md<br/>out:#nbsp;review.md"])
+        s3 -- "changes<br/>requested" --> s2
+        s3 -- "approved" --> s4((End))
+    end
+
+    build -- "e.g." --> example
 ```
 
-This will place the ui components in the `src/components` directory.
+At runtime, the coordinator starts the workflow and gets the next step each time it completes one:
 
-## Using components
+```mermaid
+sequenceDiagram
+    actor You
+    participant C as Coordinator
+    participant M as Unelos MCP
+    participant A as Task agent
 
-To use the components in your app, import them as follows:
+    You->>C: /unelos feature-workflow
+    Note over C: coordinator instructions injected
 
-```tsx
-import { Button } from "@/components/ui/button"
+    rect rgba(128, 128, 128, 0.12)
+    C->>M: start feature-workflow
+    M-->>C: Plan, agent: planner, skills: brainstorming<br/>in: none, out: plan.md
+    C->>A: run Plan as planner
+    A-->>C: result
+    C->>M: complete, outcome: approved
+    end
+
+    rect rgba(128, 128, 128, 0.12)
+    M-->>C: Implement, agent: coder, skills: tdd, MCPs: context7<br/>in: plan.md, out: report.md
+    C->>A: run Implement as coder
+    A-->>C: result
+    C->>M: complete, outcome: done
+    end
+
+    rect rgba(128, 128, 128, 0.12)
+    M-->>C: Review, agent: reviewer, skills: code-review<br/>in: plan.md, report.md, out: review.md
+    C->>A: run Review as reviewer
+    A-->>C: result
+    C->>M: complete, outcome: changes requested
+    M-->>C: Implement again<br/>in: plan.md, feedback: review.md
+    end
+
+    Note over C,A: Repeat Implement and Review until Review is approved
+    C-->>You: workflow finished
 ```
 
-## Rust workspace and CLI
+## Concepts
 
-`crates/core` owns shared application logic. `crates/cli` owns the `unelos`
-executable; `src-tauri` owns the desktop adapter. Neither adapter depends on the
-other. Default Cargo commands build/test core and CLI without desktop dependencies.
+Here are some concepts that will help you understand how to build good workflows. All the elements described below are simple text files, so you can use the app or any editor to edit them.
 
-Review the shared agent rules in the [instruction catalog](crates/core/src/instructions/README.md).
-Markdown is embedded at build time; paths and identities are supplied separately
-in runtime packets.
+### Workflows
 
-### Initialize a project
+A set of steps connected by routes. You can go in order, branch on an outcome, or loop back to an earlier step.
 
-With `unelos` installed on your machine:
+Workflows are composable, so you can call another workflow as part of a bigger workflow. An example of this could be a research workflow that asks questions, dispatches parallel agents to research on something and builds a report, and then another workflow could start with this sub-workflow and start work based on the research outcome.
 
-```sh
-cd /path/to/project
-unelos init
-unelos harness install opencode
-unelos install my-workflow --opencode v2
-```
+### Agents
 
-`init` creates missing `.unelos/project.yaml`, `workflows/`, `tasks/`, `agents/`, and `skills/`.
-It removes old Unelos project plugin registrations. `harness install opencode`
-installs the bundled v2 integration globally, preserving user JSONC comments and
-foreign plugins, and provisions a stable CLI copy under the Unelos config directory.
-No npm, network access, or source checkout is needed. Use `harness list` to rescan
-and `harness uninstall opencode` to remove the integration.
+I don't like "personifying" LLMs, but it makes sense to consider agents as the entity that performs an action (or task in our case). They "pack" a set of capabilities, AKA skills, that provide the guidance so LLM behaves as you expect, and MCPs to access external tools. The agent's model and MCPs apply when it runs as a subagent, not when the task runs in your main session.
 
-Author reusable tasks in `.unelos/tasks/<id>/task.yaml`, agents in
-`.unelos/agents/<id>/agent.yaml`, and workflows in `.unelos/workflows/<name>.yaml`.
-Folder names are definition IDs. `project.yaml` is an empty settings mapping for now.
-Workflow steps and parallel workers choose exactly one of `task: <id>` or an inline
-`taskDefinition`. Tasks/agents choose exactly one of `instructions` or
-`instructionsFile`; file paths resolve relative to the containing YAML and stay
-inside the authoring root. Agent/task folders can include templates and resources.
+This allows creating smaller, domain-specific agents, that have deeper context on how to do certain things. You will need to play a bit, depending on your specific use case, with this definitions.
+Some agents will be more generic (for example you may have one single "research" agent), or more specific (graphic designer with specific rules, some Figma/Pencil MCP, etc.), or a "developer" agent that has some specific best practices vs a "rust cli dev" vs "frontend react dev", each with specific skills, MCPs and rules that make sense only for them. Play around and see what works best for you.
 
-`install` validates/imports authoring and generates
-required `.opencode/agents/unelos-*.md` when given `--opencode v2`.
-To import a workflow package or another project, add `--source /path/to/workflow-source`.
-Packages have `workflows/`, `agents/`, and any required `tasks/`/`skills/` directly
-at their root; installation copies selected authoring under the project's `.unelos`.
-See the sole [superpowers-dev example](examples/superpowers-dev/README.md).
-Explicit `install --opencode v1|v2` selects agent generation only (global installation
-supports v2 only). Without an explicit version or legacy integration metadata,
-`install` remains core-only.
+### Tasks
 
-Reruns preserve authoring, unrelated configuration, and runs. Generated agents
-overwrite manual edits; customize authored definitions instead. If both user
-`opencode.json` and `opencode.jsonc` exist, global installation stops rather than guessing. Open a
-fresh OpenCode session after installation, then enter `/unelos` once a workflow
-is installed. Third-party skills, MCP servers, and credentials remain separate.
-Deleting `.unelos` loses authored customizations and run reports; `init` cannot
-recover them. See [integration instructions](integrations/opencode/README.md).
+Tasks are each of the steps on a workflow. As said before, they can expect specific artifacts as inputs, and may produce different outcomes (each with their respective artifacts). Each of those artifacts produced by a task should be considered "proof", and could be code, a PR, a ticket, a report, etc. that next tasks are able to access. The engine will generate the required prompts to ensure (as much as the LLM model allows) that agents produce the expected artifacts.
 
-```sh
-cargo run -p unelos-cli -- --help
-cargo run -p unelos-cli -- config show
-cargo run -p unelos-cli -- --config settings.toml --json config show
-UNELOS_LOG_LEVEL=info cargo run -p unelos-cli -- config show
-cargo run -p unelos-cli -- config show --log-level debug
-cargo run -p unelos-cli -- --project . start
-cargo run -p unelos-cli -- --project . start implement-feature --name fix-button
-cargo run -p unelos-cli -- --project . status
-cargo run -p unelos-cli -- --project . next
-cargo run -p unelos-cli -- --project . complete plan
-cargo run -p unelos-cli -- --project . approve approve-plan
-cargo run -p unelos-cli -- --project . reject approve-plan --reason 'Revise scope.'
-cargo run -p unelos-cli -- --project . rename fix-save-button --run RUN_ID
-```
+Tasks also have their own set of skills. Having a distinction between skills for tasks vs skills for agents may be tricky, and you might not need to use both. Personally, it allows me to define simpler agents, so they do not need to have instructions for specific tasks they won't perform very often.
 
-Optional `settings.toml`:
+Also, tasks can be defined inline in a workflow (if they are very specific to the workflow), or created as a reusable element that can be referenced by multiple workflows, a good example of reusable tasks could be opening a PR or fetching a ticket from Jira and starting an interview session.
 
-```toml
-log_level = "warn"
-```
+Something to consider, if a task becomes too large or you find out it is doing too many things, you might consider turning it into a small workflow instead.
 
-Settings precedence: defaults → explicit TOML file → `UNELOS_*` environment →
-explicit CLI flags. `log_level` defaults to `warn`; allowed values are `off`,
-`error`, `warn`, `info`, `debug`, and `trace`. `UNELOS_LOG_LEVEL` and `--log-level`
-override it. Unknown settings are rejected. No config file is discovered
-automatically; `--config` must name an existing UTF-8 TOML file exactly. Inspection
-contains only safe settings; diagnostics never render raw config source contents.
+### Parallel tasks
 
-Successful results go to stdout. Diagnostics and operational events go to stderr.
-`--json` emits a settings object on stdout, application errors as
-`{"error":{"code":"invalid_settings","message":"..."}}` on stderr, and
-operational events as JSON lines. Application errors contain no ANSI styling.
-Clap-generated help, version, and argument/usage errors retain standard text even
-with `--json`. Broken output pipes terminate quietly.
+Unelos can also dispatch tasks in parallel with subagents. The coordinator reads their reports and writes the summary for the next step.
 
-Exit codes: `0` success, `2` usage/domain rejection (including invalid settings
-or runtime state), `1` operational failure.
+### Human gates
 
-### Runtime CLI (T12)
+I still think you should try to read the code, at least for non-trivial work. If you think that creates a big bottleneck, at least you can focus in reviewing proof. Try to build tasks and workflows so their outputs are reviewable artifacts.
 
-The seven runtime commands are `start [WORKFLOW] [--name NAME]`, `status`,
-`next`, `complete NODE [--outcome OUTCOME]`, `approve NODE`,
-`reject NODE --reason REASON`, and `rename NAME --run RUN_ID`. `start` without
-a Workflow lists sorted choices without creating a run; with a Workflow it
-creates a run and returns its summary. `status` reports idle when no run exists;
-`next` returns the current packet using the current authoring files: Definitions
-and Skills are not snapshotted. CLI start persists empty request text; the
-controller supplies conversation context and records required answers in reports.
-Persisted progression alone does not preserve unsaved conversation context.
-`complete NODE` explicitly confirms existing declared output files for current
-work and advances after validation. Unchanged reviewed outputs are allowed; the
-CLI does not automatically check content/mtime freshness or report quality.
-Node-only mutations cannot identify a delayed callback to a later visit to the
-same Node; inspect `status`/`next` after an uncertain result, never blindly retry.
+Workflows can pause at gates so you can review artifacts. The coordinator asks for approval in your harness chat. Reply there to approve or ask for changes.
 
-See [coordinator instructions](docs/coordinator-instructions.md) and the
-[manual runtime walkthrough](docs/manual-runtime-cli-qa.md). The raw CLI does not
-inject instructions. Optional [OpenCode delivery](integrations/opencode/README.md)
-installs explicit `/unelos` activation; see its
-[verification limits](docs/opencode-delivery-verification.md). The controller
-records the agreed brief in `ledger.md`; CLI request text remains unchanged.
+### Project-scoped vs global
 
-### Local Skill resolution (T03)
+Workflows, tasks, agents, skills and MCPs can be project-scoped or global, so you can build reusable pieces that work across projects.
 
-`unelos_core::resolve_skills(root, ordered_ids)` reads only selected local
-`.unelos/skills/<id>/SKILL.md` files, deduplicating IDs in first-occurrence order.
-Each result contains its ID, absolute directory, and unchanged UTF-8 content.
-Resources remain available through that directory; they are not injected.
-IDs must be nonempty, not `.` or `..`, and contain no `/`, `\`, `:`, or NUL.
+You might want to start with project-scoped. If a task, skill or MCP turns out to be useful in another project, there is a **Make global** button for that. Project files are stored in `.unelos/` at your project's root, so you can decide whether to gitignore them or share them with your team.
+Global definitions live in `~/.config/unelos/`. Only global agents are built into the harness's global agent directory.
 
-No CLI Skill command exists yet. Terminal QA exercises real temporary files:
+## Getting started
 
-```sh
-cargo test --locked -p unelos-core --test skills -- --nocapture
-```
+### Setting things up
 
-Expect five passing checks covering order/content/resources, missing files,
-unreadable files, invalid IDs, and working-directory-independent roots.
+1. Download the latest build from Releases.
+   Note for Windows WSL users: I suggest you download the Linux version and install it in WSL, since Unelos needs to be able access harness executables and configs to detect and configure them.
 
-### Workflow validation (T04)
+1. Open the GUI and configure your harness(es). Installing Unelos to a harness will:
+   1. Add the Unelos plugin and MCP in it's global config
+   2. Create some default agents and model mappings
+      ...
 
-`unelos_core::validate_project(&loaded_project)` checks only the selected
-Workflow and returns a sorted map of logical output names to producer Node IDs.
-Call `load_project(root, workflow_name)` first. Errors include the Workflow
-source path, offending field/reference, and cause. Validation checks references,
-transitions, outcome contracts, and artifacts; loops are valid. It does not read
-Skills, connect MCPs, execute work, or check whether an input is completed yet.
+1. Setup the model aliases: Agents can reference a specific model in a harness, or a model alias. This allows to have multiple harnesses, and use their models when workflows run on each of them. An example for the default model aliases could be fast (codex uses luna, claude code uses haiku), balanced (codex uses terra, claude code uses sonnet), smart (codex uses sol, claude code uses opus).
 
-Artifact names use relative forward-slash paths (e.g. `reports/plan.md`), with
-nonempty components and no `.`, `..`, backslash, colon, or NUL. Each logical
-output has one producing Node; every input must name a declared output.
-Gates have exactly `approved` and `rejected` routes. Task outcome-map keys must
-match the referenced definition's outcomes; definitions declaring outcomes
-cannot use a single-successor transition.
+1. Create some agents, start with generic ones, you can make them more specific when needed.
 
-There is no standalone validation-only CLI command: `inspect` validates the
-selected Workflow before printing its normalized graph and reports authoring
-diagnostics. See the [workflow walkthrough](examples/superpowers-dev/README.md)
-for the example and safe QA steps. Core validation terminal QA:
+1. Create your first workflow. Grab a task that you find yourself repeating too much, skills that require steering due to edge cases, etc. Split them in smaller tasks, and think what artifacts need to be validated or iterated.
+   You can also import some example workflows to get started, they are mostly adaptations of existing stuff (like Superpowers), and adapt them to your needs. (see Importing workflows)
+   Also, you can use the workflow-design tool (a built-in global workflow) to go through your past sessions, get repeated patterns and suggest workflows. It also has the required skills to create an initial version of the workflow for you.
 
-```sh
-cargo test --locked -p unelos-core --test validation -- --nocapture
-```
+### Running a workflow
 
-Expect ten passing checks: the T02 fixture and rework loops, missing
-entry/targets, Task/Agent references, parallel workers, outcome maps, gate
-routes, artifact producers/paths, unused definitions, and invalid Node fields.
-The core API also returns these errors to direct callers; integration checks
-assert their source path, field, and cause.
+Now that you have some workflows, it's time to run them. Make sure you installed Unelos in your harness, and start
+a new session.
 
-### Rust checks
+If you type just `/unelos` the coordinator will take over and suggest a list of workflows, just follow the instructions.
 
-```sh
-cargo install cargo-nextest --locked
-cargo fmt --all -- --check
-cargo clippy --locked -p unelos-core -p unelos-cli --all-targets -- -D warnings
-cargo nextest run --locked -p unelos-core -p unelos-cli
-cargo test --locked -p unelos-core --doc
-```
+You can also start with the thing you need to accomplish (like `/unelos I want to...`) and the coordinator will suggest some workflow that matches your intention. For this, it is very important that the name and description in you workflows are good, so coordinator understands what they do.
 
-For the desktop adapter, use `pnpm tauri dev` or `pnpm tauri build` with the
-platform's Tauri prerequisites installed. Rust artifacts and `Cargo.lock` now
-live at the workspace root. `reqwest` is reserved in workspace dependencies for
-shared HTTP operations when a real command needs them; no HTTP wrapper or
-placeholder operation is included.
+There's also an "inline workflows" feature, which I found quite useful. If no single workflow covers the whole request, the coordinator can suggest a chain of existing workflows and ask you before starting it.
+
+To pick up a run or turn off Unelos for the session, use `/unelos resume` or `/unelos off` in OpenCode, and `/unelos-resume` or `/unelos-off` in Claude Code. The **Runs** screen shows progress and artifacts; you still answer gates in the harness chat.
+
+To try the workflow-design tool, type `/unelos` and pick `global/workflow-design`. It needs Python 3 to look through past sessions.
+
+### Importing workflows
+
+In the Workflows screen you will find a button, you can import from local files (just paste the absolute folder path), and from Github / Gitlab. For the later, make sure you have git installed and have access to the repo.
+
+After importing, check if the agents need model aliases mapped, then use **Project settings → Build now**. Importing doesn't build the harness files. If your harness doesn't see the new agents, try reopening the session after building.
+
+Always read the skills, MCPs, etc. before importing a workflow from someone else.
+
+## Contributing and running dev locally
+
+See [Contributing](/CONTRIBUTING.md)

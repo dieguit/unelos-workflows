@@ -158,6 +158,70 @@ Still to reflect in README: import doesn't rebuild harness agents (build after i
 
 Still to reflect in README: Python 3 requirement.
 
+### Step 11: `/unelos` live (Claude + OpenCode)
+
+Isolated HOME (`target/qa/h2`, only harness auth copied), scratch `/tmp/qa-live` (workflows `haiku`:
+subagent → gate → subagent; `facts`: parallel ×2). Claude: `claude -p` + `--resume`, sonnet, ~$1.8 total.
+OpenCode v2.4.2: `opencode serve` + HTTP `session.command` (`opencode run "/unelos"` doesn't run commands),
+`opencode/big-pickle`. Driver: `/tmp/qa-oc.py`.
+
+| Claim / need | Claude | OpenCode |
+|---|---|---|
+| `/unelos` alone: numbered menu + "0. Continue without Unelos" | ✅ | ✅ |
+| `/unelos <goal>`: one match starts immediately | ✅ | ✅ |
+| Inline chain (`facts → haiku`) proposed, asked once, run with `steps` | ✅ | Proposed and asked once; execution deferred |
+| Parallel workers dispatched in one message, coordinator writes summary | ✅ | ✅ |
+| Gate: change request → reject with user's words; "yes" → approve | ✅ | Gate shown; decisions not tested |
+| Resume from a new session (lists unfinished runs, re-shows gate) | ✅ `/unelos-resume` | ✅ `/unelos resume` |
+| Off: later approve fails `controller_inactive`, run untouched | ✅ `/unelos-off` | ✅ `/unelos off` |
+| Missing output blocks complete; unchanged output on rework rejected | ✅ (CLI) | same engine |
+| **Goal typed after `/unelos` reaches workers** | Fixed and covered by automated tests; live retest deferred | Same |
+| Runs screen live view and outputs | ✅ user-verified | |
+
+Previously, MCP `start` did not forward the goal, so the haiku worker had to ask for its topic.
+`start` now accepts an optional `request` for named or inline runs. Tests verify the MCP schema and
+start/next packets, and verify that the named-run worker prompt includes the request.
+
+Claude shows plugin commands as `/unelos:unelos-resume` / `/unelos:unelos-off`; `/unelos-resume` also works.
+
+### Step 12: "How it works" accuracy
+
+| Claim | Verdict |
+|---|---|
+| Build diagram arrow `unelos install` → harness config | ❌ GUI builds automatically on save (Project settings → Build now); CLI `install` imports a workflow |
+| "after installing the workflows to your project" | ⚠️ workflows made in the GUI are already project files; nothing to install |
+| Sequence: `next` before each step | ❌ `start` returns the first package and `complete` returns the next; `next` only re-reads |
+| Package has task, agent, skills, MCPs; validates outputs | ✅ (worker prompt seen live; missing/unchanged outputs rejected) |
+| Coordinator spends no tokens deciding, "deterministic" | ⚠️ routing is deterministic; dispatch, NEEDS_CONTEXT relay, parallel summary, gate interpretation are model-led |
+| Diagram: `context7` under skills; sequence: under MCPs | ⚠️ inconsistent; it's an MCP |
+| Agent MCPs on main-session steps | ⚠️ dropped, subagent steps only (code, `install.rs:123-135`) |
+
+### Step 13: CONTRIBUTING.md
+
+Clean checkout of `33ee680` on Linux/WSL2 with isolated HOME/XDG. Evidence: `/tmp/qa-readme-step13-PoXa6E/`.
+
+| Check | Verdict |
+|---|---|
+| Prerequisites and `pnpm install` | ✅ Installed dependencies (exit 0); host lacks `patchelf`, which did not block dev startup |
+| `pnpm tauri dev` | ✅ Vite started and the main webview loaded; stopped deliberately (exit 124) |
+| `pnpm typecheck`; `pnpm test src/lib/step-edit.test.ts` | ✅ Both exit 0; test script ran all 105 tests |
+| `cargo nextest run -p unelos-core --test workflow_document` | ✅ 23 passed (exit 0) after retrying without the disk-space pressure from the dev build |
+| `cargo fmt --all -- --check` | ✅ Initially failed at `src-tauri/src/shell_path.rs:74`; formatting-only fix, rechecked in working tree (exit 0) |
+
+Packaging, lint, clippy, and Rust doc tests were not checked in this clean checkout.
+
+### Step 14: macOS, Windows, and WSL checklist
+
+Release workflow confirms the intended assets; native validation awaits builds and machines.
+In a test profile, use a harness installed in the same OS environment as Unelos.
+
+| Target | Manual check |
+|---|---|
+| macOS Apple Silicon and Intel | On each architecture, mount its matching DMG, drag Unelos to Applications, launch it, then confirm harness detection and setup. Record any Gatekeeper warning. |
+| Windows x64 installer | Run the NSIS setup on native Windows, launch Unelos, and confirm Windows harness detection and setup. |
+| Windows x64 portable | With WebView2 installed, extract both EXEs together, launch the GUI, and confirm harness setup works without the installer. |
+| WSL | With WSLg and a Linux-installed harness, launch the Linux build inside WSL and confirm it detects that harness. |
+
 ## Remaining plan
 
 Each session: resume from `.slim/deepwork/readme-audit/progress.md`, do the listed steps, append results
