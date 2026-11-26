@@ -1,6 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "unelos-app",
+  "productName": "Unelos",
+  "mainBinaryName": "unelos-app",
   "version": "0.1.0",
   "identifier": "com.dieguit.unelos-app",
   "build": {
@@ -14,7 +15,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "unelos-app",
+        "title": "Unelos",
         "width": 1400,
         "height": 918,
         "minWidth": 1100,
@@ -36,6 +37,9 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "shortDescription": "Build and run agentic workflows",
+    "longDescription": "Unelos builds agentic workflows as state machines and runs them in your AI coding harness.",
+    "category": "DeveloperTool"
   }
 }

@@ -85,7 +85,7 @@ jobs:
           releaseName: v__VERSION__
           releaseBody: |
             See the assets below to download this version.
-            The Windows portable executable requires the Microsoft Edge WebView2 Runtime.
+            The Windows portable zip requires the Microsoft Edge WebView2 Runtime.
           releaseDraft: true
           prerelease: false
           generateReleaseNotes: true
@@ -103,33 +103,21 @@ jobs:
         run: |
           $config = Get-Content "src-tauri/tauri.conf.json" | ConvertFrom-Json
           $metadata = cargo metadata --manifest-path "src-tauri/Cargo.toml" --no-deps --format-version 1 | ConvertFrom-Json
-          $tauriPackage = $metadata.packages |
-            Where-Object { $_.name -eq "tauri-native" } |
-            Select-Object -First 1
-
-          if (-not $tauriPackage) {
-            throw "Could not determine the Tauri package."
-          }
-
-          $binaryTarget = $tauriPackage.targets |
-            Where-Object { $_.kind -contains "bin" } |
-            Select-Object -First 1
-
-          if (-not $binaryTarget) {
-            throw "Could not determine the Windows binary target from Cargo metadata."
-          }
-
-          $binaryPath = Join-Path $metadata.target_directory "release/$($binaryTarget.name).exe"
-          if (-not (Test-Path -LiteralPath $binaryPath)) {
-            throw "Portable executable was not found at $binaryPath."
+          $binaryPath = Join-Path $metadata.target_directory "release/$($config.mainBinaryName).exe"
+          # The GUI provisions harnesses from a sibling unelos.exe, so the portable build must ship both.
+          $cliPath = Join-Path $metadata.target_directory "release/unelos.exe"
+          foreach ($path in @($binaryPath, $cliPath)) {
+            if (-not (Test-Path -LiteralPath $path)) {
+              throw "Portable executable was not found at $path."
+            }
           }
 
           $safeProductName = ($config.productName -replace '[^A-Za-z0-9._-]+', '-').Trim('-')
           $version = "${{ steps.tauri.outputs.appVersion }}"
-          $assetName = "$safeProductName-$version-windows-x64-portable.exe"
+          $assetName = "$safeProductName-$version-windows-x64-portable.zip"
           $assetPath = Join-Path $env:RUNNER_TEMP $assetName
 
-          Copy-Item -LiteralPath $binaryPath -Destination $assetPath
+          Compress-Archive -LiteralPath $binaryPath, $cliPath -DestinationPath $assetPath
           gh release upload "v$version" $assetPath --clobber
 
       - name: Release summary
