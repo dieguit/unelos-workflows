@@ -394,7 +394,9 @@ fn save_skill_at(
         }
         let mut files = Vec::new();
         if global {
-            collect(root, "tasks", &mut files)?;
+            for category in ["agents", "tasks", "workflows"] {
+                collect(root, category, &mut files)?;
+            }
         }
         if let Some(project) = project {
             for category in ["agents", "tasks", "workflows"] {

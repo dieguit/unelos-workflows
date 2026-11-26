@@ -413,13 +413,7 @@ pub fn remove_global_skill(project: Option<&Utf8Path>, id: &str) -> Result<(), S
     let source = authoring_path(&root, "skills", id)?;
     check_tree(&source)?;
     let reference = format!("global/{id}");
-    let mut files = Vec::new();
-    crate::skill_document::collect(&root, "tasks", &mut files)?;
-    for file in files {
-        let text = fs::read_to_string(&file).map_err(|e| e.to_string())?;
-        let task = crate::parse_task_definition(file.as_str(), &text).map_err(|e| e.to_string())?;
-        task_reference(&root, &file, &task, "skills", &reference, &source)?;
-    }
+    references_at(&root, "skills", &reference, &source)?;
     if let Some(project) = project {
         references(project, "skills", &reference, &source)?;
     }

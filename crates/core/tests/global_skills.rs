@@ -64,8 +64,19 @@ fn global_skill_lifecycle() {
     task.skills = vec!["global/x".into()];
     save_global_task(None, task).unwrap();
     assert!(remove_global_skill(None, "x").is_err());
+    let global_agent = std::path::PathBuf::from(std::env::var("UNELOS_CONFIG_DIR").unwrap())
+        .join("agents/a/agent.yaml");
+    fs::create_dir_all(global_agent.parent().unwrap()).unwrap();
+    fs::write(&global_agent, "instructions: hi\nskills: [global/x]\n").unwrap();
+    assert!(remove_global_skill(None, "x")
+        .unwrap_err()
+        .contains("agent.yaml"));
     let saved = save_global_skill(Some(root), "x", "renamed", "", "New").unwrap();
-    assert_eq!(saved.updated_references.len(), 2);
+    assert!(fs::read_to_string(&global_agent)
+        .unwrap()
+        .contains("global/renamed"));
+    fs::remove_dir_all(global_agent.parent().unwrap()).unwrap();
+    assert_eq!(saved.updated_references.len(), 3);
     assert!(saved
         .updated_references
         .contains(&".unelos/tasks/local/task.yaml".to_owned()));
